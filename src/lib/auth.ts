@@ -34,6 +34,8 @@ export type LoginResult =
  * 成功したら失敗の回数を消し、セッションを作り、最終ログイン日時を now にする。
  * 成功のときだけ最終ログイン日時を変える。それまでの最終ログイン日時は、作ったセッションに「前回のログイン」として残す。
  * 作ったセッションには、ログインした日時（now）と User-Agent を記録する（ログイン中の端末の一覧で使う）。
+ * パスワードの誤りとロック中の試行は、その ID の利用者の「前回のログインのあとの失敗の回数」に数える。
+ * 成功したら、その回数をセッションに写して 0 に戻す（ログイン後に知らせる）。
  */
 export function login(
   userId: unknown,
@@ -43,20 +45,38 @@ export function login(
   userAgent: string | null = null,
 ): LoginResult {
   const lock = typeof userId === "string" ? getLockState(userId, db, now) : { locked: false as const };
-  if (lock.locked) return { ok: false, reason: "locked", retryAfterMinutes: lock.retryAfterMinutes };
+  if (lock.locked) {
+    countFailedLogin(userId as string, db);
+    return { ok: false, reason: "locked", retryAfterMinutes: lock.retryAfterMinutes };
+  }
   const user =
     typeof userId === "string" && typeof password === "string" ? authenticate(userId, password, db) : undefined;
   if (!user) {
-    if (typeof userId === "string") recordFailure(userId, db, now);
+    if (typeof userId === "string") {
+      transaction(db, () => {
+        recordFailure(userId, db, now);
+        countFailedLogin(userId, db);
+      });
+    }
     return { ok: false, reason: "invalid" };
   }
   const token = transaction(db, () => {
     clearFailures(user.id, db);
-    const row = db.prepare("SELECT last_login_at FROM users WHERE id = ?").get(user.id) as
-      | { last_login_at: string | null }
+    const row = db.prepare("SELECT last_login_at, failed_logins_since_login FROM users WHERE id = ?").get(user.id) as
+      | { last_login_at: string | null; failed_logins_since_login: number }
       | undefined;
-    db.prepare("UPDATE users SET last_login_at = ? WHERE id = ?").run(now.toISOString(), user.id);
-    return createSession(user.id, db, now, row?.last_login_at ?? null, userAgent);
+    db.prepare("UPDATE users SET last_login_at = ?, failed_logins_since_login = 0 WHERE id = ?").run(
+      now.toISOString(),
+      user.id,
+    );
+    return createSession(
+      user.id,
+      db,
+      now,
+      row?.last_login_at ?? null,
+      userAgent,
+      row?.failed_logins_since_login ?? 0,
+    );
   });
   return { ok: true, user, token };
 }
@@ -67,13 +87,49 @@ export function createSession(
   now: Date = new Date(),
   previousLoginAt: string | null = null,
   userAgent: string | null = null,
+  failedLoginsBefore = 0,
 ): string {
   const token = randomBytes(32).toString("hex");
   const expiresAt = new Date(now.getTime() + SESSION_TTL_MS).toISOString();
   db.prepare(
-    "INSERT INTO sessions (token, user_id, expires_at, previous_login_at, created_at, user_agent, device_id) VALUES (?, ?, ?, ?, ?, ?, ?)",
-  ).run(token, userId, expiresAt, previousLoginAt, now.toISOString(), normalizeUserAgent(userAgent), newDeviceId());
+    "INSERT INTO sessions (token, user_id, expires_at, previous_login_at, created_at, user_agent, device_id, failed_logins_before) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+  ).run(
+    token,
+    userId,
+    expiresAt,
+    previousLoginAt,
+    now.toISOString(),
+    normalizeUserAgent(userAgent),
+    newDeviceId(),
+    failedLoginsBefore,
+  );
   return token;
+}
+
+/**
+ * パスワードを誤った（またはロック中に試された）ログインを、その ID の利用者の回数に 1 足す。
+ * 存在しない ID は更新する行が無いので、どの利用者の回数にも入らない。
+ */
+function countFailedLogin(userId: string, db: Db): void {
+  db.prepare("UPDATE users SET failed_logins_since_login = failed_logins_since_login + 1 WHERE id = ?").run(userId);
+}
+
+/**
+ * 有効なセッションの「ログインした時点で、前回のログインのあとにパスワードを誤ったログインの回数」を返す。
+ * ログインした時点で決まり、そのあとの失敗では変わらない。期限切れ・不明なトークンは undefined。本人のセッションからだけ読む。
+ */
+export function getFailedLoginsBefore(token: string | undefined, db: Db = getDb(), now: Date = new Date()): number | undefined {
+  if (!token) return undefined;
+  const row = db
+    .prepare("SELECT failed_logins_before FROM sessions WHERE token = ? AND expires_at > ?")
+    .get(token, now.toISOString()) as { failed_logins_before: number } | undefined;
+  return row?.failed_logins_before;
+}
+
+/** ログイン後の失敗の知らせの文言。回数が 0 以下（または不明）なら出さない（undefined）。 */
+export function formatFailedLoginNotice(count: number | undefined): string | undefined {
+  if (!count || count < 1) return undefined;
+  return `前回のログインのあと、パスワードを誤ったログインが ${count} 回ありました`;
 }
 
 /** User-Agent の保存できる長さの上限（文字数）。これより長いものは切って保存する。 */

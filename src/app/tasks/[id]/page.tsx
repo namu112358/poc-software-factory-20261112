@@ -5,6 +5,7 @@ import { requireUser } from "@/lib/session";
 import { listTags, listTagSuggestions } from "@/lib/tags";
 import { PRIORITY_LABELS, STATUS_LABELS, formatCompletedAt, formatEstimate, formatJstDateTime, formatTaskNumber, getTask, isDueSoon, isOverdue, parseTaskId, todayInJapan } from "@/lib/tasks";
 import { getUser, listUserOptions } from "@/lib/users";
+import { ArchiveButton } from "./archive";
 import { DeleteTaskButton } from "./delete";
 import { DuplicateButton } from "./duplicate";
 import { EditTaskForm } from "./edit-form";
@@ -36,6 +37,14 @@ export default async function TaskDetailPage({ params }: Props) {
         <span data-testid="task-number" style={{ color: "#666", fontWeight: "normal" }}>
           {formatTaskNumber(task.id)}
         </span>
+        {task.archived && (
+          <>
+            {" "}
+            <span data-testid="archived-label" style={{ background: "#e5e5e5", padding: "0 0.4em", borderRadius: "3px", fontSize: "0.6em", fontWeight: "normal" }}>
+              アーカイブ済み
+            </span>
+          </>
+        )}
       </h1>
       <dl>
         <dt>ステータス</dt>
@@ -75,7 +84,8 @@ export default async function TaskDetailPage({ params }: Props) {
       </dl>
       <EditTaskForm task={task} users={listUserOptions()} />
       <p>
-        <DuplicateButton taskId={task.id} /> <DeleteTaskButton taskId={task.id} title={task.title} />
+        <DuplicateButton taskId={task.id} /> <ArchiveButton taskId={task.id} archived={task.archived} updatedAt={task.updatedAt} />{" "}
+        <DeleteTaskButton taskId={task.id} title={task.title} />
       </p>
       <section>
         <h2>メモ</h2>
@@ -142,7 +152,7 @@ export default async function TaskDetailPage({ params }: Props) {
                 {c.author === user.id && (
                   <>
                     <EditCommentForm taskId={task.id} commentId={c.id} body={c.body} />{" "}
-                    <DeleteCommentButton taskId={task.id} commentId={c.id} />
+                    <DeleteCommentButton taskId={task.id} commentId={c.id} body={c.body} />
                   </>
                 )}
               </li>

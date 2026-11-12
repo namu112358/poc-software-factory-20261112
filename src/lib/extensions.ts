@@ -244,3 +244,62 @@ export function formatExtensionRequestedAt(iso: string): string {
   );
   return `${p.year}/${p.month}/${p.day} ${p.hour}:${p.minute}`;
 }
+
+export const MY_EXTENSIONS_DAYS = 30;
+
+export type MyExtensionRow = {
+  id: number;
+  taskId: number;
+  taskTitle: string;
+  newDueDate: string; // 希望の期限 YYYY-MM-DD
+  status: ExtensionStatus;
+  createdAt: string; // ISO 8601（UTC）
+  decidedByName: string | null; // 判断した人の表示名（利用者が見つからなければ ID）。判断前・不明なら null
+  decidedAt: string | null; // ISO 8601（UTC）。判断前・不明なら null
+};
+
+/** 自分が出した延長申請を、直近 30 日分、申請の新しい順に返す（承認待ち・承認・却下のすべて）。 */
+export function listMyExtensions(userId: string, db: Db = getDb(), now: Date = new Date()): MyExtensionRow[] {
+  const since = new Date(now.getTime() - MY_EXTENSIONS_DAYS * 24 * 60 * 60 * 1000).toISOString();
+  const rows = db
+    .prepare(
+      `SELECT e.id, e.task_id, t.title, e.new_due_date, e.status, e.created_at, e.decided_by, d.name AS decided_by_name, e.decided_at
+       FROM due_date_extensions e
+       JOIN tasks t ON t.id = e.task_id
+       LEFT JOIN users d ON d.id = e.decided_by
+       WHERE e.requester = ? AND e.created_at >= ?
+       ORDER BY e.created_at DESC, e.id DESC`,
+    )
+    .all(userId, since) as {
+    id: number;
+    task_id: number;
+    title: string;
+    new_due_date: string;
+    status: ExtensionStatus;
+    created_at: string;
+    decided_by: string | null;
+    decided_by_name: string | null;
+    decided_at: string | null;
+  }[];
+  return rows.map((r) => ({
+    id: r.id,
+    taskId: r.task_id,
+    taskTitle: r.title,
+    newDueDate: r.new_due_date,
+    status: r.status,
+    createdAt: r.created_at,
+    decidedByName: r.decided_by === null ? null : (r.decided_by_name ?? r.decided_by),
+    decidedAt: r.decided_at,
+  }));
+}
+
+const EXTENSION_STATUS_LABEL: Record<ExtensionStatus, string> = {
+  pending: "承認待ち",
+  approved: "承認",
+  rejected: "却下",
+};
+
+/** 申請の結果の日本語表示。 */
+export function extensionStatusLabel(status: ExtensionStatus): string {
+  return EXTENSION_STATUS_LABEL[status];
+}

@@ -51,11 +51,25 @@ export const SORT_LABELS: Record<TaskSort, string> = {
   due: "期限の近い順",
 };
 
+/** 期限の絞り込み。期限切れ・今日まで・7 日以内（どれも期限切れを含む）・期限なし。 */
+export const TASK_DUE_FILTERS = ["overdue", "today", "week", "none"] as const;
+export type TaskDueFilter = (typeof TASK_DUE_FILTERS)[number];
+
+export const DUE_FILTER_LABELS: Record<TaskDueFilter, string> = {
+  overdue: "期限切れ",
+  today: "今日まで",
+  week: "7 日以内",
+  none: "期限なし",
+};
+
 export type TaskFilter = {
+  due?: TaskDueFilter; // 期限の範囲。指定なしなら期限で絞り込まない
+  today?: string; // 「今日」（日本時間の YYYY-MM-DD）。省略すると今日。テストで日付を固定するための項目
   status?: TaskStatus;
   assignee?: string;
   tag?: string;
   q?: string; // キーワード。タイトルかメモに含まれるタスクだけ（英字の大文字・小文字は区別しない）
+  qInComments?: boolean; // true のときだけ、キーワードをコメントの本文からも探す（一覧画面と CSV 用。API は指定しない）
   sort?: TaskSort;
   includeArchived?: boolean; // true のときだけ、アーカイブ済みも含める
 };

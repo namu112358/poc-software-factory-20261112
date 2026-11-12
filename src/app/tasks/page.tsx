@@ -1,16 +1,17 @@
 import { Fragment } from "react";
 import { bulkSelectionKey } from "@/lib/bulk-select";
 import { listCommentersByTask } from "@/lib/comments";
+import { NOTHING_TO_DO_TEXT, listExtensionsAwaitingMe, listMyDueTasks } from "@/lib/my-attention";
 import { listUserOptions } from "@/lib/users";
 import { BulkBar, BulkCheckbox, BulkSelection } from "./BulkActions";
 import { exportHref } from "@/lib/export";
 import { parseIncludeArchived } from "@/lib/task-query";
 import { requireUser } from "@/lib/session";
 import { listTagsByTask } from "@/lib/tags";
-import { assigneeName, PRIORITY_LABELS, STATUS_LABELS, SORT_LABELS, TASK_LIST_HELP, TASK_SORTS, TASK_STATUSES, formatCurrentUser, clearFilterHref, formatEstimate, formatJstDate, formatDaysLeft, formatEstimateTotal, countUnestimated, formatUnestimatedCount, formatMemoPreview, formatTaskCount, formatDoneCount, priorityFontWeight, formatOverdueCount, countOverdue, memoTooltip, isOverdue, isTaskStatus, listAssignees, listTasks, parseAssignee, parseKeyword, parseSort, parseTagFilter, sumEstimateMinutes, taskRowDoneAttr, todayInJapan } from "@/lib/tasks";
+import { DUE_FILTER_LABELS, TASK_DUE_FILTERS, parseDueFilter, assigneeName, PRIORITY_LABELS, STATUS_LABELS, SORT_LABELS, TASK_LIST_HELP, TASK_SORTS, TASK_STATUSES, formatCurrentUser, clearFilterHref, formatEstimate, formatJstDate, formatDaysLeft, formatEstimateTotal, countUnestimated, formatUnestimatedCount, formatMemoPreview, formatTaskCount, formatDoneCount, priorityFontWeight, formatOverdueCount, countOverdue, memoTooltip, isOverdue, isTaskStatus, listAssignees, listTasks, parseAssignee, parseKeyword, parseSort, parseTagFilter, sumEstimateMinutes, taskRowDoneAttr, todayInJapan } from "@/lib/tasks";
 
 type Props = {
-  searchParams: Promise<{ status?: string; assignee?: string; tag?: string; q?: string; sort?: string; archived?: string }>;
+  searchParams: Promise<{ status?: string; assignee?: string; tag?: string; q?: string; due?: string; sort?: string; archived?: string }>;
 };
 
 export default async function TasksPage({ searchParams }: Props) {
@@ -20,10 +21,11 @@ export default async function TasksPage({ searchParams }: Props) {
   const assignee = parseAssignee(params.assignee);
   const tag = parseTagFilter(params.tag);
   const q = parseKeyword(params.q);
+  const due = parseDueFilter(params.due);
   const sort = parseSort(params.sort);
   const includeArchived = parseIncludeArchived(params.archived);
   const assignees = listAssignees();
-  const tasks = listTasks({ status, assignee, tag, q, sort, includeArchived });
+  const tasks = listTasks({ status, assignee, tag, q, qInComments: true, due, sort, includeArchived });
   const today = todayInJapan();
   const clearHref = clearFilterHref(tasks.length);
   const unestimatedText = formatUnestimatedCount(countUnestimated(tasks));
@@ -31,13 +33,43 @@ export default async function TasksPage({ searchParams }: Props) {
   const tagsByTask = listTagsByTask(tasks.map((t) => t.id));
   const commentersByTask = listCommentersByTask(tasks.map((t) => t.id));
   const users = listUserOptions();
-  const selectionKey = bulkSelectionKey({ status, assignee, tag, q, sort, includeArchived });
+  const myTasks = listMyDueTasks(user.id, undefined, today);
+  const myExtensions = listExtensionsAwaitingMe(user.id);
+  const selectionKey = bulkSelectionKey({ status, assignee, tag, q, due, sort, includeArchived });
 
   return (
     <main>
       <h1>タスク一覧</h1>
       <p data-testid="current-user">{formatCurrentUser(user.name)}</p>
       <p data-testid="list-help">{TASK_LIST_HELP}</p>
+      <section aria-labelledby="my-attention-heading" data-testid="my-attention">
+        <h2 id="my-attention-heading">あなたの対応が必要なもの</h2>
+        {myTasks.length === 0 && myExtensions.length === 0 && <p data-testid="my-attention-empty">{NOTHING_TO_DO_TEXT}</p>}
+        {myTasks.length > 0 && (
+          <>
+            <h3>担当のタスク（期限切れ・期限間近）</h3>
+            <ul>
+              {myTasks.map((t) => (
+                <li key={t.id} data-testid="my-task">
+                  <strong>{t.kind === "overdue" ? "期限切れ" : "期限間近"}</strong> <a href={`/tasks/${t.id}`}>{t.title}</a>（期限 {t.dueDate}）
+                </li>
+              ))}
+            </ul>
+          </>
+        )}
+        {myExtensions.length > 0 && (
+          <>
+            <h3>承認待ちの期限延長</h3>
+            <ul>
+              {myExtensions.map((e) => (
+                <li key={e.id} data-testid="my-extension">
+                  <a href="/extensions">{e.taskTitle}</a>（{e.requesterName}さんの申請: {e.currentDueDate} → {e.newDueDate}）
+                </li>
+              ))}
+            </ul>
+          </>
+        )}
+      </section>
       <p>
         <a href="/tasks/new" data-testid="new-task-link">
           新しいタスク
@@ -51,7 +83,7 @@ export default async function TasksPage({ searchParams }: Props) {
       <form method="get" aria-label="絞り込み">
         <label>
           キーワード{" "}
-          <input type="search" name="q" defaultValue={q ?? ""} maxLength={100} placeholder="タイトル・メモ" />
+          <input type="search" name="q" defaultValue={q ?? ""} maxLength={100} placeholder="タイトル・メモ・コメント" />
         </label>{" "}
         <label>
           ステータス{" "}
@@ -77,6 +109,17 @@ export default async function TasksPage({ searchParams }: Props) {
           </select>
         </label>{" "}
         <label>
+          期限{" "}
+          <select name="due" defaultValue={due ?? ""} data-testid="due-filter">
+            <option value="">指定なし</option>
+            {TASK_DUE_FILTERS.map((d) => (
+              <option key={d} value={d}>
+                {DUE_FILTER_LABELS[d]}
+              </option>
+            ))}
+          </select>
+        </label>{" "}
+        <label>
           並び順{" "}
           <select name="sort" defaultValue={sort}>
             {TASK_SORTS.map((s) => (
@@ -94,7 +137,7 @@ export default async function TasksPage({ searchParams }: Props) {
       </form>
       <p data-testid="task-count">{formatTaskCount(tasks.length)}</p>
       <p>
-        <a href={exportHref({ status, assignee, tag, q, sort })} data-testid="export-link">
+        <a href={exportHref({ status, assignee, tag, q, due, sort })} data-testid="export-link">
           CSV でダウンロード
         </a>
       </p>
