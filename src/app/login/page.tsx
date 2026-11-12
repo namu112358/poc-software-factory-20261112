@@ -1,8 +1,13 @@
+import { redirect } from "next/navigation";
+import { getCurrentUser } from "@/lib/session";
+
 type Props = {
   searchParams: Promise<{ error?: string }>;
 };
 
 export default async function LoginPage({ searchParams }: Props) {
+  // ログイン済みなら、ログイン画面を見せずにタスク一覧へ移す。
+  if (await getCurrentUser()) redirect("/tasks");
   const { error } = await searchParams;
   return (
     <main>
