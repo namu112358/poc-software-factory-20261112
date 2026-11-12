@@ -29,7 +29,7 @@ Issue に `ready` が付いたときに起動します。1 回の起動で 1 つ
 ## 4. PR を出す
 
 1. コミットして push し、draft の PR を出す。本文は `.github/pull_request_template.md` の見出しに沿い、「関連 Issue」に `Closes #<番号>` を書く。「検証結果」には実際に実行したコマンドと結果を書く。
-2. GitHub Actions の CI（`app-check`）の結果を待つ（数分おきに確かめる。15 分たっても終わらなければ、その旨を書いて終える）。
+2. GitHub Actions の CI（`app-check`）の結果を待つ（数分おきに確かめる）。15 分たっても終わらなければ、その旨を Issue に書き、`in-progress` を付けたまま終える（巡回が、止まった実装として拾う）。
 3. CI が落ちたら、原因を直して push する。同じ失敗の修正は 3 回まで。超えたら、Issue の `in-progress` を外して `needs-human` を付け、調べたことをコメントし、終える（PR は draft のまま）。
 4. CI が通ったら、PR を Ready にする（これがレビューの起動の合図）。Issue の `in-progress` を外す。
 
@@ -37,4 +37,4 @@ Issue に `ready` が付いたときに起動します。1 回の起動で 1 つ
 
 Issue に、PR の番号と「レビューの Routine が動く」ことを 1 行でコメントする（先頭に `<!-- factory:implement -->`）。
 
-途中で止まるときは、どの場合も `ready` と `in-progress` が外れていることを確かめてから終える（`README.md` の「ラベル」）。
+`blocked:question` か `needs-human` を付けて止まるときは、`ready` と `in-progress` が外れていることを確かめてから終える（`README.md` の「ラベル」）。
