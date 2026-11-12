@@ -133,4 +133,12 @@ export const MIGRATIONS: readonly Migration[] = [
       ALTER TABLE tasks ADD COLUMN completed_at TEXT;
     `,
   },
+  {
+    version: 12,
+    name: "task_archived",
+    sql: `
+      -- アーカイブ済みなら 1。既存のタスクはすべて 0（アーカイブしていない）。
+      ALTER TABLE tasks ADD COLUMN archived INTEGER NOT NULL DEFAULT 0 CHECK (archived IN (0, 1));
+    `,
+  },
 ];
