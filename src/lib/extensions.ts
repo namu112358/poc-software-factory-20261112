@@ -170,3 +170,68 @@ export function withdrawExtension(
   if (current.requester !== userId) return { result: "forbidden" };
   return { result: "conflict" };
 }
+
+export type PendingExtensionRow = {
+  id: number;
+  taskId: number;
+  taskTitle: string;
+  requester: string; // 申請者の ID
+  requesterName: string; // 申請者の表示名（利用者が見つからなければ ID）
+  currentDueDate: string; // タスクの今の期限 YYYY-MM-DD
+  newDueDate: string; // 希望の期限 YYYY-MM-DD
+  reason: string;
+  createdAt: string; // ISO 8601（UTC）
+};
+
+/** 承認待ち（pending）の延長申請を、申請の古い順に返す。タスクの題名・今の期限・申請者の名前つき。 */
+export function listPendingExtensions(db: Db = getDb()): PendingExtensionRow[] {
+  const rows = db
+    .prepare(
+      `SELECT e.id, e.task_id, t.title, e.requester, u.name AS requester_name, t.due_date, e.new_due_date, e.reason, e.created_at
+       FROM due_date_extensions e
+       JOIN tasks t ON t.id = e.task_id
+       LEFT JOIN users u ON u.id = e.requester
+       WHERE e.status = 'pending'
+       ORDER BY e.created_at, e.id`,
+    )
+    .all() as {
+    id: number;
+    task_id: number;
+    title: string;
+    requester: string;
+    requester_name: string | null;
+    due_date: string;
+    new_due_date: string;
+    reason: string;
+    created_at: string;
+  }[];
+  return rows.map((r) => ({
+    id: r.id,
+    taskId: r.task_id,
+    taskTitle: r.title,
+    requester: r.requester,
+    requesterName: r.requester_name ?? r.requester,
+    currentDueDate: r.due_date,
+    newDueDate: r.new_due_date,
+    reason: r.reason,
+    createdAt: r.created_at,
+  }));
+}
+
+/** 申請日時の表示。日本時間の「YYYY/MM/DD HH:mm」。 */
+export function formatExtensionRequestedAt(iso: string): string {
+  const p = Object.fromEntries(
+    new Intl.DateTimeFormat("en-US", {
+      timeZone: "Asia/Tokyo",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      hourCycle: "h23",
+    })
+      .formatToParts(new Date(iso))
+      .map((x) => [x.type, x.value]),
+  );
+  return `${p.year}/${p.month}/${p.day} ${p.hour}:${p.minute}`;
+}

@@ -18,6 +18,7 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
             <a href="/tags">タグ一覧</a>
             <a href="/members">メンバー</a>
             <a href="/board">ステータス別</a>
+            <a href="/extensions">承認待ちの延長</a>
             <a href="/settings/password">パスワード変更</a>
             <span data-testid="header-user">{user.name}（{user.id}）</span>
             <span data-testid="previous-login">{formatPreviousLogin(previousLogin ?? null)}</span>
