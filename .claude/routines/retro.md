@@ -14,8 +14,8 @@
 
 同じ期間について、次のものも集める（レビューの指摘には出ない、流れの問題を拾うため）。対象は、マージされた `claude/` の PR に加えて、同じ期間にマージされずに閉じた `claude/` の PR と、それらの Issue。マージされずに閉じた PR は、閉じたときのコメントに止まりの原因が書かれていることが多い（2026-11-12 の #58 では、「ブランチが古い版から作られていた」という原因が、そこにしか無かった）。
 
-- `in-progress` が付いてから PR が Ready になるまでに 10 分以上かかった Issue と、その間に何が起きたか（衝突・CI の待ち など）。あわせて、`ready` が付いてから `in-progress` が付くまでの待ち（空き待ち・同じファイル待ち・依存先待ち）
-- 実装・修正の役が、待ちきれずに終えたり、`needs-human`・`blocked:question` で止まったりした回と、その理由。理由は役のコメントだけでなく、その後に人や別の役が書いたコメントと、PR を閉じた理由まで読む
+- `status:in-progress` が付いてから PR が Ready になるまでに 10 分以上かかった Issue と、その間に何が起きたか（衝突・CI の待ち など）。あわせて、`status:ready` が付いてから `status:in-progress` が付くまでの待ち（空き待ち・同じファイル待ち・依存先待ち）
+- 実装・修正の役が、待ちきれずに終えたり、`status:needs-human`・`status:blocked-question` で止まったりした回と、その理由。理由は役のコメントだけでなく、その後に人や別の役が書いたコメントと、PR を閉じた理由まで読む
 - 衝突で draft に戻された回数（PR ごと）と、キューで待った時間
 - レビューで `verdict=ok` になってからマージされるまでに 10 分以上かかった PR と、その間に何が起きたか（Mergify のキューから外れた・衝突・人の判断の待ち など）
 
@@ -27,6 +27,8 @@
 - PR が Ready になった・draft に戻った時刻: REST の `GET /repos/{owner}/{repo}/issues/{number}/timeline`（`ready_for_review`・`convert_to_draft`）
 - Mergify のキューの出入り: PR の Mergify のコメント（外れた理由は `dequeue_reason`）
 - CI が動いたか: REST の `GET /repos/{owner}/{repo}/commits/{sha}/check-runs` と、PR の `mergeable`（`main` と衝突している PR では、CI が動かない）
+
+ラベルの名前は 2026-11-12 に、用途のグループを接頭に付けた名前に変えた。それより前の記録（コメント・イベント）には旧名が残っていることがあるので、旧名も同じラベルとして数える: `ready` → `status:ready`、`in-progress` → `status:in-progress`、`in-progress:hard` → `status:in-progress-hard`、`blocked:question` → `status:blocked-question`、`needs-human` → `status:needs-human`、`epic` → `kind:epic`、`kaizen` → `kind:kaizen`、`merge` → `merge:requested`、`enhancement` → `type:feat`、`bug` → `type:fix`。
 
 ## 2. くり返しそうなものを選ぶ
 

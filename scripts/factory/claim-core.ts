@@ -1,21 +1,56 @@
 // Factory の Routine が使う「着手してよいか・待っている Issue のどれから着手するか」の判定（#137・#218・#220）。
 // GitHub への書き込み（ラベルの付け外し・コメント）はしない。判定だけを返し、割り当ての役がその結果に従う。
 // 決まりの説明は scripts/factory/README.md、役の手順は .claude/routines/dispatch.md の「2.」。
-// 用語: 「待っている Issue」は、ready があり in-progress / in-progress:hard の無い Issue（コード上は queued と呼ぶ。実装の起動の合図を ready から in-progress に変えたとき、queued のラベルをやめた）。
+// 用語: 「待っている Issue」は、status:ready があり status:in-progress / status:in-progress-hard の無い Issue（コード上は queued と呼ぶ。ラベルの queued はもう無い）。ラベルの名前は LABEL。
 
 export const WIP_LIMIT = 4;
 
 /**
- * 実装の Routine の起動のきっかけ（`in-progress` / `in-progress:hard` が付いたこと）を、直近 60 分に何回まで使うか（#250）。
+ * ラベルの名前。用途のグループを接頭に付けている（status: 流れの状態、kind: Issue の分類、merge: マージの依頼）。
+ * 名前を変えるときは、ここと手順書・.mergify.yml・Issue テンプレートを同じ PR で直す。
+ */
+export const LABEL = {
+  ready: "status:ready",
+  inProgress: "status:in-progress",
+  inProgressHard: "status:in-progress-hard",
+  blockedQuestion: "status:blocked-question",
+  needsHuman: "status:needs-human",
+  epic: "kind:epic",
+  kaizen: "kind:kaizen",
+  merge: "merge:requested",
+} as const;
+
+/** 接頭を付ける前の名前 → 今の名前。過去のイベント（付けたときの名前のまま残る場合がある）を数えるときだけ使う */
+export const OLD_LABEL_NAMES: Readonly<Record<string, string>> = {
+  ready: LABEL.ready,
+  "in-progress": LABEL.inProgress,
+  "in-progress:hard": LABEL.inProgressHard,
+  "blocked:question": LABEL.blockedQuestion,
+  "needs-human": LABEL.needsHuman,
+  epic: LABEL.epic,
+  kaizen: LABEL.kaizen,
+  merge: LABEL.merge,
+};
+
+/** 旧名なら今の名前に直す。それ以外はそのまま */
+export function normalizeLabel(name: string): string {
+  return OLD_LABEL_NAMES[name] ?? name;
+}
+
+/** 実装の開始の合図（実装の Routine のトリガー）。標準と難しい用 */
+export const START_LABELS: readonly string[] = [LABEL.inProgress, LABEL.inProgressHard];
+
+/**
+ * 実装の Routine の起動のきっかけ（`status:in-progress` / `status:in-progress-hard` が付いたこと）を、直近 60 分に何回まで使うか（#250）。
  * GitHub のイベントには Routine ごとの 1 時間あたりの上限があり、超えたイベントは捨てられる（数値は非公開）。
  * 2026-11-12 は、直近 60 分のきっかけが 53〜55 回になったところで実装の Routine が起動しなくなった。
  * 余裕をみて 45 回にする。上限が分かったら、この値だけを直す。
  * 上限が起動のきっかけ以外のイベント（ほかのラベルなど、フィルタを通る前のもの）も数えるなら、数える対象も見直す。
- * （名前の READY は、きっかけが ready だったときの名残り。値の意味は「起動のきっかけ」）
+ * （名前の READY は、きっかけが ready（今の status:ready）だったときの名残り。値の意味は「起動のきっかけ」）
  */
 export const READY_EVENTS_PER_HOUR_BUDGET = 45;
 
-/** 直近 60 分のきっかけの数から、あと何回 in-progress を付けてよいか */
+/** 直近 60 分のきっかけの数から、あと何回 status:in-progress を付けてよいか */
 export function readyBudget(startsLastHour: number): { startsLastHour: number; budget: number; remaining: number } {
   return { startsLastHour, budget: READY_EVENTS_PER_HOUR_BUDGET, remaining: Math.max(0, READY_EVENTS_PER_HOUR_BUDGET - startsLastHour) };
 }
@@ -27,10 +62,10 @@ export type IssueInfo = {
   body: string;
   comments: Comment[];
   blockedBy?: number[]; // GitHub の依存関係（blocked by）に登録された Issue の番号
-  labels?: string[]; // いまのラベル（precheck で、付ける直前に読み直した値。#322）
+  labels?: string[]; // いまのラベル（今の名前に直した値。precheck で、付ける直前に読み直した値。#322）
 };
 
-/** stalled: PR か、その Issue（claude/issue-<番号>）に needs-human・blocked:question が付いて、人を待っている（#255） */
+/** stalled: PR か、その Issue（claude/issue-<番号>）に status:needs-human・status:blocked-question が付いて、人を待っている（#255） */
 export type PrInfo = { number: number; headRef: string; files: string[]; stalled?: boolean };
 
 export type Wait = number | "slot";
@@ -142,9 +177,9 @@ export function dependencies(issue: IssueInfo): number[] {
   return [...deps].sort((a, b) => a - b);
 }
 
-export const STALLED_LABELS = ["needs-human", "blocked:question"];
+export const STALLED_LABELS: readonly string[] = [LABEL.needsHuman, LABEL.blockedQuestion];
 /** 付いていれば着手させないラベル（作業中・人を待っている・実装しない）。#322 */
-export const NOT_STARTABLE_LABELS = ["in-progress", "in-progress:hard", ...STALLED_LABELS, "epic"];
+export const NOT_STARTABLE_LABELS: readonly string[] = [...START_LABELS, ...STALLED_LABELS, LABEL.epic, LABEL.kaizen];
 
 /**
  * 番号（Issue か PR）が人を待って止まっているか、を返す関数を作る（#255）。
@@ -163,7 +198,7 @@ export function makeIsStalled(labels: Map<number, string[]>, prIssue: Map<number
 /**
  * まだ待つ依存先。blocked by・「#N の後」（人が決めた依存）は、開いていれば待つ。
  * factory:queued の wait=#N（同じファイルを変える作業を待つもの）は、開いていても、
- * 待ち先が needs-human・blocked:question で人を待っているなら待たない（無期限に止まらないため。#255）。
+ * 待ち先が status:needs-human・status:blocked-question で人を待っているなら待たない（無期限に止まらないため。#255）。
  */
 export function blockingDeps(
   issue: IssueInfo,
@@ -259,7 +294,7 @@ function queue(kind: "queue" | "retreat", wait: Wait, files: string[], reason: s
 
 /**
  * 着手の前の確かめ（implement.md の「キューに載せる」）。
- * inProgress: in-progress の付いた開いている Issue（自分を含んでいてよい）
+ * inProgress: status:in-progress の付いた開いている Issue（自分を含んでいてよい）
  * queued: queued の付いた開いている Issue
  * openPrs: 開いている claude/ の PR
  */
@@ -278,8 +313,8 @@ export function precheck(args: {
   // 着手の合図を付ける直前に、ラベルを読み直した値で確かめる（#322: ready を外した 20 秒後に in-progress が付いた）
   if (self.labels !== undefined) {
     const blocking = self.labels.filter((l) => NOT_STARTABLE_LABELS.includes(l));
-    if (!self.labels.includes("ready") || blocking.length > 0) {
-      const why = !self.labels.includes("ready") ? "`ready`（人の承認）が無い" : `${blocking.map((l) => `\`${l}\``).join("・")} が付いている`;
+    if (!self.labels.includes(LABEL.ready) || blocking.length > 0) {
+      const why = !self.labels.includes(LABEL.ready) ? `\`${LABEL.ready}\`（人の承認）が無い` : `${blocking.map((l) => `\`${l}\``).join("・")} が付いている`;
       return { decision: "skip", reason: `${why}ので、着手させずに次へ進む。` };
     }
   }
@@ -324,7 +359,7 @@ export function precheck(args: {
     return {
       decision: "go",
       ahead,
-      note: `${stalledOverlaps.join("・")} は同じファイルを変えるが、needs-human・blocked:question で人を待っているので待たずに着手する（#255）。後からマージされるほうで衝突したら、割り当て・修正の役が解消する。このことを着手のコメントに書く。`,
+      note: `${stalledOverlaps.join("・")} は同じファイルを変えるが、status:needs-human・status:blocked-question で人を待っているので待たずに着手する（#255）。後からマージされるほうで衝突したら、割り当て・修正の役が解消する。このことを着手のコメントに書く。`,
     };
   }
   return { decision: "go", ahead };
@@ -363,7 +398,7 @@ export function pick(args: {
   isStalled?: (n: number) => boolean;
   openPrs?: PrInfo[];
   inProgress?: IssueInfo[];
-  readyRemaining?: number; // あと何回 ready を付けてよいか（readyBudget の remaining）。省けば数えない
+  readyRemaining?: number; // あと何回 status:in-progress を付けてよいか（readyBudget の remaining）。省けば数えない
 }): {
   slots: number;
   pick: number[];
@@ -428,7 +463,7 @@ export type Actions = { removeLabels: string[]; addLabels: string[]; addLabelsIf
 
 /**
  * precheck の結果から、割り当て・巡回の役がそのまま行う操作を作る。
- * go: ready を外して in-progress（難しいと判定したら in-progress:hard）を付け、着手の記録（factory:touch）を書く。
+ * go: status:ready を外して status:in-progress（難しいと判定したら status:in-progress-hard）を付け、着手の記録（factory:touch）を書く。
  * queue: ラベルは変えず、待ちの記録を書く（直前の待ちと待ち先が同じなら書かない）。
  */
 export function precheckActions(self: IssueInfo, files: string[], d: Decision): Actions {
@@ -441,9 +476,9 @@ export function precheckActions(self: IssueInfo, files: string[], d: Decision): 
         ? "同じファイルを予定して先に待っている Issue は無い（この Issue が先頭）。"
         : `同じファイルを予定して先に待っている #${ahead.join("・#")} より先に着手する（それらは依存・人待ち・ほかの待ちの後ろにいて、まだ着手できない）。`;
     return {
-      removeLabels: ["ready"],
-      addLabels: ["in-progress"],
-      addLabelsIfHard: ["in-progress:hard"],
+      removeLabels: [LABEL.ready],
+      addLabels: [LABEL.inProgress],
+      addLabelsIfHard: [LABEL.inProgressHard],
       comment: `<!-- factory:touch files=${files.join(",")} ahead=${ahead.map((n) => `#${n}`).join(",")} -->\n着手させた（変えるファイルは上のとおり）。${order}難しいと判定したときは、当たった観点をこの下に書く。${note}`,
     };
   }
@@ -451,16 +486,16 @@ export function precheckActions(self: IssueInfo, files: string[], d: Decision): 
   return { removeLabels: [], addLabels: [], comment: same ? null : d.comment };
 }
 
-/** precheck が error のときの操作: ready を外して needs-human を付け、理由を書く */
+/** precheck が error のときの操作: status:ready を外して status:needs-human を付け、理由を書く */
 export function errorActions(reason: string): Actions {
-  return { removeLabels: ["ready"], addLabels: ["needs-human"], comment: `着手させる前の確かめが失敗したので止めた。\n${reason}` };
+  return { removeLabels: [LABEL.ready], addLabels: [LABEL.needsHuman], comment: `着手させる前の確かめが失敗したので止めた。\n${reason}` };
 }
 
 export const START_MARK_RE = /<!--\s*factory:implement action=start\s*-->/;
 
 /**
  * 起動しなかった実装の付け直しの対象（dispatch.md の「3.」・patrol.md の「1.」）。
- * in-progress（in-progress:hard）が付いてから minMinutes 以上たち、その後に実装の着手のコメントも PR も無く、
+ * status:in-progress（status:in-progress-hard）が付いてから minMinutes 以上たち、その後に実装の着手のコメントも PR も無く、
  * まだ付け直していない（relabel-start のコメントが無い）Issue。古い順に remaining 件まで。
  * 付け直し済みのものは needsHuman に入れる（2 回目は人に回す）。
  */
@@ -486,7 +521,7 @@ export function relabelTargets(args: {
 }
 
 /**
- * merge を付けてよいか（#293）。最新の factory:review が verdict=ok で、そのレビューのコミットより後のコミットが
+ * merge:requested を付けてよいか（#293）。最新の factory:review が verdict=ok で、そのレビューのコミットより後のコミットが
  * すべて「取り込みだけのコミット」（git show --remerge-diff の差分が空のマージ）なら ok。
  * reviews はレビュー（古い順）。印を信じるのは、書き込み権限のある人（author_association が OWNER・MEMBER・COLLABORATOR）のレビューだけ
  * （PR のレビューは誰でも書けるので、ほかの人が印を偽って ok にできないように）。after は、レビューのコミットより後のコミット（first-parent）。

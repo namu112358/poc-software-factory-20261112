@@ -2,8 +2,7 @@
 // フォーム送信のときは画面遷移（303）、JSON のときは JSON で応答する。
 import { NextResponse } from "next/server";
 import { jsonError, readJson } from "@/lib/api";
-import { clearFailures, getLockState, recordFailure } from "@/lib/login-throttle";
-import { SESSION_COOKIE, SESSION_TTL_MS, authenticate, createSession } from "@/lib/auth";
+import { SESSION_COOKIE, SESSION_TTL_MS, login } from "@/lib/auth";
 
 export async function POST(request: Request) {
   const isJson = (request.headers.get("content-type") ?? "").includes("application/json");
@@ -19,29 +18,24 @@ export async function POST(request: Request) {
     password = form.get("password");
   }
 
-  const lock = typeof userId === "string" ? getLockState(userId) : { locked: false as const };
-  if (lock.locked) {
+  const result = login(userId, password);
+  if (!result.ok && result.reason === "locked") {
     return isJson
       ? jsonError(429, "ログインに続けて失敗したため、しばらくログインできません", [
-          `あと ${lock.retryAfterMinutes} 分後に試せます`,
+          `あと ${result.retryAfterMinutes} 分後に試せます`,
         ])
       : NextResponse.redirect(new URL("/login?error=locked", request.url), 303);
   }
-
-  const user =
-    typeof userId === "string" && typeof password === "string" ? authenticate(userId, password) : undefined;
-  if (!user) {
-    if (typeof userId === "string") recordFailure(userId);
+  if (!result.ok) {
     return isJson
       ? jsonError(401, "ID またはパスワードが正しくありません")
       : NextResponse.redirect(new URL("/login?error=1", request.url), 303);
   }
 
-  clearFailures(user.id);
   const response = isJson
-    ? NextResponse.json({ user })
+    ? NextResponse.json({ user: result.user })
     : NextResponse.redirect(new URL("/tasks", request.url), 303);
-  response.cookies.set(SESSION_COOKIE, createSession(user.id), {
+  response.cookies.set(SESSION_COOKIE, result.token, {
     httpOnly: true,
     sameSite: "lax",
     path: "/",
