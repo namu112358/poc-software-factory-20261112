@@ -6,7 +6,9 @@ import {
   formatTaskCount,
   getTask,
   isTaskStatus,
+  listAssignees,
   listTasks,
+  parseAssignee,
   parseTaskId,
   updateTask,
   validateTaskInput,
@@ -21,6 +23,47 @@ describe("listTasks", () => {
     const tasks = listTasks({ status: "todo" }, openDb());
     assert.ok(tasks.length > 0);
     assert.ok(tasks.every((t) => t.status === "todo"));
+  });
+});
+
+describe("listTasks by assignee", () => {
+  it("filters by assignee", () => {
+    const tasks = listTasks({ assignee: "sato" }, openDb());
+    assert.equal(tasks.length, 3);
+    assert.ok(tasks.every((t) => t.assignee === "sato"));
+  });
+
+  it("combines status and assignee", () => {
+    const tasks = listTasks({ status: "todo", assignee: "sato" }, openDb());
+    assert.deepEqual(
+      tasks.map((t) => t.title),
+      ["E2E テストの追加"],
+    );
+  });
+});
+
+describe("listAssignees", () => {
+  it("returns assignees appearing in tasks without duplicates", () => {
+    assert.deepEqual(
+      listAssignees(openDb()).map((a) => a.id),
+      ["sato", "suzuki", "tanaka"],
+    );
+  });
+
+  it("excludes users with no tasks", () => {
+    const db = openDb();
+    db.prepare("INSERT INTO users (id, name, password_hash) VALUES ('new', '新人', 'x')").run();
+    assert.ok(!listAssignees(db).some((a) => a.id === "new"));
+  });
+});
+
+describe("parseAssignee", () => {
+  it("accepts a known assignee and treats unknown values as unspecified", () => {
+    const db = openDb();
+    assert.equal(parseAssignee("sato", db), "sato");
+    assert.equal(parseAssignee("nobody", db), undefined);
+    assert.equal(parseAssignee(undefined, db), undefined);
+    assert.equal(parseAssignee(["sato"], db), undefined);
   });
 });
 
@@ -101,7 +144,7 @@ describe("formatTaskCount", () => {
   it("shows the count after filtering by status", () => {
     const db = openDb();
     const todo = listTasks({ status: "todo" }, db);
-    assert.equal(formatTaskCount(todo.length), `${todo.length} 件`);
+    assert.equal(formatTaskCount(todo.length), "3 件");
   });
 
   it("shows 「0 件」 when nothing matches", () => {

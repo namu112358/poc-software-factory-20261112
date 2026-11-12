@@ -1,15 +1,17 @@
 import { requireUser } from "@/lib/session";
-import { STATUS_LABELS, formatTaskCount, TASK_STATUSES, isTaskStatus, listTasks } from "@/lib/tasks";
+import { STATUS_LABELS, TASK_STATUSES, formatTaskCount, isTaskStatus, listAssignees, listTasks, parseAssignee } from "@/lib/tasks";
 
 type Props = {
-  searchParams: Promise<{ status?: string }>;
+  searchParams: Promise<{ status?: string; assignee?: string }>;
 };
 
 export default async function TasksPage({ searchParams }: Props) {
   await requireUser();
   const params = await searchParams;
   const status = isTaskStatus(params.status) ? params.status : undefined;
-  const tasks = listTasks({ status });
+  const assignee = parseAssignee(params.assignee);
+  const assignees = listAssignees();
+  const tasks = listTasks({ status, assignee });
 
   return (
     <main>
@@ -22,6 +24,17 @@ export default async function TasksPage({ searchParams }: Props) {
             {TASK_STATUSES.map((s) => (
               <option key={s} value={s}>
                 {STATUS_LABELS[s]}
+              </option>
+            ))}
+          </select>
+        </label>{" "}
+        <label>
+          担当者{" "}
+          <select name="assignee" defaultValue={assignee ?? ""}>
+            <option value="">すべて</option>
+            {assignees.map((a) => (
+              <option key={a.id} value={a.id}>
+                {a.name}
               </option>
             ))}
           </select>

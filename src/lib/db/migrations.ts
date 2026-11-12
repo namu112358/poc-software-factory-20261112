@@ -38,4 +38,18 @@ export const MIGRATIONS: readonly Migration[] = [
       CREATE INDEX sessions_user ON sessions(user_id);
     `,
   },
+  {
+    version: 3,
+    name: "comments",
+    sql: `
+      CREATE TABLE comments (
+        id         INTEGER PRIMARY KEY AUTOINCREMENT,
+        task_id    INTEGER NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+        author     TEXT NOT NULL REFERENCES users(id),
+        body       TEXT NOT NULL,
+        created_at TEXT NOT NULL -- ISO 8601（UTC）
+      );
+      CREATE INDEX comments_task ON comments(task_id);
+    `,
+  },
 ];

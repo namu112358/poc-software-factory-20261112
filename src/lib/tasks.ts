@@ -24,7 +24,25 @@ export function isTaskStatus(value: unknown): value is TaskStatus {
 
 export type TaskFilter = {
   status?: TaskStatus;
+  assignee?: string;
 };
+
+export type Assignee = { id: string; name: string };
+
+/** タスクに登場する担当者（重複なし）。 */
+export function listAssignees(db: Db = getDb()): Assignee[] {
+  return db
+    .prepare(
+      "SELECT DISTINCT u.id AS id, u.name AS name FROM tasks t JOIN users u ON u.id = t.assignee ORDER BY u.id",
+    )
+    .all() as Assignee[];
+}
+
+/** クエリの担当者 ID を検証する。タスクに登場する担当者でなければ undefined（指定なし）。 */
+export function parseAssignee(value: unknown, db: Db = getDb()): string | undefined {
+  if (typeof value !== "string") return undefined;
+  return listAssignees(db).some((a) => a.id === value) ? value : undefined;
+}
 
 type TaskRow = { id: number; title: string; status: TaskStatus; assignee: string; due_date: string };
 
@@ -34,8 +52,10 @@ function toTask(row: TaskRow): Task {
 
 export function listTasks(filter: TaskFilter = {}, db: Db = getDb()): Task[] {
   const rows = db
-    .prepare("SELECT id, title, status, assignee, due_date FROM tasks WHERE (:status IS NULL OR status = :status) ORDER BY id")
-    .all({ status: filter.status ?? null }) as TaskRow[];
+    .prepare(
+      "SELECT id, title, status, assignee, due_date FROM tasks WHERE (:status IS NULL OR status = :status) AND (:assignee IS NULL OR assignee = :assignee) ORDER BY id",
+    )
+    .all({ status: filter.status ?? null, assignee: filter.assignee ?? null }) as TaskRow[];
   return rows.map(toTask);
 }
 
