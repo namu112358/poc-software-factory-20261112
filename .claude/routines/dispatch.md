@@ -43,7 +43,7 @@
 対象は `claude/issue-` の PR と、その Issue だけ。`status:needs-human` の付いた PR と、Issue に `status:blocked-question`・`status:needs-human`・`kind:epic` があるものには触らない。コメントの先頭に `<!-- factory:dispatch action=<処置> -->` を付ける。
 
 - CI（`app-check`）が成功した draft の PR が 15 分以上動いていない: PR を Ready にし、Issue の `status:in-progress` を外す（`ready-stalled`）。
-- `status:in-progress` が付き、PR が無いか draft のまま、最後の動きから 60 分以上（上に当たらないもの）: `status:in-progress` を外し、経過をコメントして `status:needs-human` を付ける（`stalled`）。
+- `status:in-progress` が付き、draft の PR の CI（`app-check`）が失敗したまま、最後の動きから 30 分以上（実装の役は CI が落ちるとすぐ直すので、30 分動かなければ止まっている。#351）、または PR が無いか draft のまま 60 分以上（上に当たらないもの）: `status:in-progress` を外し、経過をコメントして `status:needs-human` を付ける（`stalled`）。
 - draft の PR の CI（`app-check`）が失敗か終わっておらず、Issue に `status:in-progress` が無く、最後の動きから 60 分以上: 経過をコメントして `status:needs-human` を付ける（`stalled-ci`）。
 
 ## 5. 終える
