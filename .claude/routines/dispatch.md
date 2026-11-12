@@ -24,10 +24,11 @@ Mergify のキューに入っている PR（チェック「Mergify Merge Queue�
 
 ## 5. 途中で止まった実装を片付ける
 
-巡回の表の次の 2 行に当たるものを、巡回と同じように片付ける。コメントの先頭に `<!-- factory:dispatch action=<した処置> -->` を付ける。
+巡回の表の次の 3 行に当たるものを、巡回と同じように片付ける。対象外の決まりも巡回と同じ: PR は head のブランチが `claude/` で始まるものだけ。`needs-human` の付いた PR と、`Closes` で参照する Issue に `blocked:question`・`needs-human`・`epic` が付いているものには触らない。コメントの先頭に `<!-- factory:dispatch action=<した処置> -->` を付ける。
 
 - CI が成功した draft の PR が 15 分以上動いていない（PR を Ready にする直前で止まった）: PR を Ready にし、Issue に `in-progress` が残っていれば外す（`action=ready-stalled`）。
 - `in-progress` が付き、PR が無いか draft のまま、最後の動きから 60 分以上（上に当たらないもの）: `in-progress` を外し、経過をコメントして `needs-human` を付ける（`action=stalled`）。
+- draft の PR の最新のコミットの CI が失敗しているか終わっておらず、Issue に `in-progress` が無く、最後の動きから 60 分以上（実装が CI を待ちきれずに終えた後、CI が落ちたもの）: 経過をコメントして `needs-human` を付ける（`action=stalled-ci`）。
 
 止まった実装が `in-progress` のまま、同時に実装する枠（4 件）を塞ぎ続けないため（#215・#219。利用上限で止まった 3 件が、CI は通っていたのに 2 時間近く枠を塞いだ）。
 
