@@ -125,6 +125,14 @@ async function loadWaiting(): Promise<IssueInfo[]> {
   return Promise.all(raws.map((r) => loadIssue(r.number, r)));
 }
 
+/** main の最新のコミットの app-check が失敗しているか（#363）。読めなければ false（ふだんどおり待たせる） */
+async function loadMainBroken(): Promise<boolean> {
+  const { status, data } = await get<{ check_runs?: { name: string; conclusion: string | null; started_at: string }[] }>(`/repos/${REPO}/commits/main/check-runs?check_name=app-check`);
+  if (status !== 200) return false;
+  const latest = (data.check_runs ?? []).sort((a, b) => (a.started_at < b.started_at ? -1 : 1)).at(-1);
+  return latest?.conclusion === "failure";
+}
+
 async function loadOpenPrs(): Promise<PrInfo[]> {
   const prs = await getAll<{ number: number; head: { ref: string }; labels?: { name: string }[] }>(`/repos/${REPO}/pulls?state=open`);
   const mine = prs.filter((p) => p.head.ref.startsWith("claude/"));
@@ -178,14 +186,14 @@ async function main(): Promise<unknown> {
       const files = splitFiles(arg("files")).filter((f) => !f.startsWith("tests/"));
       const [self, inProgress, queued, openPrs, own] = await Promise.all([loadIssue(n), loadInProgress(), loadWaiting(), loadOpenPrs(), ownPr(n)]);
       await loadOpen(dependencies(self));
-      const d = precheck({ self, files, inProgress, queued, openPrs, isOpen, isStalled, ownPr: own });
+      const d = precheck({ self, files, inProgress, queued, openPrs, isOpen, isStalled, ownPr: own, mainBroken: await loadMainBroken() });
       return { issue: n, files, ...d, actions: precheckActions(self, files, d) };
     }
     case "pick": {
       const [queued, inProgress, openPrs, b] = await Promise.all([loadWaiting(), loadInProgress(), loadOpenPrs(), loadBudget()]);
       await loadOpen(queued.flatMap(dependencies));
       const inProgressCount = inProgress.length;
-      return { inProgress: inProgressCount, ...b, ...pick({ queued, inProgressCount, isOpen, isStalled, openPrs, inProgress, readyRemaining: b.remaining }) };
+      return { inProgress: inProgressCount, ...b, ...pick({ queued, inProgressCount, isOpen, isStalled, openPrs, inProgress, readyRemaining: b.remaining, mainBroken: await loadMainBroken() }) };
     }
     case "budget":
       return loadBudget();
