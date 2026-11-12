@@ -8,6 +8,7 @@ Issue に `ready` か `ready:hard` が付いたときに起動します。1 回�
 
 - イベントの Issue に `ready` が付いていない。
 - Issue が閉じている。
+- Issue に `epic` が付いている（Epic は子の Issue をまとめるだけで、実装しない）。
 - Issue に `in-progress`・`blocked:question`・`needs-human` のどれかが付いている。
 - その Issue を `Closes #<番号>` で参照する、開いている PR がある。
 - `ready` を付けた人が、リポジトリへの書き込み権限を持たない。次の順に確かめる。
