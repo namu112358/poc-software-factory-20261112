@@ -1,10 +1,12 @@
 # Mergify の設定（PoC SF1 で試す）。
-# - 人が PR に `merge` のラベルを付けると、条件を満たしていれば自動でキューに入る（autoqueue）。
+# - 人が PR に `merge` のラベルを付けると、条件を満たしていればキューに入る。
+#   （ラベルでキューに入れる規則 pull_request_rules は、Mergify の Workflow Automation を有効にすると動く）
 # - キューは 1 件ずつ、PR のブランチに main を取り込んで CI を回し直してから、squash でマージする。
 # - マージを人が判断する決まりは変えない（`merge` のラベルを付けるのは人だけ）。
+#   ただし PoC では AI も同じアカウントで動くため、AI がラベルを付けることは手順書でしか止められない。
+#   配る標準では、AI を専用の ID で動かし、人の承認をマージの条件に入れる。
 queue_rules:
   - name: default
-    autoqueue: true
     merge_method: squash
     queue_conditions:
       - label = merge
@@ -14,3 +16,12 @@ queue_rules:
     merge_conditions:
       - check-success = app-check
       - check-success = pr-body-check
+
+pull_request_rules:
+  - name: merge のラベルが付いた PR をキューに入れる
+    conditions:
+      - label = merge
+      - -draft
+    actions:
+      queue:
+        name: default
