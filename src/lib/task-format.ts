@@ -86,6 +86,12 @@ export function formatJstDateTime(iso: string): string {
   return `${jst.slice(0, 10).replaceAll("-", "/")} ${jst.slice(11, 16)}`;
 }
 
+/** 詳細画面の「完了」欄の表示。完了済みで完了日時が記録されているときだけ日時を返し、それ以外は「—」。 */
+export function formatCompletedAt(task: Pick<Task, "status" | "completedAt">): string {
+  if (task.status !== "done" || task.completedAt === null) return "—";
+  return formatJstDateTime(task.completedAt);
+}
+
 /** ISO 8601（UTC）の日時を、日本時間の日付「YYYY-MM-DD」にする。解釈できなければ「—」。 */
 export function formatJstDate(iso: string): string {
   const t = Date.parse(iso);
