@@ -145,7 +145,9 @@ describe("updateTasks", () => {
     assert.ok(result.ok);
     for (const [i, after] of result.tasks.entries()) {
       assert.notEqual(after.updatedAt, OLD);
-      assert.deepEqual({ ...after, status: before[i].status, updatedAt: OLD }, before[i]);
+      // 完了にしたので、完了日時は更新時刻になる（ほかの項目は変わらない）。
+      assert.equal(after.completedAt, after.updatedAt);
+      assert.deepEqual({ ...after, status: before[i].status, updatedAt: OLD, completedAt: before[i].completedAt }, before[i]);
     }
     assert.equal(result.tasks[0].updatedAt, result.tasks[1].updatedAt);
   });
