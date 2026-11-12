@@ -103,4 +103,4 @@ flowchart LR
 - **取り込みだけのコミット**は、`main` を取り込んだマージのコミットで、衝突の解消などの手の入っていないもの（`git show <コミット>` の差分が空）を指す。Mergify（キューの中）と修正の役が、レビューの後に PR へ足す。中身は変わらないので、レビュー済みかを判定するときは数えない（`commit=` が最新でなくても、レビュー済みとして扱う。#195）。
 - PR の draft と Ready の切り替えは、GitHub MCP の `update_pull_request`（`draft: true` / `false`）で行う。
 - 権限で拒まれた操作は、言い換えて通そうとせず、拒まれたコマンドをコメントに書いて `needs-human` を付けて止まる。
-- 役の最後に、Issue か PR に「何をしたか・次に誰が何をするか」を 1〜3 行でコメントする。コメントの先頭には `<!-- factory:<役> -->` を付ける（巡回と集計が数える）。コメントの最後に、そのセッションの URL を 1 行書く（`セッション: https://claude.ai/code/session_<ID>`。コミットの `Claude-Session:` の行と同じもの。無ければ、環境変数 `CLAUDE_CODE_REMOTE_SDK_URL` の末尾の `cse_<ID>` の `<ID>` を使う）。Routine のセッションは名前を変えられないので、Issue・PR からセッションをたどれるようにするため（#144）。
+- 役の最後に、Issue か PR に「何をしたか・次に誰が何をするか」を 1〜3 行でコメントする。コメントの先頭には `<!-- factory:<役> -->` を付ける（巡回と集計が数える）。コメントの最後に、そのセッションの URL を 1 行書く（`セッション: https://claude.ai/code/session_<ID>`。`<ID>` は、環境変数 `CLAUDE_CODE_REMOTE_SDK_URL` の末尾の `cse_<ID>` から取る。例: `echo "$CLAUDE_CODE_REMOTE_SDK_URL" | sed 's/.*cse_/session_/'`。リポジトリのコミットの `Claude-Session:` の行からは取らない。ほかのセッションの行が入っていて、取り違えたため。#271）。Routine のセッションは名前を変えられないので、Issue・PR からセッションをたどれるようにするため（#144）。
