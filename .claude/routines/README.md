@@ -26,7 +26,7 @@ flowchart LR
 |---|---|---|---|
 | `ready` | Issue | 実装してよい（これが承認） | 書き込み権限のある人だけ |
 | `ready:hard` | Issue | 実装してよい。難しいので、難しい用の実装に回す（「難易度」） | 人、または標準の実装の役 |
-| `in-progress` | Issue | 実装の Routine が作業中（PR を Ready にするまで） | 実装 |
+| `in-progress` | Issue | 実装の Routine が作業中（PR を Ready にするまで。CI を待ちきれずに終えるときも外す。止まったものは割り当て・巡回が外す） | 実装 |
 | `blocked:question` | Issue | 確認事項があり止まっている | 実装・修正 |
 | `queued` | Issue | 受け付けたが、空きか依存先を待っている（キュー） | 実装 |
 | `needs-human` | Issue・PR | 上限に達した・手順の外のことが要る | どの役でも |
