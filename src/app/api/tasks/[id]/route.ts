@@ -1,8 +1,8 @@
-// GET /api/tasks/:id — タスクを 1 件取得 / PATCH /api/tasks/:id — 送った項目だけを更新する。ログインが必要。
+// GET /api/tasks/:id — タスクを 1 件取得 / PATCH /api/tasks/:id — 送った項目だけを更新する / DELETE /api/tasks/:id — タスクを消す（担当者だけ）。ログインが必要。
 // PATCH の本文に expectedUpdatedAt（編集を始めたときの更新日時）があれば、ほかの人が先に更新していたときは変えずに 409 を返す。
 import { NextResponse } from "next/server";
 import { jsonError, readJson, requireApiUser } from "@/lib/api";
-import { getTask, parseExpectedUpdatedAt, parseTaskId, updateTask, updateTaskIfUnchanged, validateTaskInput } from "@/lib/tasks";
+import { deleteTask, getTask, parseExpectedUpdatedAt, parseTaskId, updateTask, updateTaskIfUnchanged, validateTaskInput } from "@/lib/tasks";
 
 type Context = { params: Promise<{ id: string }> };
 
@@ -34,4 +34,14 @@ export async function PATCH(request: Request, { params }: Context) {
     { error: "ほかの人が先にこのタスクを更新しました。最新の内容を確かめてから、もう一度保存してください", task: updated.task },
     { status: 409 },
   );
+}
+
+export async function DELETE(_request: Request, { params }: Context) {
+  const user = await requireApiUser();
+  if (user instanceof NextResponse) return user;
+  const id = parseTaskId((await params).id);
+  const result = id === undefined ? "not_found" : deleteTask(id, user.id);
+  if (result === "not_found") return jsonError(404, "タスクが見つかりません");
+  if (result === "forbidden") return jsonError(403, "このタスクを削除できるのは担当者だけです");
+  return NextResponse.json({ ok: true });
 }
