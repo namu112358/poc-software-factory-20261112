@@ -35,11 +35,11 @@ describe("addTag / listTags / removeTag", () => {
     assert.deepEqual(listTags(2, db), ["急ぎ"]);
   });
 
-  it("treats names differing only in case as different tags", () => {
+  it("does not attach a second tag that differs only in case", () => {
     const db = openDb();
     assert.equal(addTag(1, "Bug", db), "added");
-    assert.equal(addTag(1, "bug", db), "added");
-    assert.deepEqual(listTags(1, db), ["Bug", "bug"]);
+    assert.equal(addTag(1, "bug", db), "duplicate");
+    assert.deepEqual(listTags(1, db), ["Bug"]);
   });
 
   it("removes only the given tag, and reports one that is not attached", () => {
@@ -133,7 +133,8 @@ describe("listTagSuggestions", () => {
     addTag(3, "急ぎ", db);
     addTag(2, "bug", db);
     addTag(3, "bug", db);
-    addTag(3, "Bug", db);
+    // 揃える前から保存されている、書き方だけが違うタグ
+    db.prepare("INSERT INTO task_tags (task_id, name) VALUES (?, ?)").run(3, "Bug");
     assert.deepEqual(listTagSuggestions(1, db), ["bug", "Bug"]);
     assert.deepEqual(listTagSuggestions(4, db), ["急ぎ", "bug", "Bug"]);
     assert.equal(addTag(4, "新しいタグ", db), "added");

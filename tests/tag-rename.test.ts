@@ -70,7 +70,8 @@ describe("renameTag", () => {
     addTag(1, "急ぎ", db);
     addTag(1, "bug", db);
     addTag(1, "UI", db);
-    addTag(2, "Bug", db);
+    // 揃える前から保存されている、書き方だけが違うタグ
+    db.prepare("INSERT INTO task_tags (task_id, name) VALUES (?, ?)").run(2, "Bug");
     renameTag("bug", "バグ", db);
     assert.deepEqual(tagsOf(db, [1, 2]), { 1: ["急ぎ", "バグ", "UI"], 2: ["Bug"] });
   });
