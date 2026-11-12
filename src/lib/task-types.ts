@@ -69,6 +69,7 @@ export type TaskFilter = {
   assignee?: string;
   tag?: string;
   q?: string; // キーワード。タイトルかメモに含まれるタスクだけ（英字の大文字・小文字は区別しない）
+  qInComments?: boolean; // true のときだけ、キーワードをコメントの本文からも探す（一覧画面と CSV 用。API は指定しない）
   sort?: TaskSort;
   includeArchived?: boolean; // true のときだけ、アーカイブ済みも含める
 };
