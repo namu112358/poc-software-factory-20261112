@@ -1,6 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { openDb } from "../src/lib/db/index.ts";
+import { listUserOptions } from "../src/lib/users.ts";
 import { validateTaskInput } from "../src/lib/task-validation.ts";
 import { TASK_CREATE_FAILED_MESSAGE, buildTaskBody, taskDetailHref, taskFormErrorMessages } from "../src/lib/task-form.ts";
 
@@ -9,6 +10,14 @@ describe("タスク作成画面の入力", () => {
     const db = openDb();
     const body = buildTaskBody({ title: "資料を作る", assignee: "sato", dueDate: "2026-12-01", status: "todo" });
     const r = validateTaskInput(body, {}, db);
+    assert.equal(r.ok, true);
+  });
+  it("担当者の選択肢は、タスクを持たない利用者も含めた利用者全員になる", () => {
+    const db = openDb();
+    db.prepare("UPDATE tasks SET assignee = 'sato'").run();
+    const ids = listUserOptions(db).map((u) => u.id);
+    assert.deepEqual(ids, ["sato", "suzuki", "tanaka"]);
+    const r = validateTaskInput(buildTaskBody({ title: "x", assignee: "tanaka", dueDate: "2026-12-01", status: "todo" }), {}, db);
     assert.equal(r.ok, true);
   });
   it("タイトルが空・期限が日付でないと、検証で日本語の理由が返る", () => {
