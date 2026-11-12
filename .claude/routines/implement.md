@@ -33,7 +33,7 @@ Issue に `in-progress` か `in-progress:hard` が付いたときに起動しま
 
 1. コミットして push し、draft の PR を出す。本文は `.github/pull_request_template.md` の見出しに沿い、「関連 Issue」に `Closes #<番号>`、「検証結果」に実行したコマンドと結果、「注意事項・残課題」に当てはめた `AGENTS.md` の「罠」を 1 行ずつ（無ければ「当てはめた罠: なし」）書く。
 2. CI（`app-check`）を待つ。待ち始めを `date -u` で記録し、バックグラウンドの until ループ（CI が終わるか 15 分たつまで）で待つ。待つ前と待つ間に `mergeable` を見て、衝突していれば `main` を取り込んで解消し、push して待ち直す。打ち切る前に、15 分たったことを `date -u` で確かめ、CI をもう一度だけ読み直す。終わっていなければ、待ち始めと打ち切った時刻を Issue に書き、`in-progress` を外して終える（PR は draft のまま）。
-3. CI が落ちたら直して push する。同じ失敗の修正は 3 回まで。超えたら `in-progress` を外して `needs-human` を付け、調べたことをコメントして終える。
+3. CI（`app-check`）が落ちたら直して push する（draft の間に PR 本文の検査 `pr-body-check` が赤くなっても、ここでは数えない）。同じ失敗の修正は 3 回まで。超えたら `in-progress` を外して `needs-human` を付け、調べたことをコメントして終える。
 4. CI が通ったら PR を Ready にし（レビューの合図）、`in-progress` を外す。
 
 ## 5. 終える

@@ -1,5 +1,6 @@
 # PR 本文が pull_request_template.md の必須見出しを満たしているか検証する。
-# - Draft の PR は対象外。本文を編集すると再実行される。
+# - Draft の PR も検査する（draft の間に push した直後に Ready にすると、Ready のときの実行が作られず、skipped のまま残って
+#   Mergify のキューに入れなかったため。#252）。draft の本文が未完成なら赤くなるが、マージを止めるのは Ready の後だけ。本文を編集すると再実行される。
 # - 失敗するとチェックが赤くなるが、それだけではマージは止まらない。止めたい場合はブランチ保護の必須チェックに追加する。
 # - PR 本文は context.payload から読み、シェルや式展開には渡さない（スクリプト注入対策）。
 name: PR body check
@@ -15,7 +16,6 @@ jobs:
   check:
     # Ruleset の必須チェックはこの name で指定する。他のワークフローとジョブ名が重ならないようにするため、変更しないこと
     name: pr-body-check
-    if: github.event.pull_request.draft == false
     runs-on: ubuntu-latest
     steps:
       - uses: actions/github-script@v7
