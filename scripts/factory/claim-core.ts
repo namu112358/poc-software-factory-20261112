@@ -460,3 +460,27 @@ export function relabelTargets(args: {
   }
   return { relabel, needsHuman };
 }
+
+/**
+ * merge を付けてよいか（#293）。最新の factory:review が verdict=ok で、そのレビューのコミットより後のコミットが
+ * すべて「取り込みだけのコミット」（git show --remerge-diff の差分が空のマージ）なら ok。
+ * reviews はレビューの本文（古い順）。after は、レビューのコミットより後のコミット（first-parent）。
+ */
+export function mergeCheck(args: {
+  reviews: string[];
+  headSha: string;
+  after: { sha: string; mergeOnly: boolean }[] | null; // null: レビューのコミットが PR の履歴に無い
+}): { ok: boolean; reason: string; review: { verdict: string; commit: string } | null } {
+  const marks = args.reviews
+    .map((b) => /<!--\s*factory:review\s+verdict=(\w+)[^>]*?commit=([0-9a-f]+)/.exec(b))
+    .filter((m): m is RegExpExecArray => m !== null);
+  const last = marks.at(-1);
+  if (!last) return { ok: false, reason: "factory:review のレビューが 1 つも無い。レビューの Routine を起こしてから（PR を draft にして Ready に戻す）付ける。", review: null };
+  const review = { verdict: last[1], commit: last[2] };
+  if (review.verdict !== "ok") return { ok: false, reason: `最新のレビューが verdict=${review.verdict}。直して ok になるまで付けない。`, review };
+  if (args.headSha.startsWith(review.commit) || review.commit.startsWith(args.headSha)) return { ok: true, reason: "最新のコミットが ok のレビューを受けている。", review };
+  if (args.after === null) return { ok: false, reason: `レビューのコミット ${review.commit} が PR の履歴に見つからない。レビューを起こし直す。`, review };
+  const changed = args.after.filter((c) => !c.mergeOnly).map((c) => c.sha.slice(0, 7));
+  if (changed.length > 0) return { ok: false, reason: `ok のレビューの後に中身の変わるコミット（${changed.join("、")}）がある。レビューを起こし直す（PR を draft にして Ready に戻す）。`, review };
+  return { ok: true, reason: "ok のレビューの後は、取り込みだけのコミットだけ。", review };
+}

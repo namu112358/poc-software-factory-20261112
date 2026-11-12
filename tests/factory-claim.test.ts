@@ -7,6 +7,7 @@ import {
   parseTouch,
   pick,
   precheck,
+  mergeCheck,
   precheckActions,
   relabelTargets,
   readyBudget,
@@ -368,5 +369,23 @@ describe("役がそのまま行う操作（precheckActions・relabelTargets）",
     });
     assert.deepEqual(r.relabel, [{ issue: 1, label: "in-progress" }]);
     assert.deepEqual(r.needsHuman, [5]);
+  });
+});
+
+describe("merge を付けてよいか（mergeCheck。#293）", () => {
+  const ok = (c: string) => `<!-- factory:review verdict=ok round=1 commit=${c} -->\n本文`;
+  const ng = (c: string) => `<!-- factory:review verdict=changes round=1 commit=${c} -->\n本文`;
+  it("レビューが無い・最新が changes なら付けない", () => {
+    assert.equal(mergeCheck({ reviews: [], headSha: "aaa", after: [] }).ok, false);
+    assert.equal(mergeCheck({ reviews: [ok("aaa"), ng("bbb")], headSha: "bbb", after: [] }).ok, false);
+  });
+  it("最新のコミットが ok を受けていれば付けてよい", () => {
+    assert.equal(mergeCheck({ reviews: [ng("aaa"), ok("bbbbbbb")], headSha: "bbbbbbb1234", after: [] }).ok, true);
+  });
+  it("ok の後が取り込みだけなら付けてよく、中身の変わるコミットがあれば付けない", () => {
+    assert.equal(mergeCheck({ reviews: [ok("aaa")], headSha: "ccc", after: [{ sha: "ccc", mergeOnly: true }] }).ok, true);
+    const r = mergeCheck({ reviews: [ok("aaa")], headSha: "ddd", after: [{ sha: "ccc", mergeOnly: true }, { sha: "ddd1234", mergeOnly: false }] });
+    assert.equal(r.ok, false);
+    assert.match(r.reason, /ddd1234/);
   });
 });
