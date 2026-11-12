@@ -4,7 +4,7 @@
 
 ## 1. 取りこぼしを拾う
 
-対象は、最後に状態が変わってから 30 分以上たったもの（表に別の時間があればそれに従う）。PR は `claude/` のものだけ。人を待っているもの（PR に `status:needs-human`、または Issue に `status:blocked-question`・`status:needs-human`）は対象にしない。したことは `<!-- factory:patrol action=<したこと> -->` でコメントする。同じものに同じことをするのは 1 回まで。2 回目は `status:needs-human` を付けて理由をコメントする。
+対象は、最後に状態が変わってから 30 分以上たったもの（表に別の時間があればそれに従う）。PR は `claude/issue-` のものだけ（ほかの `claude/` の PR は、出したセッションが扱う）。人を待っているもの（PR に `status:needs-human`、または Issue に `status:blocked-question`・`status:needs-human`）は対象にしない。したことは `<!-- factory:patrol action=<したこと> -->` でコメントする。同じものに同じことをするのは 1 回まで。2 回目は `status:needs-human` を付けて理由をコメントする。
 
 まず `node scripts/factory/claim.ts relabel --minutes 30` を実行する。`relabel` の Issue は（2 件目からは 30 秒あけて）その `label` を外して付け直し（`relabel-start`）、`needsHuman` の Issue は `status:in-progress` を外して `status:needs-human` を付ける。
 
