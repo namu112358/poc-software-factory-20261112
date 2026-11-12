@@ -435,7 +435,7 @@ export function errorActions(reason: string): Actions {
 export const START_MARK_RE = /<!--\s*factory:implement action=start\s*-->/;
 
 /**
- * 起動しなかった実装の付け直しの対象（dispatch.md の「4.」・patrol.md の表）。
+ * 起動しなかった実装の付け直しの対象（dispatch.md の「3.」・patrol.md の「1.」）。
  * in-progress（in-progress:hard）が付いてから minMinutes 以上たち、その後に実装の着手のコメントも PR も無く、
  * まだ付け直していない（relabel-start のコメントが無い）Issue。古い順に remaining 件まで。
  * 付け直し済みのものは needsHuman に入れる（2 回目は人に回す）。

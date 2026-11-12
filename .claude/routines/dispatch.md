@@ -19,7 +19,7 @@
 1. ラベルを読み直し、`ready` が無いか、`in-progress`・`blocked:question`・`needs-human`・`epic` が付いていれば、次へ。
 2. `ready` を付けた人が書き込み権限を持つかを確かめる（Issue のイベントの最後の `labeled ready` の人を、GitHub MCP の `list_repository_collaborators` で見る）。持たなければ `ready` を外して `needs-human` を付け、理由をコメントして次へ。
 3. 変えるファイル（テストを除く）を決める。受入条件から、変える画面・API・表を挙げ、`main` の最新を検索する（`src/lib/db/migrations.ts` も含める）。
-4. `node scripts/factory/claim.ts precheck <番号> --files <カンマ区切りのパス>` を実行する。`decision` が `go` でなければ、`actions` のとおりにして次へ（`comment` が `null` ならコメントしない）。
+4. `node scripts/factory/claim.ts precheck <番号> --files <カンマ区切りのパス>` を実行する。`decision` が `go` でなければ、`actions` のとおりにして次へ（`comment` が `null` ならコメントしない。`actions` が無い＝スクリプトが失敗したときは、その Issue には何もせず次へ）。
 5. 難易度を判定する。次の 1 つでも当たれば「難しい」。
    - 元に戻しにくい（データの書き換え・削除、外部への送信）
    - 外部の利用者がいる（ほかのシステム・端末・集計が読む API や列）
