@@ -125,4 +125,12 @@ export const MIGRATIONS: readonly Migration[] = [
       UPDATE tasks SET created_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now');
     `,
   },
+  {
+    version: 11,
+    name: "task_completed_at",
+    sql: `
+      -- 完了にした日時。ISO 8601（UTC）。完了していなければ NULL。既存の完了済みタスクも推測で埋めず NULL のまま。
+      ALTER TABLE tasks ADD COLUMN completed_at TEXT;
+    `,
+  },
 ];
