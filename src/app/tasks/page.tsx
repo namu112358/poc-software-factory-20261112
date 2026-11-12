@@ -11,10 +11,10 @@ import { getCurrentLoginWindow, requireUser } from "@/lib/session";
 import { NEWLY_ASSIGNED_HEADING, listNewlyAssignedTasks, newlyAssignedNames } from "@/lib/assignee-history";
 import { formatJstDateTime } from "@/lib/task-format";
 import { listTagCounts, listTagsByTask } from "@/lib/tags";
-import { DUE_FILTER_LABELS, TASK_DUE_FILTERS, parseDueFilter, assigneeName, PRIORITY_LABELS, STATUS_LABELS, SORT_LABELS, TASK_LIST_HELP, TASK_SORTS, TASK_STATUSES, formatCurrentUser, clearFilterHref, formatEstimate, formatJstDate, formatDaysLeft, formatEstimateTotal, countUnestimated, formatUnestimatedCount, formatMemoPreview, formatTaskCount, formatDoneCount, priorityFontWeight, formatOverdueCount, countOverdue, memoTooltip, isOverdue, isTaskStatus, listAssignees, listTasks, parseAssignee, parseKeyword, parseSort, parseTagFilters, sumEstimateMinutes, taskRowDoneAttr, todayInJapan } from "@/lib/tasks";
+import { DUE_FILTER_LABELS, TASK_DUE_FILTERS, parseDueFilter, assigneeName, PRIORITY_LABELS, STATUS_LABELS, SORT_LABELS, TASK_LIST_HELP, TASK_SORTS, TASK_STATUSES, formatCurrentUser, clearFilterHref, formatEstimate, formatJstDate, formatDaysLeft, formatEstimateTotal, countUnestimated, formatUnestimatedCount, formatMemoPreview, formatTaskCount, formatDoneCount, priorityFontWeight, formatOverdueCount, countOverdue, memoTooltip, isOverdue, isTaskStatus, listAssignees, listTasks, parseAssignees, parseKeyword, parseSort, parseTagFilters, sumEstimateMinutes, taskRowDoneAttr, todayInJapan } from "@/lib/tasks";
 
 type Props = {
-  searchParams: Promise<{ status?: string; assignee?: string; tag?: string | string[]; q?: string; due?: string; sort?: string; archived?: string; reset?: string }>;
+  searchParams: Promise<{ status?: string; assignee?: string | string[]; tag?: string | string[]; q?: string; due?: string; sort?: string; archived?: string; reset?: string }>;
 };
 
 export default async function TasksPage({ searchParams }: Props) {
@@ -22,7 +22,7 @@ export default async function TasksPage({ searchParams }: Props) {
   const rawParams = await searchParams;
   const params = resolveTaskViewQuery(user.id, rawParams, rawParams.reset === "1") as typeof rawParams;
   const status = isTaskStatus(params.status) ? params.status : undefined;
-  const assignee = parseAssignee(params.assignee);
+  const selectedAssignees = parseAssignees(params.assignee);
   const tags = parseTagFilters(params.tag);
   const allTags = listTagCounts();
   const q = parseKeyword(params.q);
@@ -30,7 +30,7 @@ export default async function TasksPage({ searchParams }: Props) {
   const sort = parseSort(params.sort);
   const includeArchived = parseIncludeArchived(params.archived);
   const assignees = listAssignees();
-  const tasks = listTasks({ status, assignee, tags, q, qInComments: true, due, sort, includeArchived });
+  const tasks = listTasks({ status, assignees: selectedAssignees, tags, q, qInComments: true, due, sort, includeArchived });
   const today = todayInJapan();
   const clearHref = clearFilterHref(tasks.length);
   const unestimatedText = formatUnestimatedCount(countUnestimated(tasks));
@@ -42,7 +42,7 @@ export default async function TasksPage({ searchParams }: Props) {
   const myExtensions = listExtensionsAwaitingMe(user.id);
   const loginWindow = await getCurrentLoginWindow();
   const newlyAssigned = listNewlyAssignedTasks(user.id, loginWindow?.previousLoginAt, loginWindow?.loginAt);
-  const selectionKey = bulkSelectionKey({ status, assignee, tags, q, due, sort, includeArchived });
+  const selectionKey = bulkSelectionKey({ status, assignees: selectedAssignees, tags, q, due, sort, includeArchived });
 
   return (
     <main>
@@ -119,9 +119,8 @@ export default async function TasksPage({ searchParams }: Props) {
           </select>
         </label>{" "}
         <label>
-          担当者{" "}
-          <select name="assignee" defaultValue={assignee ?? ""}>
-            <option value="">すべて</option>
+          担当者（Ctrl／Cmd を押しながら複数選べます。選んだだれかが担当のタスクが出ます）{" "}
+          <select name="assignee" multiple size={Math.min(assignees.length + 1, 5)} defaultValue={selectedAssignees} data-testid="assignee-select">
             {assignees.map((a) => (
               <option key={a.id} value={a.id}>
                 {a.name}
@@ -175,7 +174,7 @@ export default async function TasksPage({ searchParams }: Props) {
       </form>
       <p data-testid="task-count">{formatTaskCount(tasks.length)}</p>
       <p>
-        <a href={exportHref({ status, assignee, tags, q, due, sort })} data-testid="export-link">
+        <a href={exportHref({ status, assignees: selectedAssignees, tags, q, due, sort })} data-testid="export-link">
           CSV でダウンロード
         </a>
       </p>

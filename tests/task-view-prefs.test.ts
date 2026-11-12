@@ -17,7 +17,7 @@ describe("task view prefs", () => {
     saveTaskViewPrefs(a, { status: "todo", assignee: b, tag: "急ぎ", q: " 資料 ", due: "overdue", sort: "due", archived: "include" }, db);
     const loaded = loadTaskViewPrefs(a, db);
     assert.equal(loaded.status, "todo");
-    assert.equal(loaded.assignee, b);
+    assert.deepEqual(loaded.assignee, [b]);
     assert.deepEqual(loaded.tag, ["急ぎ"]);
     assert.equal(loaded.q, "資料");
     assert.equal(loaded.sort, "due");

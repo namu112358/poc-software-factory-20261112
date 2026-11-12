@@ -61,6 +61,7 @@ export function canSubmitBulk(selected: readonly number[], choice: BulkChoice): 
 export function bulkSelectionKey(filter: {
   status?: string;
   assignee?: string;
+  assignees?: readonly string[];
   tag?: string;
   tags?: readonly string[];
   q?: string;
@@ -71,6 +72,7 @@ export function bulkSelectionKey(filter: {
   return JSON.stringify([
     filter.status ?? "",
     filter.assignee ?? "",
+    filter.assignees ?? [],
     filter.tag ?? "",
     filter.tags ?? [],
     filter.q ?? "",
