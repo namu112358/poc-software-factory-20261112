@@ -6,7 +6,7 @@ import { createContext, useContext, useState, type ReactNode } from "react";
 import { canSelectMore, canSubmitBulk, confirmAndBulkUpdate, keepVisible, toggleSelection, type BulkChoice } from "@/lib/bulk-select";
 import { STATUS_LABELS, TASK_STATUSES } from "@/lib/task-types";
 
-type User = { id: string; name: string };
+type User = { id: string; name: string; label?: string };
 
 type State = {
   selected: number[];
@@ -88,7 +88,7 @@ export function BulkBar({ users }: { users: User[] }) {
               <option value="">変えない</option>
               {users.map((u) => (
                 <option key={u.id} value={u.id}>
-                  {u.name}
+                  {u.label ?? u.name}
                 </option>
               ))}
             </select>
