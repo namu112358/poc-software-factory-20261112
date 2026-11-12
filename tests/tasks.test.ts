@@ -4,6 +4,7 @@ import { DatabaseSync } from "node:sqlite";
 import { migrate, openDb } from "../src/lib/db/index.ts";
 import { MIGRATIONS } from "../src/lib/db/migrations.ts";
 import {
+  assigneeName,
   createTask,
   isOverdue,
   taskRowDoneAttr,
@@ -72,6 +73,28 @@ describe("listAssignees", () => {
   });
 });
 
+describe("assigneeName", () => {
+  it("ログイン ID ではなく、担当者の名前を返す", () => {
+    const db = openDb();
+    const assignees = listAssignees(db);
+    const task = listTasks({}, db)[0];
+    const name = assigneeName(task.assignee, assignees);
+    assert.notEqual(name, task.assignee);
+    assert.equal(name, assignees.find((a) => a.id === task.assignee)?.name);
+  });
+
+  it("担当者の絞り込みの値はログイン ID のまま", () => {
+    assert.deepEqual(
+      listAssignees(openDb()).map((a) => a.id),
+      ["sato", "suzuki", "tanaka"],
+    );
+  });
+
+  it("担当者なしは空文字を返す", () => {
+    assert.equal(assigneeName(null, listAssignees(openDb())), "");
+  });
+});
+
 describe("担当者なしの絞り込み", () => {
   it("parseAssignee は none を受け付ける", () => {
     assert.equal(parseAssignee("none", openDb()), "none");
@@ -87,7 +110,7 @@ describe("担当者なしの絞り込み", () => {
     db.exec("CREATE TABLE tasks_bak AS SELECT * FROM tasks");
     db.exec("DROP TABLE tasks");
     db.exec(
-      "CREATE TABLE tasks (id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT NOT NULL, status TEXT NOT NULL, assignee TEXT, due_date TEXT NOT NULL, priority TEXT NOT NULL DEFAULT 'medium', estimate_minutes INTEGER, memo TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL DEFAULT '', updated_at TEXT NOT NULL DEFAULT '')",
+      "CREATE TABLE tasks (id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT NOT NULL, status TEXT NOT NULL, assignee TEXT, due_date TEXT NOT NULL, priority TEXT NOT NULL DEFAULT 'medium', estimate_minutes INTEGER, memo TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL DEFAULT '', updated_at TEXT NOT NULL DEFAULT '', completed_at TEXT)",
     );
     db.exec("INSERT INTO tasks SELECT * FROM tasks_bak");
     db.exec("INSERT INTO tasks (title, status, assignee, due_date) VALUES ('未割当', 'todo', NULL, '2026-12-01')");
@@ -116,6 +139,7 @@ describe("getTask", () => {
       id: 1,
       createdAt: "",
       updatedAt: "",
+      completedAt: null,
       title: "要件定義書のレビュー",
       status: "done",
       assignee: "sato",
@@ -187,7 +211,7 @@ describe("createTask / updateTask", () => {
     assert.equal(created.id, 8);
     assert.equal(listTasks({}, db).length, 8);
     const updated = updateTask(created.id, { status: "done" }, db);
-    assert.deepEqual(updated, { ...created, status: "done", updatedAt: updated!.updatedAt });
+    assert.deepEqual(updated, { ...created, status: "done", updatedAt: updated!.updatedAt, completedAt: updated!.updatedAt });
     assert.equal(updateTask(999, { status: "done" }, db), undefined);
   });
 });
@@ -405,6 +429,36 @@ describe("duplicateTask", () => {
     const n = db.prepare("SELECT COUNT(*) AS n FROM comments WHERE task_id = ?").get(copy.id) as { n: number };
     assert.equal(n.n, 0);
     assert.equal(getTask(1, db)!.status, "done");
+  });
+
+  it("keeps tasks without tags untagged", async () => {
+    const { duplicateTask } = await import("../src/lib/tasks.ts");
+    const { listTags } = await import("../src/lib/tags.ts");
+    const db = openDb();
+    db.prepare("DELETE FROM task_tags WHERE task_id = 1").run();
+    assert.deepEqual(listTags(duplicateTask(1, db)!.id, db), []);
+  });
+
+  it("removing a tag from the copy leaves the source's tags", async () => {
+    const { duplicateTask } = await import("../src/lib/tasks.ts");
+    const { addTag, removeTag, listTags } = await import("../src/lib/tags.ts");
+    const db = openDb();
+    addTag(1, "急ぎ", db);
+    addTag(1, "週次", db);
+    const copy = duplicateTask(1, db)!;
+    removeTag(copy.id, "急ぎ", db);
+    assert.deepEqual(listTags(copy.id, db), ["週次"]);
+    assert.deepEqual(listTags(1, db), ["急ぎ", "週次"]);
+  });
+
+  it("leaves no copy behind when copying the tags fails", async () => {
+    const { duplicateTask } = await import("../src/lib/tasks.ts");
+    const db = openDb();
+    const count = () => (db.prepare("SELECT COUNT(*) AS n FROM tasks").get() as { n: number }).n;
+    const before = count();
+    db.exec("DROP TABLE task_tags");
+    assert.throws(() => duplicateTask(1, db));
+    assert.equal(count(), before);
   });
 
   it("returns undefined for a missing task", async () => {

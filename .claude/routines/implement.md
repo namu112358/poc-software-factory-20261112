@@ -18,11 +18,17 @@ Issue に `ready` か `ready:hard` が付いたときに起動します。1 回�
 
 ### キューに載せる
 
-次のどちらかに当たれば、`ready` を外して `queued` を付け、何を待っているか（依存先の番号、または「空き待ち」）をコメントして終える（`README.md` の「キュー」）。どの理由でも、コメントの先頭の `factory:queued` には `files=<この Issue で変えそうなファイル。カンマ区切り>` を付ける（後から来た Issue と取り出す役が、重なりを見るのに使う。空き待ちでも付ける）。
+変えそうなファイル（テストを除く）を決める。Issue の受入条件から、変える画面・API・表を挙げ、リポジトリを検索して決める（`src/lib/db/migrations.ts` も含める）。続けて判定のスクリプトを実行し、その結果に従う。件数や重なりを、手順書の文を読んで自分で数え直さない（#137）。
 
-- Issue の依存先（`README.md` の「キュー」の定義。blocked by と、本文の「#N の後」）に、まだ開いているものがある。
-- `in-progress` の付いた開いている Issue が、すでに 4 件ある。
-- 開いている `claude/` の PR のどれかが、この Issue で変えそうなファイルを、すでに変えている（衝突の予防）。調べ方: Issue の受入条件から、変える画面・API・表を挙げ、リポジトリを検索して変えそうなファイル（テストを除く）を決める。開いている `claude/` の PR の変更ファイルの一覧（`pull_request_read` の `get_files`）と、`in-progress` の付いたほかの Issue の `<!-- factory:touch files=... -->` のコメントと、`queued` の付いた、この Issue より古い（番号が小さい）Issue の最新の `<!-- factory:queued ... files=... -->` のコメント（`files=` が無ければ、その Issue の最新の `factory:touch` の `files=`）と突き合わせる。重なれば、その PR（PR がまだ無ければ、その Issue）を待つ。`queued` の Issue と重なったときは、その Issue を待つ（先に待っていた Issue を、後から来た Issue が追い越さないため。#183）。コメントの先頭に `<!-- factory:queued wait=#<待つ PR か Issue の番号> files=<この Issue で変えそうなファイル。カンマ区切り> -->` を付け、どのファイルが重なったかを書く（`files=` は、後から来た Issue と取り出す役が、重なりを見るのに使う）。`src/lib/db/migrations.ts` も、重なりとして数える。
+```
+node scripts/factory/claim.ts precheck <番号> --files <カンマ区切りのパス>
+```
+
+- `"decision": "go"` なら次に進む。
+- `"decision": "queue"` なら、`ready` を外して `queued` を付け、結果の `comment` をそのままコメントして終える（キューからは取り出さない）。`comment` の先頭の `factory:queued` には、どの理由でも `files=` が付いている（後から来た Issue と取り出す役が、重なりを見るのに使う。#216）。
+- `"decision": "error"` なら、`ready` を外して `needs-human` を付け、出力をコメントして終える。
+
+スクリプトが確かめること（`README.md` の「キュー」）: 依存先がすべて閉じているか、自分以外の作業中が 4 件未満か、変えそうなファイルが、開いている `claude/` の PR・作業中のほかの Issue の `factory:touch`・自分より古い `queued` の Issue の `files=` と重ならないか。
 
 ### 難易度を判定する（標準の役だけ）
 
@@ -31,8 +37,7 @@ Issue に `ready` か `ready:hard` が付いたときに起動します。1 回�
 ## 2. 着手する
 
 1. `ready` を外し、`in-progress` を付ける。続けて、変えそうなファイルを Issue にコメントする（先頭に `<!-- factory:touch files=<カンマ区切りのパス> -->`）。後から着手する役が、衝突の予防に使う。
-2. 記録してから 30 秒待ち、`in-progress` の付いたほかの Issue の `factory:touch` のコメントを読み直す。時刻は、自分のもの・ほかの Issue のものとも、それぞれの Issue の最新の `factory:touch` を使う（キューから取り出し直された Issue には、前の着手の記録も残っているため）。自分の記録と同じファイルを含み、自分より前の時刻（同じ時刻なら、Issue の番号が小さいほう）に記録したものがあれば、自分が引き下がる: `in-progress` を外して `queued` を付け、`<!-- factory:queued wait=#<その Issue の番号> files=<自分の factory:touch の files> -->` でコメントして終える（ほぼ同時に着手した作業どうしが、お互いの記録を見落とさないため）。
-   - 同じ読み直しで、件数も確かめる。`in-progress` の付いた開いている Issue のうち、自分より前の時刻（同じ時刻なら、Issue の番号が小さいほう）に `factory:touch` を記録したものと、`factory:touch` のコメントが無いものを数える。4 件以上なら、自分が引き下がる: `in-progress` を外して `queued` を付け、先頭に `<!-- factory:queued wait=slot files=<自分の factory:touch の files> -->` を付けて「空き待ち」とコメントして終える（ほぼ同時に着手すると、どの役も数えた時点では 4 件未満と判断して、上限を超えるため。#137）。
+2. 記録した後、`node scripts/factory/claim.ts confirm <番号>` を実行する（中で 30 秒待ってから読み直す）。`"decision": "retreat"` なら、`in-progress` を外して `queued` を付け、結果の `comment` をそのままコメントして終える（キューからは取り出さない）。`"go"` なら次に進む。`"error"` なら、`in-progress` を外して `needs-human` を付け、出力をコメントして終える。スクリプトは、それぞれの Issue の最新の `factory:touch` の時刻で前後を決め（同じ時刻なら番号が小さいほうが先）、先に記録した作業と同じファイルを含むか、先に記録した作業中の Issue（記録の無いものを含む）が 4 件以上あれば、引き下がらせる（ほぼ同時の着手で、お互いの記録を見落としたり上限を超えたりしないため。#137）。
 3. `main` の最新から `claude/issue-<番号>` のブランチを作る（ほかの名前にしない。巡回と集計がこの名前で Issue と PR を結び付ける）。
 
 ## 3. 実装する
@@ -44,7 +49,7 @@ Issue に `ready` か `ready:hard` が付いたときに起動します。1 回�
 
 ## 4. PR を出す
 
-1. コミットして push し、draft の PR を出す。本文は `.github/pull_request_template.md` の見出しに沿い、「関連 Issue」に `Closes #<番号>` を書く。「検証結果」には実際に実行したコマンドと結果を書く。
+1. コミットして push し、draft の PR を出す。本文は `.github/pull_request_template.md` の見出しに沿い、「関連 Issue」に `Closes #<番号>` を書く。「検証結果」には実際に実行したコマンドと結果を書く。「注意事項・残課題」には、`AGENTS.md` の「このプロジェクトの罠」のうち、この PR で当てはめたものを 1 行ずつ書く（無ければ「当てはめた罠: なし」）。振り返りの役が、決まりの効き目を数えるのに使う。
 2. GitHub Actions の CI（`app-check`）の結果を待つ（数分おきに確かめる）。待つ前と待つ間に、PR が `main` と衝突していないか（`mergeable`）を見る。衝突していれば、GitHub は CI を動かさないので、`main` を取り込んで衝突を解消し、push してから待ち直す（ほかの PR が先にマージされると起きる）。15 分たっても終わらなければ、その旨を Issue に書き、`in-progress` を付けたまま終える（巡回が、止まった実装として拾う）。
 3. CI が落ちたら、原因を直して push する。同じ失敗の修正は 3 回まで。超えたら、Issue の `in-progress` を外して `needs-human` を付け、調べたことをコメントし、終える（PR は draft のまま）。
 4. CI が通ったら、PR を Ready にする（これがレビューの起動の合図）。Issue の `in-progress` を外す。
@@ -55,4 +60,4 @@ Issue に、PR の番号と「レビューの Routine が動く」ことを 1 �
 
 `blocked:question` か `needs-human` を付けて止まるときは、`ready` と `in-progress` が外れていることを確かめてから終える（`README.md` の「ラベル」）。
 
-PR を Ready にしたとき、または止まるときは、最後にキューから 1 件取り出す（`README.md` の「キュー」）。キューに載せて終えるときは、取り出さない。
+PR を Ready にしたとき、または止まるときは、最後にキューから 1 件取り出す（`README.md` の「キュー」。`claim.ts pick` の `pick` の先頭の 1 件だけ。`rewait` は、2 件目以降を取り出す役のためのものなので書かない）。`pick` が `error` なら取り出さず、終えるコメントに出力を書く（割り当て・巡回が後で取り出す）。キューに載せて終えるときは、取り出さない。
