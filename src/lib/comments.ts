@@ -8,6 +8,7 @@ export type Comment = {
   authorName: string;
   body: string;
   createdAt: string; // ISO 8601（UTC）
+  editedAt: string | null; // 最後に本文を編集した日時。ISO 8601（UTC）。未編集なら null
 };
 
 type CommentRow = {
@@ -17,10 +18,11 @@ type CommentRow = {
   author_name: string;
   body: string;
   created_at: string;
+  edited_at: string | null;
 };
 
 const SELECT =
-  "SELECT c.id, c.task_id, c.author, u.name AS author_name, c.body, c.created_at FROM comments c JOIN users u ON u.id = c.author";
+  "SELECT c.id, c.task_id, c.author, u.name AS author_name, c.body, c.created_at, c.edited_at FROM comments c JOIN users u ON u.id = c.author";
 
 function toComment(row: CommentRow): Comment {
   return {
@@ -30,6 +32,7 @@ function toComment(row: CommentRow): Comment {
     authorName: row.author_name,
     body: row.body,
     createdAt: row.created_at,
+    editedAt: row.edited_at,
   };
 }
 
@@ -80,6 +83,43 @@ export function deleteComment(taskId: number, commentId: number, userId: string,
   if (comment.author !== userId) return "forbidden";
   db.prepare("DELETE FROM comments WHERE id = ?").run(commentId);
   return "deleted";
+}
+
+export type UpdateCommentResult =
+  | { status: "updated"; comment: Comment }
+  | { status: "not_found" }
+  | { status: "forbidden" };
+
+/**
+ * コメントの本文を書き換え、編集日時を記録する。投稿者本人だけが編集できる（削除と同じ判定）。
+ * 別のタスクのコメントは、だれが指定しても not_found。本文が今と同じなら、編集日時は変えない。
+ * body は validateCommentInput を通した値を渡す。
+ */
+export function updateComment(
+  taskId: number,
+  commentId: number,
+  userId: string,
+  body: string,
+  db: Db = getDb(),
+  now: Date = new Date(),
+): UpdateCommentResult {
+  // 判定と書き込みを 1 つの文で行い、読んでから書くまでに削除などが入っても、他人のコメントを書き換えない。
+  const { changes } = db
+    .prepare(
+      "UPDATE comments SET edited_at = CASE WHEN body = :body THEN edited_at ELSE :now END, body = :body WHERE id = :id AND task_id = :taskId AND author = :userId",
+    )
+    .run({ body, now: now.toISOString(), id: commentId, taskId, userId });
+  if (Number(changes) === 0) {
+    const comment = getComment(commentId, db);
+    if (!comment || comment.taskId !== taskId) return { status: "not_found" };
+    return { status: "forbidden" };
+  }
+  return { status: "updated", comment: getComment(commentId, db)! };
+}
+
+/** 詳細画面で、日時の隣に出す編集の印。未編集なら空文字。 */
+export function commentEditedLabel(comment: Pick<Comment, "editedAt">): string {
+  return comment.editedAt === null ? "" : "（編集済み）";
 }
 
 /** 複数のタスクについて、コメントした人の名前を、最初にコメントした古い順・重複なしでまとめて返す。コメントの無いタスクは含まない。 */
