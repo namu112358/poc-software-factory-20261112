@@ -16,6 +16,7 @@ export type Task = {
   updatedAt: string; // ISO 8601（UTC）
   completedAt: string | null; // 完了にした日時。ISO 8601（UTC）。完了していなければ null
   memo: string; // メモ（詳しい説明）。0〜2000 文字。既定は空文字
+  archived: boolean; // アーカイブ済みか。一覧には既定で出ない（消さずに隠す）
 };
 
 export const TASK_STATUSES: readonly TaskStatus[] = ["todo", "in_progress", "done"];
@@ -61,6 +62,7 @@ export type TaskFilter = {
   assignee?: string;
   tag?: string;
   sort?: TaskSort;
+  includeArchived?: boolean; // true のときだけ、アーカイブ済みも含める
 };
 
 /** 「担当者なし」を表す絞り込みの値。 */
@@ -102,6 +104,7 @@ type TaskRow = {
   updated_at: string;
   completed_at: string | null;
   memo: string;
+  archived: number;
 };
 
 function toTask(row: TaskRow): Task {
@@ -117,6 +120,7 @@ function toTask(row: TaskRow): Task {
     updatedAt: row.updated_at,
     completedAt: row.completed_at,
     memo: row.memo,
+    archived: row.archived === 1,
   };
 }
 
@@ -127,9 +131,9 @@ export function listTasks(filter: TaskFilter = {}, db: Db = getDb()): Task[] {
       : "ORDER BY id";
   const rows = db
     .prepare(
-      "SELECT id, title, status, assignee, due_date, priority, estimate_minutes, created_at, updated_at, completed_at, memo FROM tasks WHERE (:status IS NULL OR status = :status) AND (:assignee IS NULL OR (:assignee = 'none' AND assignee IS NULL) OR (:assignee <> 'none' AND assignee = :assignee)) AND (:tag IS NULL OR EXISTS (SELECT 1 FROM task_tags g WHERE g.task_id = tasks.id AND g.name = :tag)) " + orderBy,
+      "SELECT id, title, status, assignee, due_date, priority, estimate_minutes, created_at, updated_at, completed_at, memo, archived FROM tasks WHERE (:includeArchived = 1 OR archived = 0) AND (:status IS NULL OR status = :status) AND (:assignee IS NULL OR (:assignee = 'none' AND assignee IS NULL) OR (:assignee <> 'none' AND assignee = :assignee)) AND (:tag IS NULL OR EXISTS (SELECT 1 FROM task_tags g WHERE g.task_id = tasks.id AND g.name = :tag)) " + orderBy,
     )
-    .all({ status: filter.status ?? null, assignee: filter.assignee ?? null, tag: filter.tag ?? null }) as TaskRow[];
+    .all({ status: filter.status ?? null, assignee: filter.assignee ?? null, tag: filter.tag ?? null, includeArchived: filter.includeArchived ? 1 : 0 }) as TaskRow[];
   return rows.map(toTask);
 }
 
@@ -152,7 +156,7 @@ export function formatCurrentUser(name: string): string {
 }
 
 export function getTask(id: number, db: Db = getDb()): Task | undefined {
-  const row = db.prepare("SELECT id, title, status, assignee, due_date, priority, estimate_minutes, created_at, updated_at, completed_at, memo FROM tasks WHERE id = ?").get(id) as
+  const row = db.prepare("SELECT id, title, status, assignee, due_date, priority, estimate_minutes, created_at, updated_at, completed_at, memo, archived FROM tasks WHERE id = ?").get(id) as
     | TaskRow
     | undefined;
   return row && toTask(row);
@@ -164,10 +168,11 @@ export function parseTaskId(value: unknown): number | undefined {
   return Number(value);
 }
 
-export type TaskInput = Omit<Task, "id" | "priority" | "estimateMinutes" | "memo" | "createdAt" | "updatedAt" | "completedAt"> & {
+export type TaskInput = Omit<Task, "id" | "priority" | "estimateMinutes" | "memo" | "archived" | "createdAt" | "updatedAt" | "completedAt"> & {
   priority?: TaskPriority;
   estimateMinutes?: number | null;
   memo?: string;
+  archived?: boolean;
 };
 
 export const MEMO_MAX_LENGTH = 2000;
@@ -229,14 +234,18 @@ export function validateTaskInput(
       errors.push(`メモは ${MEMO_MAX_LENGTH} 文字以内の文字列で入力してください`);
     } else value.memo = b.memo;
   }
+  if ("archived" in b) {
+    if (typeof b.archived !== "boolean") errors.push("archived は true か false で指定してください");
+    else value.archived = b.archived;
+  }
   return errors.length > 0 ? { ok: false, errors } : { ok: true, value };
 }
 
 export function createTask(input: TaskInput, db: Db = getDb()): Task {
   const now = new Date().toISOString();
   const { lastInsertRowid } = db
-    .prepare("INSERT INTO tasks (title, status, assignee, due_date, priority, estimate_minutes, memo, created_at, updated_at, completed_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
-    .run(input.title, input.status, input.assignee, input.dueDate, input.priority ?? "medium", input.estimateMinutes ?? null, input.memo ?? "", now, now, input.status === "done" ? now : null);
+    .prepare("INSERT INTO tasks (title, status, assignee, due_date, priority, estimate_minutes, memo, archived, created_at, updated_at, completed_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+    .run(input.title, input.status, input.assignee, input.dueDate, input.priority ?? "medium", input.estimateMinutes ?? null, input.memo ?? "", input.archived ? 1 : 0, now, now, input.status === "done" ? now : null);
   return getTask(Number(lastInsertRowid), db)!;
 }
 
@@ -254,7 +263,7 @@ export function updateTask(id: number, changes: Partial<TaskInput>, db: Db = get
   if (!current) return undefined;
   const next = { ...current, ...changes };
   db.prepare(
-    `UPDATE tasks SET title = :title, status = :status, assignee = :assignee, due_date = :dueDate, priority = :priority, estimate_minutes = :estimateMinutes, memo = :memo, updated_at = :now, ${COMPLETED_AT_SQL} WHERE id = :id`,
+    `UPDATE tasks SET title = :title, status = :status, assignee = :assignee, due_date = :dueDate, priority = :priority, estimate_minutes = :estimateMinutes, memo = :memo, archived = :archived, updated_at = :now, ${COMPLETED_AT_SQL} WHERE id = :id`,
   ).run({
     title: next.title,
     status: next.status,
@@ -263,6 +272,7 @@ export function updateTask(id: number, changes: Partial<TaskInput>, db: Db = get
     priority: next.priority,
     estimateMinutes: next.estimateMinutes,
     memo: next.memo,
+    archived: next.archived ? 1 : 0,
     now: new Date().toISOString(),
     id,
   });
