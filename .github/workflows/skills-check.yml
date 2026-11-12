@@ -1,0 +1,27 @@
+# Skills（.claude/skills/）を、モデルを呼ばずに機械的に検査する（scripts/check-skills.py）。
+# - Skills・検査スクリプト・指紋を変えた PR と、main への push で動く。
+# - 失敗するとチェックが赤くなるが、それだけではマージは止まらない。止めたい場合は Ruleset の必須チェックに追加する。
+name: Skills check
+
+on:
+  pull_request:
+    paths: [".claude/skills/**", "scripts/check-skills.py", "scripts/skills.lock.json", ".github/workflows/skills-check.yml"]
+  push:
+    branches: [main]
+    paths: [".claude/skills/**", "scripts/check-skills.py", "scripts/skills.lock.json", ".github/workflows/skills-check.yml"]
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    # Ruleset の必須チェックはこの name で指定する。他のワークフローとジョブ名が重ならないようにするため、変更しないこと
+    name: skills-check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install pyyaml==6.0.2
+      - run: python3 scripts/check-skills.py

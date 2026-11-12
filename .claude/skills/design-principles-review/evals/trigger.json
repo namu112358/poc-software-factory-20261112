@@ -1,0 +1,66 @@
+[
+  {
+    "query": "PR #128 をレビューして。決済の処理を Stripe から自前の PaymentProvider インターフェース経由に変えたやつ。抽象化しすぎてないかも見てほしい",
+    "should_trigger": true
+  },
+  {
+    "query": "この差分見てもらえる？ OrderService に在庫の引き当てとメール送信を足したんだけど、責務的にどうかな",
+    "should_trigger": true
+  },
+  {
+    "query": "src/lib/billing.ts のリファクタリング案をレビューしてほしい。継承で共通化してるけど、これでいいか不安",
+    "should_trigger": true
+  },
+  {
+    "query": "後輩の PR、テストが内部のメソッドをモックしまくってて気になる。コードレビューのコメント書いて",
+    "should_trigger": true
+  },
+  {
+    "query": "レビュー頼む。将来いろんな形式で出力できるように Exporter の仕組みを作ったんだけど、やりすぎかな",
+    "should_trigger": true
+  },
+  {
+    "query": "git diff main...feature/notify の内容を設計の観点でレビューして。マージしていいか判断したい",
+    "should_trigger": true
+  },
+  {
+    "query": "この関数、同じ処理が 3 か所にあるから共通化した。レビューして問題なければ approve コメント書いて",
+    "should_trigger": true
+  },
+  {
+    "query": "Can you review this PR for design issues? It adds a plugin registry for a single CSV exporter.",
+    "should_trigger": true
+  },
+  {
+    "query": "この PR のセキュリティ診断をして。SQL インジェクションや XSS がないか全部洗い出して",
+    "should_trigger": false
+  },
+  {
+    "query": "ESLint の設定に import の順番のルールを追加して、既存のファイルも全部直して",
+    "should_trigger": false
+  },
+  {
+    "query": "CI が落ちてる。npm test の出力を見て、どのテストがなぜ落ちたか調べて直して",
+    "should_trigger": false
+  },
+  {
+    "query": "SOLID 原則について、新人向けに 1 ページの解説を書いて。例は TypeScript で",
+    "should_trigger": false
+  },
+  {
+    "query": "このコンポーネントの見た目を、デザインのガイドラインに沿っているかチェックして（余白とか色とか）",
+    "should_trigger": false
+  },
+  {
+    "query": "TaskService をインターフェースに分けるリファクタリングを実装して。テストも書いて",
+    "should_trigger": false
+  },
+  {
+    "query": "PR の本文を書いて。変更内容は期限の検証の追加",
+    "should_trigger": false
+  },
+  {
+    "query": "本番で 500 が出てる。ログを見て原因を特定して",
+    "should_trigger": false
+  }
+]

@@ -1,0 +1,39 @@
+PR: 見積書の金額を 10 円単位で切り上げて表示する（Issue: 見積書だけ、税込み金額を 10 円単位で切り上げて表示する。請求書は今のまま 1 円単位で四捨五入）
+
+（参考: formatAmount は、以前に請求書と見積書で「見た目が同じだった」金額の表示を 1 つにまとめた関数。今は次の 3 か所から呼ばれている）
+- 請求書の画面: formatAmount(v, { isInvoice: true })
+- 見積書の画面: formatAmount(v, { isEstimate: true, taxIncluded: true })
+- 領収書の PDF: formatAmount(v, { isInvoice: true, forPdf: true })
+
+diff --git a/src/lib/format.ts b/src/lib/format.ts
+@@
+ export function formatAmount(
+   value: number,
+-  opts: { isInvoice?: boolean; isEstimate?: boolean; taxIncluded?: boolean; forPdf?: boolean } = {},
++  opts: { isInvoice?: boolean; isEstimate?: boolean; taxIncluded?: boolean; forPdf?: boolean; roundTo10?: boolean } = {},
+ ): string {
+   let v = value;
+   if (opts.taxIncluded) v = v * 1.1;
+-  v = Math.round(v);
++  if (opts.isEstimate && opts.roundTo10) {
++    v = Math.ceil(v / 10) * 10;
++  } else if (opts.isInvoice && opts.forPdf) {
++    v = Math.round(v);
++  } else {
++    v = Math.round(v);
++  }
+   const s = v.toLocaleString("ja-JP");
+-  return opts.forPdf ? `${s} 円` : `¥${s}`;
++  if (opts.forPdf) return `${s} 円`;
++  if (opts.isEstimate) return `¥${s}（税込）`;
++  return `¥${s}`;
+ }
+diff --git a/src/app/estimates/[id]/page.tsx b/src/app/estimates/[id]/page.tsx
+@@
+-  formatAmount(total, { isEstimate: true, taxIncluded: true })
++  formatAmount(total, { isEstimate: true, taxIncluded: true, roundTo10: true })
+diff --git a/tests/format.test.ts b/tests/format.test.ts
+@@
++test("見積書は 10 円単位で切り上げる", () => {
++  assert.equal(formatAmount(1001, { isEstimate: true, taxIncluded: true, roundTo10: true }), "¥1,110（税込）");
++});

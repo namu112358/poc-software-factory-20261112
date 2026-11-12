@@ -1,0 +1,37 @@
+# PR 本文が pull_request_template.md の必須見出しを満たしているか検証する。
+# - Draft の PR は対象外。本文を編集すると再実行される。
+# - 失敗するとチェックが赤くなるが、それだけではマージは止まらない。止めたい場合はブランチ保護の必須チェックに追加する。
+# - PR 本文は context.payload から読み、シェルや式展開には渡さない（スクリプト注入対策）。
+name: PR body check
+
+on:
+  pull_request:
+    types: [opened, edited, reopened, synchronize, ready_for_review]
+
+permissions:
+  pull-requests: read
+
+jobs:
+  check:
+    if: github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/github-script@v7
+        with:
+          script: |
+            // 必須の見出し。pull_request_template.md の見出しを変えたらここも合わせる
+            const required = ['概要', '背景・目的', '変更内容', '検証結果', '関連 Issue'];
+            const body = (context.payload.pull_request.body ?? '').replace(/<!--[\s\S]*?-->/g, '');
+            const escape = s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+            const problems = [];
+            for (const h of required) {
+              const re = new RegExp(`^##\\s+${escape(h)}\\s*$([\\s\\S]*?)(?=^##\\s|(?![\\s\\S]))`, 'm');
+              const m = body.match(re);
+              if (!m) { problems.push(`見出し「${h}」がありません`); continue; }
+              // 「:」で終わる未記入の項目行（例: "- [ ] 自動テスト:" / "- 変更前:"）だけなら空とみなす
+              const content = m[1].replace(/^\s*-\s*(\[ \]\s*)?[^\n]*:\s*$/gm, '').trim();
+              if (!content) problems.push(`「${h}」が空です`);
+            }
+            if (problems.length) {
+              core.setFailed(`PR 本文がテンプレートを満たしていません:\n- ${problems.join('\n- ')}`);
+            }

@@ -1,0 +1,59 @@
+PR: 期限切れのタスクを一覧で赤く表示する（Issue: 期限を過ぎたタスクの行を赤く表示する。期限の当日はまだ期限切れにしない）
+
+PR の本文より: 「ついでに、分かりにくかった dueDate を deadline に名前を変え、日付の処理を src/lib/date/ に移しました」
+
+diff --git a/src/lib/datetime.ts b/src/lib/date/index.ts
+similarity index 92%
+rename from src/lib/datetime.ts
+rename to src/lib/date/index.ts
+@@
+-export function isOverdue(dueDate: string, today: string): boolean {
+-  return dueDate < today;
++export function isOverdue(deadline: string, today: string): boolean {
++  return deadline <= today;
+ }
+diff --git a/src/lib/tasks.ts b/src/lib/tasks.ts
+@@
+-  dueDate: string | null;
++  deadline: string | null;
+@@
+-  const rows = db.prepare("SELECT id, title, status, due_date AS dueDate FROM tasks").all();
++  const rows = db.prepare("SELECT id, title, status, due_date AS deadline FROM tasks").all();
+diff --git a/src/lib/validation.ts b/src/lib/validation.ts
+@@
+-import { todayInTokyo } from "./datetime";
++import { todayInTokyo } from "./date";
+@@
+-  if (data.dueDate !== undefined && data.dueDate < today) {
+-    errors.push({ field: "dueDate", message: "期限には今日以降の日付を入れてください" });
++  if (data.deadline !== undefined && data.deadline < today) {
++    errors.push({ field: "deadline", message: "期限には今日以降の日付を入れてください" });
+diff --git a/src/app/api/tasks/route.ts b/src/app/api/tasks/route.ts
+@@
+-import { todayInTokyo } from "../../../lib/datetime";
++import { todayInTokyo } from "../../../lib/date";
+diff --git a/src/app/tasks/page.tsx b/src/app/tasks/page.tsx
+@@
+-import { formatDate } from "../../lib/datetime";
++import { formatDate, isOverdue } from "../../lib/date";
+@@
+-      <td>{formatDate(t.dueDate)}</td>
++      <tr className={t.deadline && isOverdue(t.deadline, today) ? "row-overdue" : undefined}>
++      <td>{formatDate(t.deadline)}</td>
+diff --git a/src/app/tasks/[id]/page.tsx b/src/app/tasks/[id]/page.tsx
+@@
+-  <dd>{formatDate(task.dueDate)}</dd>
++  <dd>{formatDate(task.deadline)}</dd>
+diff --git a/tests/datetime.test.ts b/tests/date.test.ts
+similarity index 85%
+rename from tests/datetime.test.ts
+rename to tests/date.test.ts
+@@
+-import { isOverdue } from "../src/lib/datetime";
++import { isOverdue } from "../src/lib/date";
+@@
+-test("期限の翌日は期限切れ", () => assert.equal(isOverdue("2026-11-10", "2026-11-11"), true));
+-test("期限の当日は期限切れではない", () => assert.equal(isOverdue("2026-11-11", "2026-11-11"), false));
++test("期限の翌日は期限切れ", () => assert.equal(isOverdue("2026-11-10", "2026-11-11"), true));
+
+（参考: isOverdue は既存の関数で、通知のバッチ src/jobs/notify-overdue.ts からも呼ばれている。API の応答のフィールド名 dueDate は、スマートフォンのアプリも読んでいる）

@@ -1,0 +1,52 @@
+name: 技術的負債・リファクタリング / Tech debt
+description: 振る舞いを変えずにコードや基盤を改善する
+title: "[Tech debt]: "
+labels: ["tech-debt"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        技術そのものが目的の Issue なので、ファイル名・モジュール名などの技術的な記述をしてかまいません。
+        ただし「なぜ今やる価値があるか」は、技術に詳しくない人にも伝わるように書いてください。
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: 現状の問題
+      description: どこが、どう問題か。
+    validations:
+      required: true
+
+  - type: textarea
+    id: reason
+    attributes:
+      label: 改善する理由
+      description: 放置した場合の影響（障害リスク、開発速度、コスト、セキュリティなど）。
+    validations:
+      required: true
+
+  - type: textarea
+    id: improvement
+    attributes:
+      label: 期待する改善
+      description: 改善後の状態。方針の候補があれば書いてください。
+    validations:
+      required: true
+
+  - type: textarea
+    id: impact
+    attributes:
+      label: 既存動作への影響
+      description: 利用者から見た振る舞いが変わるか。変わらないことをどう確認するか。
+      placeholder: 利用者から見た振る舞いは変わらない。既存の E2E テストがすべて通ることで確認する。
+    validations:
+      required: true
+
+  - type: textarea
+    id: done
+    attributes:
+      label: 完了条件
+      value: |
+        - [ ]
+    validations:
+      required: true

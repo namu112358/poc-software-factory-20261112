@@ -1,0 +1,43 @@
+PR: タスクのタイトルの前後の空白を除いて保存する（Issue: 新規作成・編集で、タイトルの前後の空白を除いてから保存する）
+
+PR の本文より: 「SOLID の原則（単一責任・開放閉鎖・依存性逆転）に沿って、正規化の処理を差し替えられる形にしました」
+
+diff --git a/src/lib/title/TitleNormalizer.ts b/src/lib/title/TitleNormalizer.ts
+new file mode 100644
++export interface TitleNormalizer {
++  normalize(title: string): string;
++}
+diff --git a/src/lib/title/TrimTitleNormalizer.ts b/src/lib/title/TrimTitleNormalizer.ts
+new file mode 100644
++import type { TitleNormalizer } from "./TitleNormalizer";
++export class TrimTitleNormalizer implements TitleNormalizer {
++  normalize(title: string): string {
++    return title.trim();
++  }
++}
+diff --git a/src/lib/title/TitleNormalizerFactory.ts b/src/lib/title/TitleNormalizerFactory.ts
+new file mode 100644
++import type { TitleNormalizer } from "./TitleNormalizer";
++import { TrimTitleNormalizer } from "./TrimTitleNormalizer";
++export class TitleNormalizerFactory {
++  static create(kind: "trim" = "trim"): TitleNormalizer {
++    switch (kind) {
++      case "trim":
++        return new TrimTitleNormalizer();
++    }
++  }
++}
+diff --git a/src/lib/validation.ts b/src/lib/validation.ts
+@@
++import { TitleNormalizerFactory } from "./title/TitleNormalizerFactory";
+@@ export function validateTaskInput(input: unknown, today: string): ValidationResult {
+-  const title = data.title;
++  const title = TitleNormalizerFactory.create().normalize(data.title);
+diff --git a/tests/title.test.ts b/tests/title.test.ts
+new file mode 100644
++test("工場は trim の正規化を返す", () => {
++  assert.ok(TitleNormalizerFactory.create("trim") instanceof TrimTitleNormalizer);
++});
++test("TrimTitleNormalizer は前後の空白を除く", () => {
++  assert.equal(new TrimTitleNormalizer().normalize("  a  "), "a");
++});

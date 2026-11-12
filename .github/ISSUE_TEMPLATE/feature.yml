@@ -1,0 +1,58 @@
+name: 機能要望 / Feature request
+description: 新しい機能や、既存機能の振る舞いの変更を提案する
+title: "[Feature]: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **何を実現したいか**を、利用者・業務の視点で書いてください。実装方法（ファイル名・関数名）は最後の任意欄にまとめます。
+        簡単な要望なら各欄 1〜2 行で十分です。
+
+  - type: textarea
+    id: summary
+    attributes:
+      label: 概要
+      description: この要望を 1〜2 文で。「誰が」「何をできるようになるか」を主語にしてください。
+      placeholder: 申請が差し戻されたとき、申請者が内容を修正して再提出できるようにする。
+    validations:
+      required: true
+
+  - type: textarea
+    id: background
+    attributes:
+      label: 背景・課題
+      description: 今なにが困っているか。どんな場面で、誰に、どの程度の影響があるか。
+      placeholder: 現状は差し戻された申請を編集できず、申請者は新規に作り直している。月 30 件ほど発生し、承認履歴も分断される。
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: 期待する動作
+      description: 実現後、利用者から見てどう振る舞うか。画面や操作の流れで書くと伝わりやすいです。
+    validations:
+      required: true
+
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: 受入条件
+      description: |
+        完了と判断できる条件をチェックリストで。テストや動作確認で検証できる書き方にしてください（テスト観点を兼ねます）。
+        （この欄が受入条件の正本です。実装計画などに複製しないでください）
+      value: |
+        - [ ]
+    validations:
+      required: true
+
+  - type: textarea
+    id: notes
+    attributes:
+      label: 補足・制約（任意）
+      description: |
+        対象外にすること、守るべき技術的・業務的な制約、関連 Issue / 設計資料、参考になる既存コードなど。
+        実装上のヒント（関連ファイル・技術的制約・実装計画へのリンク）はここに書きます。
+    validations:
+      required: false

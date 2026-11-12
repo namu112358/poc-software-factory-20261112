@@ -1,0 +1,58 @@
+PR: タスク一覧を CSV で書き出せるようにする（Issue: 一覧画面に「CSV で書き出す」ボタンを付ける。対象は今の絞り込み結果）
+
+diff --git a/src/lib/export/exporter.ts b/src/lib/export/exporter.ts
+new file mode 100644
++// 将来、Excel や PDF にも対応できるように汎用の仕組みにしておく
++export interface Exporter<T> {
++  readonly format: string;
++  export(rows: T[], options?: ExportOptions): string;
++}
++
++export interface ExportOptions {
++  delimiter?: string;      // 将来のため
++  encoding?: "utf-8" | "shift_jis"; // 将来のため
++  includeHeader?: boolean;
++  dateFormat?: string;     // 将来のため
++}
++
++const registry = new Map<string, Exporter<unknown>>();
++
++export function registerExporter(e: Exporter<unknown>): void {
++  registry.set(e.format, e);
++}
++
++export function getExporter<T>(format: string): Exporter<T> {
++  const e = registry.get(format);
++  if (!e) throw new Error(`unknown format: ${format}`);
++  return e as Exporter<T>;
++}
+diff --git a/src/lib/export/csv.ts b/src/lib/export/csv.ts
+new file mode 100644
++import { Exporter, ExportOptions, registerExporter } from "./exporter";
++import type { Task } from "../tasks";
++
++const STATUS_LABELS: Record<string, string> = {
++  todo: "未着手",
++  doing: "進行中",
++  done: "完了",
++};
++
++class CsvTaskExporter implements Exporter<Task> {
++  readonly format = "csv";
++  export(rows: Task[], options: ExportOptions = {}): string {
++    const header = options.includeHeader === false ? [] : ["タイトル,状態,期限"];
++    const body = rows.map((t) => [t.title, STATUS_LABELS[t.status], t.dueDate ?? ""].join(","));
++    return [...header, ...body].join("\n");
++  }
++}
++
++registerExporter(new CsvTaskExporter());
+diff --git a/src/app/tasks/page.tsx b/src/app/tasks/page.tsx
+@@
++import "../../lib/export/csv";
++import { getExporter } from "../../lib/export/exporter";
+@@
++  const csv = getExporter<Task>("csv").export(tasks);
+
+（参考: 既存の src/lib/tasks.ts には次の定義がすでにある）
+export const TASK_STATUS_LABEL = { todo: "未着手", doing: "進行中", done: "完了" } as const;
