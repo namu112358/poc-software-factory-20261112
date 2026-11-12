@@ -249,4 +249,28 @@ export const MIGRATIONS: readonly Migration[] = [
       ALTER TABLE sessions ADD COLUMN last_used_at TEXT;
     `,
   },
+  {
+    version: 22,
+    name: "bulk_update_undo",
+    sql: `
+      -- タスクの担当者・ステータスをまとめて変えた 1 回分。変えてから一定の時間のうちは、変えた本人が元に戻せる。
+      -- changed_at・undone_at は ISO 8601（UTC）。元に戻していなければ undone_at は NULL。
+      CREATE TABLE bulk_updates (
+        id         INTEGER PRIMARY KEY AUTOINCREMENT,
+        changed_by TEXT REFERENCES users(id),
+        changed_at TEXT NOT NULL,
+        undone_at  TEXT
+      );
+      -- その回に値が変わったタスクごとの、変える前の値と、変えた直後の更新日時（後からほかの変更があったかを見分ける）。
+      CREATE TABLE bulk_update_items (
+        bulk_update_id    INTEGER NOT NULL REFERENCES bulk_updates(id) ON DELETE CASCADE,
+        task_id           INTEGER NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+        from_status       TEXT NOT NULL,
+        from_assignee     TEXT NOT NULL,
+        from_completed_at TEXT,
+        updated_at        TEXT NOT NULL,
+        PRIMARY KEY (bulk_update_id, task_id)
+      );
+    `,
+  },
 ];

@@ -2,8 +2,17 @@
 // タスク一覧で複数のタスクを選び、担当者・ステータスをまとめて変える部品。
 // 選択の状態は BulkSelection が持つ。絞り込みが変わったら、一覧の画面が key を変えて作り直す（選択が外れる）。
 import { useRouter } from "next/navigation";
-import { createContext, useContext, useState, type ReactNode } from "react";
-import { canSelectMore, canSubmitBulk, confirmAndBulkUpdate, keepVisible, toggleSelection, type BulkChoice } from "@/lib/bulk-select";
+import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
+import {
+  BULK_UNDO_MINUTES,
+  canSelectMore,
+  canSubmitBulk,
+  confirmAndBulkUpdate,
+  keepVisible,
+  requestBulkUndo,
+  toggleSelection,
+  type BulkChoice,
+} from "@/lib/bulk-select";
 import { STATUS_LABELS, TASK_STATUSES } from "@/lib/task-types";
 
 type User = { id: string; name: string; label?: string };
@@ -50,16 +59,37 @@ export function BulkCheckbox({ id, title }: { id: number; title: string }) {
   );
 }
 
-/** 1 件以上選んだときに一覧の上に出る、まとめて変える操作。結果の文言は選択が外れても残す。 */
+/**
+ * 1 件以上選んだときに一覧の上に出る、まとめて変える操作。結果の文言は選択が外れても残す。
+ * 変えた直後は「元に戻す」ボタンを出す（変えてから BULK_UNDO_MINUTES 分で消す。期間と本人かどうかは API が判定する）。
+ */
 export function BulkBar({ users }: { users: User[] }) {
   const router = useRouter();
   const { selected, clear } = useSelection();
   const [choice, setChoice] = useState<BulkChoice>({ assignee: "", status: "" });
   const [pending, setPending] = useState(false);
   const [result, setResult] = useState<{ kind: "done" | "error"; message: string }>();
+  const [undoId, setUndoId] = useState<number>();
+
+  useEffect(() => {
+    if (undoId === undefined) return;
+    const timer = setTimeout(() => setUndoId(undefined), BULK_UNDO_MINUTES * 60 * 1000);
+    return () => clearTimeout(timer);
+  }, [undoId]);
+
+  async function onUndo() {
+    if (undoId === undefined) return;
+    setPending(true);
+    const r = await requestBulkUndo(undoId, { fetch: (url, init) => fetch(url, init) });
+    setPending(false);
+    setUndoId(undefined);
+    setResult({ kind: r.status === "undone" ? "done" : "error", message: r.message });
+    router.refresh();
+  }
 
   async function onSubmit() {
     setResult(undefined);
+    setUndoId(undefined);
     setPending(true);
     const r = await confirmAndBulkUpdate(selected, choice, users, {
       confirm: (message) => window.confirm(message),
@@ -71,6 +101,7 @@ export function BulkBar({ users }: { users: User[] }) {
       clear();
       setChoice({ assignee: "", status: "" });
       setResult({ kind: "done", message: r.message });
+      setUndoId(r.undo?.id);
     } else {
       setResult({ kind: "error", message: r.message });
     }
@@ -114,6 +145,14 @@ export function BulkBar({ users }: { users: User[] }) {
       {result && (
         <p role={result.kind === "error" ? "alert" : "status"} data-testid="bulk-result">
           {result.message}
+          {undoId !== undefined && (
+            <>
+              {" "}
+              <button type="button" onClick={onUndo} disabled={pending} data-testid="bulk-undo">
+                元に戻す
+              </button>
+            </>
+          )}
         </p>
       )}
     </>

@@ -62,7 +62,13 @@ export function validateBulkUpdateInput(body: unknown, db: Db = getDb()): Valida
   return errors.length > 0 ? { ok: false, errors } : { ok: true, value: { ids: ids as number[], changes: value } };
 }
 
-export type BulkUpdateResult = { ok: true; tasks: Task[] } | { ok: false; missingIds: number[] };
+/**
+ * 元に戻すための記録。`id` はまとめての変更 1 回分の ID、`count` は値が実際に変わったタスクの数。
+ * 1 件も変わらなかったときは記録を作らず null にする（元に戻すものが無い）。
+ */
+export type BulkUndoTicket = { id: number; count: number } | null;
+
+export type BulkUpdateResult = { ok: true; tasks: Task[]; undo: BulkUndoTicket } | { ok: false; missingIds: number[] };
 
 /**
  * 指定したタスクに同じ変更をまとめて入れる。全部か無しか: 存在しない ID が 1 つでもあれば何も変えず、
@@ -71,6 +77,7 @@ export type BulkUpdateResult = { ok: true; tasks: Task[] } | { ok: false; missin
  * 担当者が変わったタスクには、担当者の変更の履歴を同じトランザクションの中で 1 件ずつ足す（`changedBy` は変更した利用者の ID）。
  * 変えたタスクの更新日時は、1 件ずつの更新と同じく、そのタスクの前回の更新日時より必ず後にする（`nextUpdatedAt`。`now` は今の時刻）。
  * 履歴の日時・完了日時も同じ値にする。同じミリ秒に続けて更新しても、履歴が替えた順に並び、確認つきの更新が衝突になる。
+ * 値が変わったタスクの変える前の値と、変えた直後の更新日時を、同じトランザクションの中で記録する（元に戻すため。`bulk-undo.ts`）。
  */
 export function updateTasks(
   ids: readonly number[],
@@ -87,6 +94,7 @@ export function updateTasks(
     const recordAssigneeChange = db.prepare(
       "INSERT INTO task_assignee_changes (task_id, from_assignee, to_assignee, changed_by, changed_at) VALUES (?, ?, ?, ?, ?)",
     );
+    const changed: { task: Task; updatedAt: string }[] = [];
     for (const task of found as Task[]) {
       const status = changes.status ?? task.status;
       const assignee = changes.assignee ?? task.assignee;
@@ -94,7 +102,22 @@ export function updateTasks(
       const updatedAt = nextUpdatedAt(task.updatedAt, now);
       update.run({ status, assignee, now: updatedAt, id: task.id });
       if (assignee !== task.assignee) recordAssigneeChange.run(task.id, task.assignee, assignee, changedBy, updatedAt);
+      changed.push({ task, updatedAt });
     }
-    return { ok: true, tasks: ids.map((id) => getTask(id, db)!) };
+    let undo: BulkUndoTicket = null;
+    if (changed.length > 0) {
+      const { lastInsertRowid } = db
+        .prepare("INSERT INTO bulk_updates (changed_by, changed_at) VALUES (?, ?)")
+        .run(changedBy, now.toISOString());
+      const id = Number(lastInsertRowid);
+      const recordItem = db.prepare(
+        "INSERT INTO bulk_update_items (bulk_update_id, task_id, from_status, from_assignee, from_completed_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
+      );
+      for (const { task, updatedAt } of changed) {
+        recordItem.run(id, task.id, task.status, task.assignee, task.completedAt, updatedAt);
+      }
+      undo = { id, count: changed.length };
+    }
+    return { ok: true, tasks: ids.map((id) => getTask(id, db)!), undo };
   });
 }
