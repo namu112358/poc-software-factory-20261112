@@ -11,6 +11,7 @@ export type Task = {
   assignee: string;
   dueDate: string; // YYYY-MM-DD
   priority: TaskPriority;
+  estimateMinutes: number | null; // 見積もり時間（分）。未設定は null
 };
 
 export const TASK_STATUSES: readonly TaskStatus[] = ["todo", "in_progress", "done"];
@@ -75,10 +76,26 @@ export function parseAssignee(value: unknown, db: Db = getDb()): string | undefi
   return listAssignees(db).some((a) => a.id === value) ? value : undefined;
 }
 
-type TaskRow = { id: number; title: string; status: TaskStatus; assignee: string; due_date: string; priority: TaskPriority };
+type TaskRow = {
+  id: number;
+  title: string;
+  status: TaskStatus;
+  assignee: string;
+  due_date: string;
+  priority: TaskPriority;
+  estimate_minutes: number | null;
+};
 
 function toTask(row: TaskRow): Task {
-  return { id: row.id, title: row.title, status: row.status, assignee: row.assignee, dueDate: row.due_date, priority: row.priority };
+  return {
+    id: row.id,
+    title: row.title,
+    status: row.status,
+    assignee: row.assignee,
+    dueDate: row.due_date,
+    priority: row.priority,
+    estimateMinutes: row.estimate_minutes,
+  };
 }
 
 export function listTasks(filter: TaskFilter = {}, db: Db = getDb()): Task[] {
@@ -88,7 +105,7 @@ export function listTasks(filter: TaskFilter = {}, db: Db = getDb()): Task[] {
       : "ORDER BY id";
   const rows = db
     .prepare(
-      "SELECT id, title, status, assignee, due_date, priority FROM tasks WHERE (:status IS NULL OR status = :status) AND (:assignee IS NULL OR assignee = :assignee) AND (:tag IS NULL OR EXISTS (SELECT 1 FROM task_tags g WHERE g.task_id = tasks.id AND g.name = :tag)) " + orderBy,
+      "SELECT id, title, status, assignee, due_date, priority, estimate_minutes FROM tasks WHERE (:status IS NULL OR status = :status) AND (:assignee IS NULL OR assignee = :assignee) AND (:tag IS NULL OR EXISTS (SELECT 1 FROM task_tags g WHERE g.task_id = tasks.id AND g.name = :tag)) " + orderBy,
     )
     .all({ status: filter.status ?? null, assignee: filter.assignee ?? null, tag: filter.tag ?? null }) as TaskRow[];
   return rows.map(toTask);
@@ -106,7 +123,7 @@ export function formatTaskCount(count: number): string {
 }
 
 export function getTask(id: number, db: Db = getDb()): Task | undefined {
-  const row = db.prepare("SELECT id, title, status, assignee, due_date, priority FROM tasks WHERE id = ?").get(id) as
+  const row = db.prepare("SELECT id, title, status, assignee, due_date, priority, estimate_minutes FROM tasks WHERE id = ?").get(id) as
     | TaskRow
     | undefined;
   return row && toTask(row);
@@ -118,7 +135,10 @@ export function parseTaskId(value: unknown): number | undefined {
   return Number(value);
 }
 
-export type TaskInput = Omit<Task, "id" | "priority"> & { priority?: TaskPriority };
+export type TaskInput = Omit<Task, "id" | "priority" | "estimateMinutes"> & {
+  priority?: TaskPriority;
+  estimateMinutes?: number | null;
+};
 
 export type ValidationResult<T> = { ok: true; value: T } | { ok: false; errors: string[] };
 
@@ -165,13 +185,20 @@ export function validateTaskInput(
     if (!isTaskPriority(b.priority)) errors.push("優先度は high・medium・low のいずれかにしてください");
     else value.priority = b.priority;
   }
+  if ("estimateMinutes" in b) {
+    const m = b.estimateMinutes;
+    if (m === null) value.estimateMinutes = null;
+    else if (typeof m !== "number" || !Number.isInteger(m) || m < 1 || m > 10000) {
+      errors.push("見積もり時間は 1〜10000 の整数（分）で入力してください");
+    } else value.estimateMinutes = m;
+  }
   return errors.length > 0 ? { ok: false, errors } : { ok: true, value };
 }
 
 export function createTask(input: TaskInput, db: Db = getDb()): Task {
   const { lastInsertRowid } = db
-    .prepare("INSERT INTO tasks (title, status, assignee, due_date, priority) VALUES (?, ?, ?, ?, ?)")
-    .run(input.title, input.status, input.assignee, input.dueDate, input.priority ?? "medium");
+    .prepare("INSERT INTO tasks (title, status, assignee, due_date, priority, estimate_minutes) VALUES (?, ?, ?, ?, ?, ?)")
+    .run(input.title, input.status, input.assignee, input.dueDate, input.priority ?? "medium", input.estimateMinutes ?? null);
   return getTask(Number(lastInsertRowid), db)!;
 }
 
@@ -180,13 +207,19 @@ export function updateTask(id: number, changes: Partial<TaskInput>, db: Db = get
   const current = getTask(id, db);
   if (!current) return undefined;
   const next = { ...current, ...changes };
-  db.prepare("UPDATE tasks SET title = ?, status = ?, assignee = ?, due_date = ?, priority = ? WHERE id = ?").run(
+  db.prepare("UPDATE tasks SET title = ?, status = ?, assignee = ?, due_date = ?, priority = ?, estimate_minutes = ? WHERE id = ?").run(
     next.title,
     next.status,
     next.assignee,
     next.dueDate,
     next.priority,
+    next.estimateMinutes,
     id,
   );
   return getTask(id, db);
+}
+
+/** 見積もり時間の表示用の文字列。未設定は「—」。 */
+export function formatEstimate(minutes: number | null): string {
+  return minutes === null ? "—" : `${minutes} 分`;
 }
