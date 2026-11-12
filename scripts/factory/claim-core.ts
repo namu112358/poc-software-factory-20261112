@@ -159,13 +159,74 @@ export function makeIsStalled(labels: Map<number, string[]>, prIssue: Map<number
  * factory:queued の wait=#N（同じファイルを変える作業を待つもの）は、開いていても、
  * 待ち先が needs-human・blocked:question で人を待っているなら待たない（無期限に止まらないため。#255）。
  */
-export function blockingDeps(issue: IssueInfo, isOpen: (n: number) => boolean, isStalled: (n: number) => boolean = () => false): number[] {
+export function blockingDeps(
+  issue: IssueInfo,
+  isOpen: (n: number) => boolean,
+  isStalled: (n: number) => boolean = () => false,
+  currentFilesOf: (n: number) => string[] | null = () => null,
+  files: string[] = plannedFiles(issue),
+  isActive: (n: number) => boolean = () => true,
+): number[] {
   const hard = new Set<number>([...(issue.blockedBy ?? []), ...bodyDeps(issue.body)]);
   const out = new Set<number>([...hard].filter((n) => isOpen(n)));
   const q = latestQueued(issue);
-  if (q && typeof q.value.wait === "number" && !hard.has(q.value.wait) && isOpen(q.value.wait) && !isStalled(q.value.wait)) out.add(q.value.wait);
+  // 待ち先がキューにいるだけ（動いていない）なら、依存にはしない。キューの中の順番は予約で決める（数珠つなぎにしないため。#275）
+  if (q && typeof q.value.wait === "number" && !hard.has(q.value.wait) && isOpen(q.value.wait) && !isStalled(q.value.wait) && isActive(q.value.wait)) {
+    // 待ち先の今のファイルが分かり、自分の変えるファイルと重ならなければ、待つ理由が無くなったので待たない（#262）
+    const now = currentFilesOf(q.value.wait);
+    if (now === null || files.length === 0 || overlap(files, now).length > 0) out.add(q.value.wait);
+  }
   out.delete(issue.number);
   return [...out].sort((a, b) => a - b);
+}
+
+/**
+ * 待ち先（Issue か PR）の今の変えるファイル。分からなければ null（そのときは待ち続ける）。
+ * PR は変更ファイル。Issue は、PR があればその変更ファイル、無ければ作業中なら最新の factory:touch、queued なら記録の files=。
+ */
+export function makeCurrentFilesOf(ctx: { openPrs: PrInfo[]; inProgress: IssueInfo[]; queued: IssueInfo[] }): (n: number) => string[] | null {
+  return (n: number) => {
+    const pr = ctx.openPrs.find((p) => p.number === n);
+    if (pr) return pr.files;
+    const working = ctx.inProgress.find((i) => i.number === n);
+    const waiting = ctx.queued.find((i) => i.number === n);
+    const ownPr = ctx.openPrs.find((p) => p.headRef === `claude/issue-${n}`);
+    if (!working && !waiting && !ownPr) return null;
+    // PR があれば、実際の変更ファイルを使う（factory:touch・files= は着手の前の見積もりで、分けたファイルの古い名前が残ることがある）
+    if (ownPr) return ownPr.files;
+    // 記録が無い・空なら、重ならないのではなく「分からない」として待ち続ける（着手してから記録するまでの数秒など）
+    const recorded = working ? (latestTouch(working)?.value ?? []) : waiting ? plannedFiles(waiting) : [];
+    return recorded.length > 0 ? recorded : null;
+  };
+}
+
+/**
+ * 番号（Issue か PR）が動いている作業か: 開いている PR、作業中の Issue、PR を持つ Issue。
+ * キューにいるだけの Issue は動いていない。どちらとも分からない番号は、動いているとみなす（待つほうに倒す）。
+ */
+export function makeIsActive(ctx: { openPrs: PrInfo[]; inProgress: IssueInfo[]; queued: IssueInfo[] }): (n: number) => boolean {
+  return (n: number) => {
+    if (ctx.openPrs.some((p) => p.number === n || p.headRef === `claude/issue-${n}`)) return true;
+    if (ctx.inProgress.some((i) => i.number === n)) return true;
+    return !ctx.queued.some((i) => i.number === n);
+  };
+}
+
+/**
+ * キューの先頭（予約を持つ Issue）: 待ち始めの早い順に見て、それより前の先頭と変えるファイルが重ならないもの。
+ * 先頭に重なって並んでいる Issue は、ほかの Issue を並ばせない（予約の数珠つなぎを 1 段にする。#275）。
+ * 自分を待っている Issue（waitsOn）は、自分にとっての先頭にしない。
+ */
+export function queueHeads(queued: IssueInfo[], self?: number): IssueInfo[] {
+  const heads: IssueInfo[] = [];
+  for (const i of [...queued].sort(waitOrder)) {
+    if (i.number === self) continue;
+    if (self !== undefined && waitsOn(i, self, queued)) continue;
+    const files = plannedFiles(i);
+    if (heads.some((h) => overlap(files, plannedFiles(h)).length > 0)) continue;
+    heads.push(i);
+  }
+  return heads;
 }
 
 /** 変えるファイル: 最新の factory:queued の files=、無ければ最新の factory:touch の files= */
@@ -209,7 +270,7 @@ export function precheck(args: {
 }): Decision {
   const { self, files } = args;
   if (args.ownPr) return ownPrGo(args.ownPr);
-  const openDeps = blockingDeps(self, args.isOpen, args.isStalled);
+  const openDeps = blockingDeps(self, args.isOpen, args.isStalled, makeCurrentFilesOf(args), files, makeIsActive(args));
   if (openDeps.length > 0) {
     return queue("queue", openDeps[0], files, `依存先 #${openDeps.join("・#")} がまだ開いているので待つ。`);
   }
@@ -234,9 +295,8 @@ export function precheck(args: {
   }
   // 自分より先に待ち始めた queued の Issue（自分がキューに載ったことが無ければ、queued のすべて）を追い越さない（#183）
   // ただし、待ち先をたどると自分に着く Issue（自分を待っている Issue）は除く（お互いを待って止まらないため）
-  const olderQueued = args.queued
-    .filter((i) => i.number !== self.number && waitOrder(i, self) < 0 && !waitsOn(i, self.number, args.queued))
-    .sort(waitOrder);
+  // 比べるのはキューの先頭（予約を持つ Issue）だけ（#275）
+  const olderQueued = queueHeads(args.queued, self.number).filter((i) => waitOrder(i, self) < 0);
   for (const i of olderQueued) {
     const o = overlap(files, plannedFiles(i));
     if (o.length > 0) return queue("queue", i.number, files, `先に待っている #${i.number} が同じファイル（${o.join("、")}）を変える予定なので、追い越さずに待つ。`);
@@ -301,14 +361,16 @@ function blocker(self: IssueInfo, files: string[], openPrs: PrInfo[], inProgress
   }
   for (const i of inProgress) {
     if (i.number === self.number) continue;
-    if (overlap(files, latestTouch(i)?.value ?? []).length > 0) return i.number;
+    // 作業中の Issue に PR があれば、着手の記録（見積もり）ではなく PR の実際の変更ファイルで見る（#262）
+    const pr = openPrs.find((p) => p.headRef === `claude/issue-${i.number}`);
+    if (overlap(files, pr ? pr.files : (latestTouch(i)?.value ?? [])).length > 0) return i.number;
   }
   return null;
 }
 
 /**
  * キューから取り出す（README の「キュー」）。ラベルは変えず、取り出してよい Issue と、待ち先を付け替える Issue を返す。
- * 待ち始めが早い順に見る。先に待っている（依存先が開いていて飛ばした）Issue・開いている PR・作業中の Issue・同じ回に取り出した Issue と同じファイルを変えるものは、
+ * 待ち始めが早い順に見る。キューの先頭（先に待っていて、それより前の先頭と重ならない Issue。取り出したものを含む）・開いている PR・作業中の Issue と同じファイルを変えるものは、
  * 取り出さずに待ち先を付け替える（取り出しても着手の前の確かめで戻るだけなので。#183）。待ち先が今と同じなら何もしない。
  */
 export function pick(args: {
@@ -331,19 +393,21 @@ export function pick(args: {
     if (latestQueued(i)?.value.wait === wait) return; // すでに同じ待ち先なら、コメントをくり返さない
     rewait.push({ issue: i.number, wait, files, comment: queuedComment(wait, files, reason) });
   };
-  const skipped: IssueInfo[] = []; // 依存先が開いているので飛ばした、先に待っている Issue（予約として扱う）
+  const ctx = { openPrs: args.openPrs ?? [], inProgress: args.inProgress ?? [], queued: args.queued };
+  const currentFilesOf = makeCurrentFilesOf(ctx);
+  const isActive = makeIsActive(ctx);
+  const heads: IssueInfo[] = []; // キューの先頭（予約を持つ）。取り出したものも先頭に入る
   for (const i of [...args.queued].sort(waitOrder)) {
     if (picked.length >= slots) break;
-    if (blockingDeps(i, args.isOpen, args.isStalled).length > 0) {
-      skipped.push(i);
-      continue;
-    }
     const files = plannedFiles(i);
-    const ahead = skipped.find((s) => overlap(files, plannedFiles(s)).length > 0 && !waitsOn(s, i.number, args.queued));
+    // 先に待っている先頭と同じファイルを変えるなら、その先頭の後ろに並ぶ（自分を待っている先頭は除く）
+    const ahead = heads.find((h) => overlap(files, plannedFiles(h)).length > 0 && !waitsOn(h, i.number, args.queued));
     if (ahead) {
       addRewait(i, ahead.number, files, `先に待っている #${ahead.number} が同じファイルを変える予定なので、取り出さずに #${ahead.number} を待つ。`);
       continue;
     }
+    heads.push(i);
+    if (blockingDeps(i, args.isOpen, args.isStalled, currentFilesOf, files, isActive).length > 0) continue;
     const busy = blocker(i, files, args.openPrs ?? [], args.inProgress ?? []);
     if (busy !== null) {
       addRewait(i, busy, files, `#${busy} が同じファイルを変えているので、取り出さずに #${busy} を待つ。`);
