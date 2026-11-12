@@ -4,6 +4,7 @@ import { DatabaseSync } from "node:sqlite";
 import { migrate, openDb } from "../src/lib/db/index.ts";
 import { MIGRATIONS } from "../src/lib/db/migrations.ts";
 import {
+  assigneeName,
   createTask,
   isOverdue,
   taskRowDoneAttr,
@@ -69,6 +70,28 @@ describe("listAssignees", () => {
     const db = openDb();
     db.prepare("INSERT INTO users (id, name, password_hash) VALUES ('new', '新人', 'x')").run();
     assert.ok(!listAssignees(db).some((a) => a.id === "new"));
+  });
+});
+
+describe("assigneeName", () => {
+  it("ログイン ID ではなく、担当者の名前を返す", () => {
+    const db = openDb();
+    const assignees = listAssignees(db);
+    const task = listTasks({}, db)[0];
+    const name = assigneeName(task.assignee, assignees);
+    assert.notEqual(name, task.assignee);
+    assert.equal(name, assignees.find((a) => a.id === task.assignee)?.name);
+  });
+
+  it("担当者の絞り込みの値はログイン ID のまま", () => {
+    assert.deepEqual(
+      listAssignees(openDb()).map((a) => a.id),
+      ["sato", "suzuki", "tanaka"],
+    );
+  });
+
+  it("担当者なしは空文字を返す", () => {
+    assert.equal(assigneeName(null, listAssignees(openDb())), "");
   });
 });
 
