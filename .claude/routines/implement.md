@@ -22,7 +22,7 @@ Issue に `ready` か `ready:hard` が付いたときに起動します。1 回�
 
 - Issue の依存先（`README.md` の「キュー」の定義。blocked by と、本文の「#N の後」）に、まだ開いているものがある。
 - `in-progress` の付いた開いている Issue が、すでに 4 件ある。
-- 開いている `claude/` の PR のどれかが、この Issue で変えそうなファイルを、すでに変えている（衝突の予防）。調べ方: Issue の受入条件から、変える画面・API・表を挙げ、リポジトリを検索して変えそうなファイル（テストを除く）を決める。開いている `claude/` の PR の変更ファイルの一覧（`pull_request_read` の `get_files`）と、`in-progress` の付いたほかの Issue の `<!-- factory:touch files=... -->` のコメントと突き合わせる。重なれば、その PR（PR がまだ無ければ、その Issue）を待つ。コメントの先頭に `<!-- factory:queued wait=#<PR の番号> -->` を付け、どのファイルが重なったかを書く。`src/lib/db/migrations.ts` も、重なりとして数える。
+- 開いている `claude/` の PR のどれかが、この Issue で変えそうなファイルを、すでに変えている（衝突の予防）。調べ方: Issue の受入条件から、変える画面・API・表を挙げ、リポジトリを検索して変えそうなファイル（テストを除く）を決める。開いている `claude/` の PR の変更ファイルの一覧（`pull_request_read` の `get_files`）と、`in-progress` の付いたほかの Issue の `<!-- factory:touch files=... -->` のコメントと、`queued` の付いた、この Issue より古い（番号が小さい）Issue の最新の `<!-- factory:queued ... files=... -->` のコメント（`files=` が無ければ、その Issue の最新の `factory:touch` の `files=`）と突き合わせる。重なれば、その PR（PR がまだ無ければ、その Issue）を待つ。`queued` の Issue と重なったときは、その Issue を待つ（先に待っていた Issue を、後から来た Issue が追い越さないため。#183）。コメントの先頭に `<!-- factory:queued wait=#<待つ PR か Issue の番号> files=<この Issue で変えそうなファイル。カンマ区切り> -->` を付け、どのファイルが重なったかを書く（`files=` は、後から来た Issue と取り出す役が、重なりを見るのに使う）。`src/lib/db/migrations.ts` も、重なりとして数える。
 
 ### 難易度を判定する（標準の役だけ）
 
