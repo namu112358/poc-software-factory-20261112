@@ -42,6 +42,16 @@ export function sumEstimateMinutes(tasks: { estimateMinutes: number | null }[]):
   return tasks.reduce((sum, t) => sum + (t.estimateMinutes ?? 0), 0);
 }
 
+/** 見積もりが未設定（null）のタスクの数。 */
+export function countUnestimated(tasks: { estimateMinutes: number | null }[]): number {
+  return tasks.filter((t) => t.estimateMinutes === null).length;
+}
+
+/** 見積もり未設定の件数の表示用の文字列（例: （見積もり未設定 3 件））。0 件は null（表示しない）。 */
+export function formatUnestimatedCount(count: number): string | null {
+  return count > 0 ? `（見積もり未設定 ${count} 件）` : null;
+}
+
 /** 合計の表示用の文字列。60 分未満は「M 分」、それ以上は「H 時間 M 分」（ちょうど何時間でも「H 時間 0 分」）。 */
 export function formatEstimateTotal(minutes: number): string {
   if (minutes < 60) return `${minutes} 分`;
