@@ -12,12 +12,16 @@
 | Issue に `in-progress` が付き、`claude/issue-<番号>` の PR が無いか draft のまま。最後の更新から 2 時間以上 | 実装が途中で止まった | `in-progress` を外し、経過をコメントして `needs-human` を付ける |
 | Ready の PR で、最新のコミットに対するレビュー（`commit=<最新のコミット>`）が無い | レビューが起動しなかった | PR を draft にしてから Ready に戻す（レビューがもう一度起動する。修正も起動するが、直すものが無いので何もせずに終える） |
 | draft の PR で、最新のレビューが `verdict=changes` かつ `commit=` が最新のコミットと同じ | 修正が起動しなかった | `needs-human` を付けて理由をコメントする |
-| Ready の PR が `main` と衝突している（`mergeable` が false） | 先にほかの PR がマージされた | 衝突していることをコメントし、PR を draft に戻す（修正が起動して `main` を取り込む） |
+| Ready の PR が `main` と衝突している（`mergeable` が false） | 割り当ての役が拾わなかった | 衝突していることをコメントし、PR を draft に戻す（修正が起動して `main` を取り込む） |
 | 閉じた Issue に `in-progress` が残っている | 片付け漏れ | `in-progress` を外す |
 
 同じものに同じことをするのは 1 回まで。2 回目は `needs-human` を付けて理由をコメントする。したことは、コメントの `<!-- factory:patrol action=<したこと> -->` で数える。
 
-## 2. 集計する
+## 2. キューから取り出す
+
+`README.md` の「キュー」のとおり、空きの数だけ `queued` の Issue を取り出す（割り当ての役が動かなかったときの備え）。
+
+## 3. 集計する
 
 `docs/` は変えない。結果は、Issue「Factory の運用の記録」（無ければ作る）に、次の形でコメントする。前回から変化が無ければコメントしない。
 

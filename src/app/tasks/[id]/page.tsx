@@ -2,7 +2,7 @@ import { notFound } from "next/navigation";
 import { listComments } from "@/lib/comments";
 import { requireUser } from "@/lib/session";
 import { listTags } from "@/lib/tags";
-import { STATUS_LABELS, getTask, parseTaskId } from "@/lib/tasks";
+import { PRIORITY_LABELS, STATUS_LABELS, getTask, parseTaskId } from "@/lib/tasks";
 import { getUser } from "@/lib/users";
 import { CommentForm, DeleteCommentButton } from "./comments";
 import { RemoveTagButton, TagForm } from "./tags";
@@ -31,6 +31,8 @@ export default async function TaskDetailPage({ params }: Props) {
         <dd data-testid="task-status">{STATUS_LABELS[task.status]}</dd>
         <dt>担当者</dt>
         <dd data-testid="task-assignee">{assignee?.name ?? task.assignee}</dd>
+        <dt>優先度</dt>
+        <dd data-testid="task-priority">{PRIORITY_LABELS[task.priority]}</dd>
         <dt>期限</dt>
         <dd data-testid="task-due-date">{task.dueDate}</dd>
       </dl>

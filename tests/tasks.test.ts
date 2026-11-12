@@ -78,6 +78,7 @@ describe("getTask", () => {
       status: "done",
       assignee: "sato",
       dueDate: "2026-11-02",
+      priority: "medium",
     });
     assert.equal(getTask(999, db), undefined);
   });
@@ -104,6 +105,24 @@ describe("validateTaskInput", () => {
     assert.equal(!r.ok && r.errors.length, 4);
   });
 
+  it("accepts high / medium / low priority and rejects other values", () => {
+    for (const priority of ["high", "medium", "low"]) {
+      assert.deepEqual(validateTaskInput({ ...valid, priority }, {}, openDb()), {
+        ok: true,
+        value: { ...valid, title: "新しいタスク", priority },
+      });
+    }
+    for (const priority of ["urgent", "", null, 1]) {
+      const r = validateTaskInput({ ...valid, priority }, {}, openDb());
+      assert.equal(r.ok, false, String(priority));
+    }
+    assert.equal(validateTaskInput({ priority: "x" }, { partial: true }, openDb()).ok, false);
+    assert.deepEqual(validateTaskInput({ priority: "low" }, { partial: true }, openDb()), {
+      ok: true,
+      value: { priority: "low" },
+    });
+  });
+
   it("rejects non-object bodies", () => {
     for (const body of [undefined, null, "x", []]) assert.equal(validateTaskInput(body, {}, openDb()).ok, false);
   });
@@ -126,6 +145,19 @@ describe("createTask / updateTask", () => {
     const updated = updateTask(created.id, { status: "done" }, db);
     assert.deepEqual(updated, { ...created, status: "done" });
     assert.equal(updateTask(999, { status: "done" }, db), undefined);
+  });
+});
+
+describe("priority", () => {
+  it("defaults to medium for existing and new tasks, and can be set and updated", () => {
+    const db = openDb();
+    assert.ok(listTasks({}, db).every((t) => t.priority === "medium"));
+    const defaulted = createTask({ title: "既定", status: "todo", assignee: "sato", dueDate: "2026-12-01" }, db);
+    assert.equal(defaulted.priority, "medium");
+    const high = createTask({ title: "高", status: "todo", assignee: "sato", dueDate: "2026-12-01", priority: "high" }, db);
+    assert.equal(getTask(high.id, db)!.priority, "high");
+    assert.equal(updateTask(high.id, { priority: "low" }, db)!.priority, "low");
+    assert.equal(updateTask(high.id, { status: "done" }, db)!.priority, "low");
   });
 });
 
