@@ -1,7 +1,14 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { openDb } from "../src/lib/db/index.ts";
-import { createExtension, decideExtension, getExtension, listExtensions, validateExtensionInput } from "../src/lib/extensions.ts";
+import {
+  createExtension,
+  decideExtension,
+  getExtension,
+  listExtensions,
+  validateExtensionInput,
+  withdrawExtension,
+} from "../src/lib/extensions.ts";
 import { getTask } from "../src/lib/tasks.ts";
 
 const input = { taskId: 3, requester: "sato", newDueDate: "2026-11-20", reason: "レビュー待ちのため" };
@@ -102,5 +109,79 @@ describe("decideExtension", () => {
     decideExtension(3, ext.id, "rejected", "sato", db);
     assert.deepEqual(decideExtension(3, ext.id, "approved", "sato", db), { result: "conflict" });
     assert.notEqual(getTask(3, db)!.dueDate, "2026-11-20");
+  });
+});
+
+describe("withdrawExtension", () => {
+  it("lets the requester withdraw a pending extension, which disappears from the list", () => {
+    const db = openDb();
+    const ext = createExtension(input, db) as { id: number };
+    const out = withdrawExtension(3, ext.id, "sato", db);
+    assert.equal(out.result, "withdrawn");
+    if (out.result !== "withdrawn") return;
+    assert.equal(out.extension.id, ext.id);
+    assert.equal(out.extension.status, "pending");
+    assert.equal(getExtension(ext.id, db), undefined);
+    assert.deepEqual(listExtensions(3, db), []);
+  });
+
+  it("forbids anyone but the requester, and keeps the extension", () => {
+    const db = openDb();
+    const ext = createExtension(input, db) as { id: number };
+    assert.deepEqual(withdrawExtension(3, ext.id, "suzuki", db), { result: "forbidden" });
+    assert.equal(getExtension(ext.id, db)!.status, "pending");
+  });
+
+  it("forbids others even when the extension is already decided", () => {
+    const db = openDb();
+    const ext = createExtension(input, db) as { id: number };
+    decideExtension(3, ext.id, "rejected", "suzuki", db);
+    assert.deepEqual(withdrawExtension(3, ext.id, "tanaka", db), { result: "forbidden" });
+    assert.equal(getExtension(ext.id, db)!.status, "rejected");
+  });
+
+  it("returns conflict for approved or rejected extensions, keeping them and the due date", () => {
+    const db = openDb();
+    const approved = createExtension(input, db) as { id: number };
+    decideExtension(3, approved.id, "approved", "suzuki", db);
+    assert.deepEqual(withdrawExtension(3, approved.id, "sato", db), { result: "conflict" });
+    assert.equal(getExtension(approved.id, db)!.status, "approved");
+    assert.equal(getTask(3, db)!.dueDate, "2026-11-20");
+
+    const rejected = createExtension({ ...input, newDueDate: "2026-11-30" }, db) as { id: number };
+    decideExtension(3, rejected.id, "rejected", "suzuki", db);
+    assert.deepEqual(withdrawExtension(3, rejected.id, "sato", db), { result: "conflict" });
+    assert.equal(getExtension(rejected.id, db)!.status, "rejected");
+    assert.equal(getTask(3, db)!.dueDate, "2026-11-20");
+  });
+
+  it("returns not_found for an unknown extension, one of another task, or one already withdrawn", () => {
+    const db = openDb();
+    const ext = createExtension(input, db) as { id: number };
+    assert.deepEqual(withdrawExtension(3, 999, "sato", db), { result: "not_found" });
+    assert.deepEqual(withdrawExtension(4, ext.id, "sato", db), { result: "not_found" });
+    assert.equal(getExtension(ext.id, db)!.status, "pending");
+    assert.equal(withdrawExtension(3, ext.id, "sato", db).result, "withdrawn");
+    assert.deepEqual(withdrawExtension(3, ext.id, "sato", db), { result: "not_found" });
+  });
+
+  it("removes only the specified extension", () => {
+    const db = openDb();
+    const decided = createExtension(input, db) as { id: number };
+    decideExtension(3, decided.id, "rejected", "suzuki", db);
+    const target = createExtension(input, db) as { id: number };
+    const other = createExtension({ ...input, taskId: 4 }, db) as { id: number };
+    assert.equal(withdrawExtension(3, target.id, "sato", db).result, "withdrawn");
+    assert.deepEqual(listExtensions(3, db).map((e) => e.id), [decided.id]);
+    assert.deepEqual(listExtensions(4, db).map((e) => e.id), [other.id]);
+  });
+
+  it("allows a new request on the same task after withdrawing", () => {
+    const db = openDb();
+    const ext = createExtension(input, db) as { id: number };
+    withdrawExtension(3, ext.id, "sato", db);
+    const again = createExtension({ ...input, newDueDate: "2026-11-25" }, db);
+    assert.notEqual(again, "conflict");
+    assert.deepEqual(listExtensions(3, db).map((e) => [e.newDueDate, e.status]), [["2026-11-25", "pending"]]);
   });
 });
