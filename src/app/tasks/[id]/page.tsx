@@ -4,6 +4,7 @@ import { requireUser } from "@/lib/session";
 import { listTags, listTagSuggestions } from "@/lib/tags";
 import { PRIORITY_LABELS, STATUS_LABELS, formatCompletedAt, formatEstimate, formatJstDateTime, formatTaskNumber, getTask, isDueSoon, isOverdue, parseTaskId, todayInJapan } from "@/lib/tasks";
 import { getUser } from "@/lib/users";
+import { DeleteTaskButton } from "./delete";
 import { DuplicateButton } from "./duplicate";
 import { CommentForm, DeleteCommentButton, EditCommentForm } from "./comments";
 import { RemoveTagButton, TagForm } from "./tags";
@@ -70,7 +71,7 @@ export default async function TaskDetailPage({ params }: Props) {
         <dd data-testid="completed-at">{formatCompletedAt(task)}</dd>
       </dl>
       <p>
-        <DuplicateButton taskId={task.id} />
+        <DuplicateButton taskId={task.id} /> <DeleteTaskButton taskId={task.id} title={task.title} />
       </p>
       <section>
         <h2>メモ</h2>
