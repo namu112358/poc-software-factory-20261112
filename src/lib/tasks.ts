@@ -260,6 +260,16 @@ export function formatEstimate(minutes: number | null): string {
   return minutes === null ? "—" : `${minutes} 分`;
 }
 
+const MEMO_PREVIEW_LENGTH = 30;
+
+/** 一覧に出すメモの冒頭。改行は空白 1 つにし、30 文字を超えたら「…」を付ける。空のメモは null。 */
+export function formatMemoPreview(memo: string): string | null {
+  if (memo === "") return null;
+  const chars = Array.from(memo.replace(/\r\n|\r|\n/g, " "));
+  if (chars.length <= MEMO_PREVIEW_LENGTH) return chars.join("");
+  return chars.slice(0, MEMO_PREVIEW_LENGTH).join("") + "…";
+}
+
 /** ISO 8601（UTC）の日時を、日本時間の「YYYY/MM/DD HH:mm」にする。解釈できなければ「—」。 */
 export function formatJstDateTime(iso: string): string {
   const t = Date.parse(iso);
