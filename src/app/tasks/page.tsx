@@ -1,6 +1,7 @@
 import { Fragment } from "react";
 import { bulkSelectionKey } from "@/lib/bulk-select";
 import { listCommentersByTask } from "@/lib/comments";
+import { NOTHING_TO_DO_TEXT, listExtensionsAwaitingMe, listMyDueTasks } from "@/lib/my-attention";
 import { listUserOptions } from "@/lib/users";
 import { BulkBar, BulkCheckbox, BulkSelection } from "./BulkActions";
 import { exportHref } from "@/lib/export";
@@ -32,6 +33,8 @@ export default async function TasksPage({ searchParams }: Props) {
   const tagsByTask = listTagsByTask(tasks.map((t) => t.id));
   const commentersByTask = listCommentersByTask(tasks.map((t) => t.id));
   const users = listUserOptions();
+  const myTasks = listMyDueTasks(user.id, undefined, today);
+  const myExtensions = listExtensionsAwaitingMe(user.id);
   const selectionKey = bulkSelectionKey({ status, assignee, tag, q, due, sort, includeArchived });
 
   return (
@@ -39,6 +42,34 @@ export default async function TasksPage({ searchParams }: Props) {
       <h1>タスク一覧</h1>
       <p data-testid="current-user">{formatCurrentUser(user.name)}</p>
       <p data-testid="list-help">{TASK_LIST_HELP}</p>
+      <section aria-labelledby="my-attention-heading" data-testid="my-attention">
+        <h2 id="my-attention-heading">あなたの対応が必要なもの</h2>
+        {myTasks.length === 0 && myExtensions.length === 0 && <p data-testid="my-attention-empty">{NOTHING_TO_DO_TEXT}</p>}
+        {myTasks.length > 0 && (
+          <>
+            <h3>担当のタスク（期限切れ・期限間近）</h3>
+            <ul>
+              {myTasks.map((t) => (
+                <li key={t.id} data-testid="my-task">
+                  <strong>{t.kind === "overdue" ? "期限切れ" : "期限間近"}</strong> <a href={`/tasks/${t.id}`}>{t.title}</a>（期限 {t.dueDate}）
+                </li>
+              ))}
+            </ul>
+          </>
+        )}
+        {myExtensions.length > 0 && (
+          <>
+            <h3>承認待ちの期限延長</h3>
+            <ul>
+              {myExtensions.map((e) => (
+                <li key={e.id} data-testid="my-extension">
+                  <a href="/extensions">{e.taskTitle}</a>（{e.requesterName}さんの申請: {e.currentDueDate} → {e.newDueDate}）
+                </li>
+              ))}
+            </ul>
+          </>
+        )}
+      </section>
       <p>
         <a href="/tasks/new" data-testid="new-task-link">
           新しいタスク
