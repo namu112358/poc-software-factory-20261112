@@ -1,0 +1,32 @@
+PR: 期限に過去の日付を入れられないようにする（Issue: 新規作成・編集で、期限に今日より前の日付を入れたら 400 で「期限には今日以降の日付を入れてください」を返す）
+
+diff --git a/src/lib/validation.ts b/src/lib/validation.ts
+@@ export function validateTaskInput(input: unknown, today: string): ValidationResult {
++  if (data.dueDate !== undefined && data.dueDate < today) {
++    errors.push({ field: "dueDate", message: "期限には今日以降の日付を入れてください" });
++  }
+diff --git a/src/app/api/tasks/route.ts b/src/app/api/tasks/route.ts
+@@
+-  const result = validateTaskInput(body);
++  const result = validateTaskInput(body, todayInTokyo());
+diff --git a/src/app/api/tasks/[id]/route.ts b/src/app/api/tasks/[id]/route.ts
+@@
+-  const result = validateTaskInput(body);
++  const result = validateTaskInput(body, todayInTokyo());
+diff --git a/tests/validation.test.ts b/tests/validation.test.ts
+@@
++describe("期限の検証", () => {
++  const today = "2026-11-11";
++  test("今日より前の期限は、期限の誤りとして返す", () => {
++    const r = validateTaskInput({ title: "a", dueDate: "2026-11-10" }, today);
++    assert.deepEqual(r.errors, [{ field: "dueDate", message: "期限には今日以降の日付を入れてください" }]);
++  });
++  test("今日の期限は受け付ける", () => {
++    assert.deepEqual(validateTaskInput({ title: "a", dueDate: "2026-11-11" }, today).errors, []);
++  });
++  test("期限なしは受け付ける", () => {
++    assert.deepEqual(validateTaskInput({ title: "a" }, today).errors, []);
++  });
++});
+
+（参考: todayInTokyo() は既存の src/lib/datetime.ts にあり、日本時間の今日を "YYYY-MM-DD" で返す）

@@ -1,0 +1,131 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "extraKnownMarketplaces": {
+    "claude-plugins-official": {
+      "source": {
+        "source": "github",
+        "repo": "anthropics/claude-plugins-official"
+      }
+    },
+    "impeccable": {
+      "source": {
+        "source": "github",
+        "repo": "pbakaus/impeccable"
+      }
+    }
+  },
+  "enabledPlugins": {
+    "security-guidance@claude-plugins-official": true,
+    "impeccable@impeccable": true,
+    "typescript-lsp@claude-plugins-official": true
+  },
+  "enabledMcpjsonServers": [
+    "github",
+    "playwright",
+    "next-devtools"
+  ],
+  "permissions": {
+    "allow": [
+      "Bash(git status)",
+      "Bash(git diff)",
+      "Bash(git diff --stat)",
+      "Bash(git diff --cached)",
+      "Bash(git diff --cached --stat)",
+      "Bash(git diff --name-only)",
+      "Bash(git diff origin/main --stat)",
+      "Bash(git log)",
+      "Bash(git log --oneline)",
+      "Bash(git log --oneline -5)",
+      "Bash(git log --oneline -10)",
+      "Bash(git log --oneline origin/main..HEAD)",
+      "Bash(git show)",
+      "Bash(git show --stat)",
+      "Bash(git show --stat HEAD)",
+      "Bash(git fetch)",
+      "Bash(git fetch origin)",
+      "Bash(git fetch origin main)",
+      "Bash(git fetch -q origin main)",
+      "Bash(git add *)",
+      "Bash(git commit *)",
+      "Bash(git branch)",
+      "Bash(git branch --show-current)",
+      "Bash(git branch -a)",
+      "Bash(git branch -r)",
+      "Bash(git branch -vv)",
+      "Bash(git checkout -b *)",
+      "Bash(git checkout -B *)",
+      "Bash(git switch *)",
+      "Bash(git rev-parse *)",
+      "Bash(git merge-base *)",
+      "Bash(git merge origin/main)",
+      "Bash(git merge --no-edit origin/main)",
+      "Bash(git rebase origin/main)",
+      "Bash(git push -u origin agent/*)",
+      "Bash(git push origin agent/*)",
+      "Bash(ls)",
+      "Bash(ls *)",
+      "mcp__github__pull_request_read",
+      "mcp__github__get_file_contents",
+      "mcp__github__list_pull_requests",
+      "mcp__github__list_commits",
+      "mcp__github__list_branches",
+      "mcp__github__get_commit",
+      "mcp__github__issue_read",
+      "mcp__github__list_issues",
+      "mcp__github__actions_get",
+      "mcp__github__actions_list",
+      "mcp__github__get_job_logs",
+      "mcp__github__get_check_run",
+      "mcp__github__create_pull_request",
+      "mcp__github__update_pull_request",
+      "Bash(git push -u origin claude/*)",
+      "Bash(git push origin claude/*)",
+      "Bash(npm ci)",
+      "Bash(npm install)",
+      "Bash(npm test)",
+      "Bash(npm run typecheck)",
+      "Bash(npm run build)",
+      "mcp__github__add_issue_comment",
+      "mcp__github__issue_write",
+      "mcp__github__pull_request_review_write",
+      "mcp__github__add_comment_to_pending_review",
+      "mcp__github__add_reply_to_pull_request_comment"
+    ],
+    "deny": [
+      "Read(./.env)",
+      "Read(./.env.*)",
+      "Read(./**/*.pem)",
+      "Read(./**/*.key)"
+    ],
+    "ask": [
+      "Bash(git push *--force*)",
+      "Bash(git push *-f *)",
+      "Bash(git push *-f)",
+      "Bash(git push *+*)",
+      "Bash(git push *main*)",
+      "Bash(git push *--delete*)",
+      "Bash(git push *-d *)",
+      "Bash(git push *-d)",
+      "Bash(git push *--mirror*)",
+      "Bash(git push *--all*)",
+      "Bash(git push *--tags*)",
+      "Bash(git push *--prune*)",
+      "Bash(rm -rf:*)",
+      "mcp__github__merge_pull_request",
+      "mcp__github__delete_file",
+      "mcp__github__create_repository"
+    ]
+  },
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/session-start.sh"
+          }
+        ]
+      }
+    ]
+  }
+}

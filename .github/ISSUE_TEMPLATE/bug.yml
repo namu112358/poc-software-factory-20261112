@@ -1,0 +1,73 @@
+name: 不具合報告 / Bug report
+description: 期待どおりに動かない問題を報告する
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        利用者から見て**何が起きているか**を中心に書いてください。原因の推測は最後の任意欄へ。
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: 発生している問題
+      description: 1〜2 文で。誰が・どの操作で・何に困っているか。
+      placeholder: 承認者が一覧から申請を開くと、添付ファイルが表示されない。
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: 期待する動作
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: 実際の動作
+      description: エラーメッセージやスクリーンショットがあれば貼ってください（ドラッグ＆ドロップで添付できます）。
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: 再現手順
+      value: |
+        1.
+        2.
+        3.
+    validations:
+      required: true
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: 発生環境
+      description: 環境（本番 / ステージング / ローカル）、ブラウザ・OS、バージョンやコミットなど、分かる範囲で。
+      placeholder: ステージング / Chrome 130 / macOS 15 / main@abc1234
+    validations:
+      required: false
+
+  - type: dropdown
+    id: frequency
+    attributes:
+      label: 発生頻度
+      options:
+        - 毎回
+        - ときどき
+        - 一度だけ
+        - 不明
+    validations:
+      required: false
+
+  - type: textarea
+    id: notes
+    attributes:
+      label: 補足情報（任意）
+      description: 影響範囲、回避策、ログ、原因の推測、関連しそうなコードなど。
+    validations:
+      required: false

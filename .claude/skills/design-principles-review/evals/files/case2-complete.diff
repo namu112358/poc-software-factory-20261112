@@ -1,0 +1,44 @@
+PR: タスクを完了したら、担当者にポイントを付けてメールで知らせる（Issue: 完了時にポイント 10 点。期限内なら 15 点。担当者にメールで通知）
+
+diff --git a/src/lib/tasks.ts b/src/lib/tasks.ts
+@@
++export async function completeTask(db: Db, id: number, userId: number) {
++  db.prepare("UPDATE tasks SET status = 'done', done_at = ? WHERE id = ?").run(new Date().toISOString(), id);
++  const task = db.prepare("SELECT * FROM tasks WHERE id = ?").get(id) as Task;
++  let points = 10;
++  if (task.dueDate && new Date(task.dueDate) >= new Date()) points = 15;
++  db.prepare("UPDATE users SET points = points + ? WHERE id = ?").run(points, userId);
++  const user = db.prepare("SELECT * FROM users WHERE id = ?").get(userId) as User;
++  let html = "";
++  switch (user.notifyType) {
++    case "email":
++      html = `<h1>完了しました</h1><p>${task.title} を完了し、${points} 点を獲得しました</p>`;
++      try {
++        await fetch("https://mail.example.com/api/send", { method: "POST", body: JSON.stringify({ to: user.email, html }) });
++      } catch (e) {}
++      break;
++    case "slack":
++      // TODO
++      break;
++  }
++  return { task, points };
++}
+diff --git a/src/app/api/tasks/[id]/complete/route.ts b/src/app/api/tasks/[id]/complete/route.ts
+@@
++  // ポイントの計算（画面の表示用に、ここでも同じ計算をする）
++  const expected = task.dueDate && new Date(task.dueDate) >= new Date() ? 15 : 10;
+diff --git a/tests/tasks.test.ts b/tests/tasks.test.ts
+@@
++test("completeTask", async () => {
++  const db = openDb();
++  const calls: string[] = [];
++  const spyDb = { prepare: (sql: string) => { calls.push(sql); return db.prepare(sql); } } as unknown as Db;
++  globalThis.fetch = (async () => new Response("ok")) as typeof fetch;
++  await completeTask(spyDb, 1, 1);
++  assert.deepEqual(calls, [
++    "UPDATE tasks SET status = 'done', done_at = ? WHERE id = ?",
++    "SELECT * FROM tasks WHERE id = ?",
++    "UPDATE users SET points = points + ? WHERE id = ?",
++    "SELECT * FROM users WHERE id = ?",
++  ]);
++});
