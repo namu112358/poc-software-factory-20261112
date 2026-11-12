@@ -4,6 +4,7 @@ import { openDb } from "../src/lib/db/index.ts";
 import {
   createTask,
   formatEstimate,
+  formatMemoPreview,
   formatTaskCount,
   getTask,
   isTaskStatus,
@@ -299,5 +300,19 @@ describe("memo", () => {
   it("is optional on create", () => {
     const db = openDb();
     assert.equal(validateTaskInput({ ...base }, {}, db).ok, true);
+  });
+});
+
+describe("formatMemoPreview", () => {
+  it("空のメモは表示しない", () => {
+    assert.equal(formatMemoPreview(""), null);
+  });
+  it("30 文字以内はそのまま、超えたら 30 文字の後に「…」を付ける", () => {
+    const m30 = "あ".repeat(30);
+    assert.equal(formatMemoPreview(m30), m30);
+    assert.equal(formatMemoPreview(m30 + "い"), m30 + "…");
+  });
+  it("改行は空白 1 つに置き換える", () => {
+    assert.equal(formatMemoPreview("a\nb\r\nc"), "a b c");
   });
 });
