@@ -84,4 +84,11 @@ export const MIGRATIONS: readonly Migration[] = [
       CREATE INDEX task_tags_name ON task_tags(name);
     `,
   },
+  {
+    version: 6,
+    name: "task_priority",
+    sql: `
+      ALTER TABLE tasks ADD COLUMN priority TEXT NOT NULL DEFAULT 'medium' CHECK (priority IN ('high', 'medium', 'low'));
+    `,
+  },
 ];
