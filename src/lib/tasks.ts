@@ -76,6 +76,12 @@ export function listAssignees(db: Db = getDb()): Assignee[] {
     .all() as Assignee[];
 }
 
+/** 一覧に出す担当者の名前。担当者の一覧に無い ID（通常は起きない）は ID のまま、担当者なしは空文字。 */
+export function assigneeName(assignee: string | null | undefined, assignees: Assignee[]): string {
+  if (!assignee) return "";
+  return assignees.find((a) => a.id === assignee)?.name ?? assignee;
+}
+
 /** クエリの担当者 ID を検証する。`none`（担当者なし）かタスクに登場する担当者でなければ undefined（指定なし）。 */
 export function parseAssignee(value: unknown, db: Db = getDb()): string | undefined {
   if (typeof value !== "string") return undefined;
