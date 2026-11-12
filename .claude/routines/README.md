@@ -30,7 +30,7 @@ flowchart LR
 | `blocked:question` | Issue | 確認事項があり止まっている | 実装・修正 |
 | `needs-human` | Issue・PR | 上限に達した・手順の外のことが要る | どの役でも |
 | `risk:high` | PR | 高リスクの変更。人が重点的に見る | レビュー |
-| `merge` | PR | マージしてよい（Mergify のキューに入る） | 人だけ |
+| `merge` | PR | マージしてよい（Mergify のキューに入る） | 人だけ（付ける前に `claim.ts merge-check`） |
 | `epic` | Issue | Epic。実装しない | 人 |
 
 - 止まるときは、`ready` と `in-progress`（`in-progress:hard`）を外してから、`blocked:question` か `needs-human` を付ける。

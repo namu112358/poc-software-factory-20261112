@@ -7,6 +7,7 @@ import {
   parseTouch,
   pick,
   precheck,
+  mergeCheck,
   precheckActions,
   relabelTargets,
   readyBudget,
@@ -368,5 +369,34 @@ describe("役がそのまま行う操作（precheckActions・relabelTargets）",
     });
     assert.deepEqual(r.relabel, [{ issue: 1, label: "in-progress" }]);
     assert.deepEqual(r.needsHuman, [5]);
+  });
+});
+
+describe("merge を付けてよいか（mergeCheck。#293）", () => {
+  const ok = (c: string, association = "OWNER") => ({ body: `<!-- factory:review verdict=ok round=1 commit=${c} -->\n本文`, association });
+  const ng = (c: string) => ({ body: `<!-- factory:review verdict=changes round=1 commit=${c} -->\n本文`, association: "OWNER" });
+  it("レビューが無い・最新が changes なら付けない", () => {
+    assert.equal(mergeCheck({ reviews: [], headSha: "aaa", after: [] }).ok, false);
+    assert.equal(mergeCheck({ reviews: [ok("aaa"), ng("bbb")], headSha: "bbb", after: [] }).ok, false);
+  });
+  it("最新のコミットが ok を受けていれば付けてよい", () => {
+    assert.equal(mergeCheck({ reviews: [ng("aaa"), ok("bbbbbbb")], headSha: "bbbbbbb1234", after: [] }).ok, true);
+  });
+  it("同じ版に changes と ok の両方があれば付けない（後の ok が先の指摘を打ち消さない）", () => {
+    assert.equal(mergeCheck({ reviews: [ng("aaa"), ok("aaa")], headSha: "aaa", after: [] }).ok, false);
+  });
+  it("レビューのコミットが PR の履歴に無ければ付けない", () => {
+    assert.equal(mergeCheck({ reviews: [ok("aaa")], headSha: "bbb", after: null }).ok, false);
+  });
+  it("書き込み権限の無い人のレビューの印は信じない", () => {
+    assert.equal(mergeCheck({ reviews: [ng("aaa"), ok("aaa", "NONE")], headSha: "aaa", after: [] }).ok, false);
+    assert.equal(mergeCheck({ reviews: [ok("aaa", "CONTRIBUTOR")], headSha: "aaa", after: [] }).ok, false);
+    assert.equal(mergeCheck({ reviews: [ok("aaa", "COLLABORATOR")], headSha: "aaa", after: [] }).ok, true);
+  });
+  it("ok の後が取り込みだけなら付けてよく、中身の変わるコミットがあれば付けない", () => {
+    assert.equal(mergeCheck({ reviews: [ok("aaa")], headSha: "ccc", after: [{ sha: "ccc", mergeOnly: true }] }).ok, true);
+    const r = mergeCheck({ reviews: [ok("aaa")], headSha: "ddd", after: [{ sha: "ccc", mergeOnly: true }, { sha: "ddd1234", mergeOnly: false }] });
+    assert.equal(r.ok, false);
+    assert.match(r.reason, /ddd1234/);
   });
 });
