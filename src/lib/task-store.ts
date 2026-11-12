@@ -1,4 +1,5 @@
 import { getDb, savepoint, transaction, type Db } from "./db/index.ts";
+import { addDays, todayInJapan } from "./task-dates.ts";
 import type { Assignee, Task, TaskFilter, TaskInput, TaskPriority, TaskStatus } from "./task-types.ts";
 
 /** タスクに登場する担当者（重複なし）。 */
@@ -49,11 +50,12 @@ export function listTasks(filter: TaskFilter = {}, db: Db = getDb()): Task[] {
       : filter.sort === "due"
         ? "ORDER BY CASE WHEN status = 'done' THEN 1 ELSE 0 END, due_date IS NULL, due_date, CASE priority WHEN 'high' THEN 0 WHEN 'medium' THEN 1 ELSE 2 END, id"
         : "ORDER BY id";
+  const today = filter.today ?? todayInJapan();
   const rows = db
     .prepare(
-      "SELECT id, title, status, assignee, due_date, priority, estimate_minutes, created_at, updated_at, completed_at, memo, archived FROM tasks WHERE (:includeArchived = 1 OR archived = 0) AND (:status IS NULL OR status = :status) AND (:assignee IS NULL OR (:assignee = 'none' AND assignee IS NULL) OR (:assignee <> 'none' AND assignee = :assignee)) AND (:tag IS NULL OR EXISTS (SELECT 1 FROM task_tags g WHERE g.task_id = tasks.id AND g.name = :tag)) AND (:q IS NULL OR title LIKE :q ESCAPE '\\' OR memo LIKE :q ESCAPE '\\') " + orderBy,
+      "SELECT id, title, status, assignee, due_date, priority, estimate_minutes, created_at, updated_at, completed_at, memo, archived FROM tasks WHERE (:includeArchived = 1 OR archived = 0) AND (:status IS NULL OR status = :status) AND (:assignee IS NULL OR (:assignee = 'none' AND assignee IS NULL) OR (:assignee <> 'none' AND assignee = :assignee)) AND (:tag IS NULL OR EXISTS (SELECT 1 FROM task_tags g WHERE g.task_id = tasks.id AND g.name = :tag)) AND (:due IS NULL OR (:due = 'none' AND (due_date IS NULL OR due_date = '')) OR (:due = 'overdue' AND due_date IS NOT NULL AND due_date <> '' AND due_date < :today) OR (:due = 'today' AND due_date IS NOT NULL AND due_date <> '' AND due_date <= :today) OR (:due = 'week' AND due_date IS NOT NULL AND due_date <> '' AND due_date <= :weekEnd)) AND (:q IS NULL OR title LIKE :q ESCAPE '\\' OR memo LIKE :q ESCAPE '\\') " + orderBy,
     )
-    .all({ status: filter.status ?? null, assignee: filter.assignee ?? null, tag: filter.tag ?? null, q: filter.q === undefined ? null : likePattern(filter.q), includeArchived: filter.includeArchived ? 1 : 0 }) as TaskRow[];
+    .all({ status: filter.status ?? null, assignee: filter.assignee ?? null, tag: filter.tag ?? null, q: filter.q === undefined ? null : likePattern(filter.q), includeArchived: filter.includeArchived ? 1 : 0, due: filter.due ?? null, today, weekEnd: addDays(today, 7) }) as TaskRow[];
   return rows.map(toTask);
 }
 
@@ -201,15 +203,20 @@ export type BulkCompleteResult = { ok: true; tasks: Task[] } | { ok: false; miss
 /**
  * 指定したタスクをまとめて完了（done）にする。全部か無しか: 存在しない ID が 1 つでもあれば、何も変えない。
  * すでに完了のタスクは変えない（最終更新日時・完了日時もそのまま）。完了にしたタスクには完了日時を記録する。結果は ids の順に並べる。
+ * 完了にしたタスクの更新日時は、1 件ずつの更新と同じく、そのタスクの前回の更新日時より必ず後にする（`nextUpdatedAt`。`now` は今の時刻）。
+ * 完了日時も同じ値にする。
  */
-export function completeTasks(ids: readonly number[], db: Db = getDb()): BulkCompleteResult {
+export function completeTasks(ids: readonly number[], db: Db = getDb(), now: Date = new Date()): BulkCompleteResult {
   return transaction(db, () => {
     const found = ids.map((id) => getTask(id, db));
     const missingIds = ids.filter((_, i) => found[i] === undefined);
     if (missingIds.length > 0) return { ok: false, missingIds };
-    const now = new Date().toISOString();
     const update = db.prepare("UPDATE tasks SET status = 'done', updated_at = ?, completed_at = ? WHERE id = ? AND status <> 'done'");
-    for (const id of ids) update.run(now, now, id);
+    for (const task of found as Task[]) {
+      if (task.status === "done") continue;
+      const updatedAt = nextUpdatedAt(task.updatedAt, now);
+      update.run(updatedAt, updatedAt, task.id);
+    }
     return { ok: true, tasks: ids.map((id) => getTask(id, db)!) };
   });
 }
