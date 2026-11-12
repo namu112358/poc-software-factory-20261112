@@ -1,7 +1,7 @@
 name: 機能要望 / Feature request
 description: 新しい機能や、既存機能の振る舞いの変更を提案する
 title: "[Feature]: "
-labels: ["enhancement"]
+labels: ["type:feat"]
 body:
   - type: markdown
     attributes:

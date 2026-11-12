@@ -1,7 +1,7 @@
 name: 技術的負債・リファクタリング / Tech debt
 description: 振る舞いを変えずにコードや基盤を改善する
 title: "[Tech debt]: "
-labels: ["tech-debt"]
+labels: ["type:refactor"]
 body:
   - type: markdown
     attributes:
