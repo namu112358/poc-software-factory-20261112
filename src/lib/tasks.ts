@@ -37,10 +37,25 @@ export function isTaskStatus(value: unknown): value is TaskStatus {
   return typeof value === "string" && (TASK_STATUSES as readonly string[]).includes(value);
 }
 
+export type TaskSort = "created" | "priority";
+
+export const TASK_SORTS: readonly TaskSort[] = ["created", "priority"];
+
+export const SORT_LABELS: Record<TaskSort, string> = {
+  created: "作成順",
+  priority: "優先度の高い順",
+};
+
+/** URL のクエリの並び順を検証する。不正な値は「作成順」として扱う。 */
+export function parseSort(value: unknown): TaskSort {
+  return typeof value === "string" && (TASK_SORTS as readonly string[]).includes(value) ? (value as TaskSort) : "created";
+}
+
 export type TaskFilter = {
   status?: TaskStatus;
   assignee?: string;
   tag?: string;
+  sort?: TaskSort;
 };
 
 export type Assignee = { id: string; name: string };
@@ -67,9 +82,13 @@ function toTask(row: TaskRow): Task {
 }
 
 export function listTasks(filter: TaskFilter = {}, db: Db = getDb()): Task[] {
+  const orderBy =
+    filter.sort === "priority"
+      ? "ORDER BY CASE priority WHEN 'high' THEN 0 WHEN 'medium' THEN 1 ELSE 2 END, id"
+      : "ORDER BY id";
   const rows = db
     .prepare(
-      "SELECT id, title, status, assignee, due_date, priority FROM tasks WHERE (:status IS NULL OR status = :status) AND (:assignee IS NULL OR assignee = :assignee) AND (:tag IS NULL OR EXISTS (SELECT 1 FROM task_tags g WHERE g.task_id = tasks.id AND g.name = :tag)) ORDER BY id",
+      "SELECT id, title, status, assignee, due_date, priority FROM tasks WHERE (:status IS NULL OR status = :status) AND (:assignee IS NULL OR assignee = :assignee) AND (:tag IS NULL OR EXISTS (SELECT 1 FROM task_tags g WHERE g.task_id = tasks.id AND g.name = :tag)) " + orderBy,
     )
     .all({ status: filter.status ?? null, assignee: filter.assignee ?? null, tag: filter.tag ?? null }) as TaskRow[];
   return rows.map(toTask);
