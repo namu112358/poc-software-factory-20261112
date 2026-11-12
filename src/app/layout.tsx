@@ -11,6 +11,7 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
         {user && (
           <header style={{ display: "flex", gap: 12, alignItems: "center", marginBottom: 16 }}>
             <a href="/tasks">タスク一覧</a>
+            <a href="/tags">タグ一覧</a>
             <span data-testid="current-user">{user.name}（{user.id}）</span>
             <form method="post" action="/api/logout">
               <button type="submit">ログアウト</button>
