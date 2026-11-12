@@ -260,6 +260,11 @@ export function formatEstimate(minutes: number | null): string {
   return minutes === null ? "—" : `${minutes} 分`;
 }
 
+/** タスクの番号の表示用の文字列（例: #3）。 */
+export function formatTaskNumber(id: number): string {
+  return `#${id}`;
+}
+
 const MEMO_PREVIEW_LENGTH = 30;
 
 /** 一覧に出すメモの冒頭。改行は空白 1 つにし、30 文字を超えたら「…」を付ける。空のメモは null。 */
