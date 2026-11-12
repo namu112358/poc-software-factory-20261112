@@ -16,7 +16,7 @@
 | Ready の PR が `main` と衝突している（`mergeable` が false） | 割り当ての役が拾わなかった | 衝突していることをコメントし、PR を draft に戻す（修正が起動して `main` を取り込む） |
 | 閉じた Issue に `in-progress` が残っている | 片付け漏れ | `in-progress` を外す |
 
-同じものに同じことをするのは 1 回まで。2 回目は `needs-human` を付けて理由をコメントする。したことは、コメントの `<!-- factory:patrol action=<したこと> -->` で数える。
+同じものに同じことをするのは 1 回まで。2 回目は `needs-human` を付けて理由をコメントする。`ready` の付け直しは、割り当ての役の `factory:dispatch action=relabel-ready` も 1 回目として数える。したことは、コメントの `<!-- factory:patrol action=<したこと> -->` で数える。
 
 ## 2. キューから取り出す
 
