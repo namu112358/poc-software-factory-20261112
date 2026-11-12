@@ -8,6 +8,7 @@ import {
   pick,
   precheck,
   mergeCheck,
+  ciCheck,
   precheckActions,
   relabelTargets,
   readyBudget,
@@ -444,5 +445,35 @@ describe("ラベルの名前（接頭を付けた名前への切り替え）", (
     assert.ok(START_LABELS.includes(normalizeLabel("in-progress")));
     assert.ok(START_LABELS.includes(normalizeLabel("in-progress:hard")));
     assert.ok(!START_LABELS.includes(normalizeLabel("ready")));
+  });
+});
+
+describe("キューに入る条件のチェック（ciCheck。#364）", () => {
+  const run = (name: string, conclusion: string | null, startedAt = "2026-11-12T18:00:00Z", status = "completed") => ({ name, status, conclusion, startedAt });
+
+  it("app-check と pr-body-check が両方 success なら ok", () => {
+    assert.equal(ciCheck([run("app-check", "success"), run("pr-body-check", "success"), run("Summary", "failure")]).ok, true);
+  });
+
+  it("app-check が落ちていれば ok にしない（#364 の形）", () => {
+    const r = ciCheck([run("app-check", "failure"), run("pr-body-check", "success")]);
+    assert.equal(r.ok, false);
+    assert.match(r.reason, /app-check が failure/);
+  });
+
+  it("本文の検査が skipped のまま残っていれば ok にしない（#258 の形）", () => {
+    assert.equal(ciCheck([run("app-check", "success"), run("pr-body-check", "skipped")]).ok, false);
+  });
+
+  it("まだ終わっていない・まだ無いチェックがあれば ok にしない", () => {
+    assert.equal(ciCheck([run("app-check", null, "2026-11-12T18:00:00Z", "in_progress"), run("pr-body-check", "success")]).ok, false);
+    assert.equal(ciCheck([run("app-check", "success")]).ok, false);
+  });
+
+  it("同じ名前のチェックが何度も動いたときは、最後に始まったものを見る", () => {
+    const old = run("pr-body-check", "failure", "2026-11-12T17:00:00Z");
+    const now = run("pr-body-check", "success", "2026-11-12T18:00:00Z");
+    assert.equal(ciCheck([run("app-check", "success"), now, old]).ok, true);
+    assert.equal(ciCheck([run("app-check", "success"), old, run("pr-body-check", "failure", "2026-11-12T19:00:00Z")]).ok, false);
   });
 });

@@ -2,6 +2,7 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { openDb } from "../src/lib/db/index.ts";
 import { createTask } from "../src/lib/tasks.ts";
+import { createComment } from "../src/lib/comments.ts";
 import { addTag } from "../src/lib/tags.ts";
 import { CSV_BOM, escapeCsvField, exportFilename, exportHref, exportTasksCsv, neutralizeFormula, parseTaskFilter } from "../src/lib/export.ts";
 
@@ -138,13 +139,13 @@ describe("parseTaskFilter", () => {
   it("treats invalid values as not specified", () => {
     const db = openDb();
     const filter = parseTaskFilter(new URLSearchParams("status=bogus&assignee=nobody&tag=%20&sort=zzz"), db);
-    assert.deepEqual(filter, { status: undefined, assignee: undefined, tag: undefined, q: undefined, sort: "created" });
+    assert.deepEqual(filter, { status: undefined, assignee: undefined, tag: undefined, due: undefined, q: undefined, sort: "created" });
   });
 
   it("accepts valid values", () => {
     const db = openDb();
     const filter = parseTaskFilter(new URLSearchParams("status=done&assignee=none&tag=x&sort=priority"), db);
-    assert.deepEqual(filter, { status: "done", assignee: "none", tag: "x", q: undefined, sort: "priority" });
+    assert.deepEqual(filter, { status: "done", assignee: "none", tag: "x", due: undefined, q: undefined, sort: "priority" });
   });
 });
 
@@ -170,5 +171,17 @@ describe("CSV と q（キーワード）", () => {
   it("exportHref carries q, and parseTaskFilter reads it back", () => {
     const href = exportHref({ q: "請求 100%" });
     assert.equal(parseTaskFilter(new URL(href, "http://x").searchParams).q, "請求 100%");
+  });
+});
+
+describe("コメント本文のキーワード",()=>{
+  it("CSV でも、コメントの本文のキーワードと別の絞り込みの両方を満たすものだけが出る", () => {
+    const db = openDb();
+    const x = createTask({ title: "検索用E", status: "todo", assignee: "sato", dueDate: "", priority: "low", memo: "" }, db);
+    const y = createTask({ title: "検索用F", status: "done", assignee: "sato", dueDate: "", priority: "low", memo: "" }, db);
+    createComment({ taskId: x.id, author: "sato", body: "珍しい合言葉" }, db);
+    createComment({ taskId: y.id, author: "sato", body: "珍しい合言葉" }, db);
+    const rows = parseCsv(exportTasksCsv({ q: "合言葉", status: "todo" }, db)).slice(1).map((r) => r[0]);
+    assert.deepEqual(rows, [String(x.id)]);
   });
 });
