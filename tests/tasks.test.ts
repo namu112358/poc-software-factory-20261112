@@ -7,6 +7,7 @@ import {
   isTaskStatus,
   listTasks,
   parseTaskId,
+  taskRowDoneAttr,
   updateTask,
   validateTaskInput,
 } from "../src/lib/tasks.ts";
@@ -88,5 +89,13 @@ describe("isTaskStatus", () => {
     assert.equal(isTaskStatus("done"), true);
     assert.equal(isTaskStatus("unknown"), false);
     assert.equal(isTaskStatus(undefined), false);
+  });
+});
+
+describe("taskRowDoneAttr", () => {
+  it("marks only done tasks", () => {
+    assert.deepEqual(taskRowDoneAttr("done"), { "data-done": "true" });
+    assert.deepEqual(taskRowDoneAttr("todo"), {});
+    assert.deepEqual(taskRowDoneAttr("in_progress"), {});
   });
 });

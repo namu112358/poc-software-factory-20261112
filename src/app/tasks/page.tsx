@@ -1,5 +1,5 @@
 import { requireUser } from "@/lib/session";
-import { STATUS_LABELS, TASK_STATUSES, isTaskStatus, listTasks } from "@/lib/tasks";
+import { STATUS_LABELS, TASK_STATUSES, isTaskStatus, listTasks, taskRowDoneAttr } from "@/lib/tasks";
 
 type Props = {
   searchParams: Promise<{ status?: string }>;
@@ -39,9 +39,16 @@ export default async function TasksPage({ searchParams }: Props) {
         </thead>
         <tbody>
           {tasks.map((task) => (
-            <tr key={task.id} data-testid="task-row">
+            <tr
+              key={task.id}
+              data-testid="task-row"
+              {...taskRowDoneAttr(task.status)}
+              style={task.status === "done" ? { color: "#8a8a8a" } : undefined}
+            >
               <td>
-                <a href={`/tasks/${task.id}`}>{task.title}</a>
+                <a href={`/tasks/${task.id}`} style={task.status === "done" ? { color: "inherit" } : undefined}>
+                  {task.title}
+                </a>
               </td>
               <td>{STATUS_LABELS[task.status]}</td>
               <td>{task.assignee}</td>

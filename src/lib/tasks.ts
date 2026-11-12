@@ -10,6 +10,11 @@ export type Task = {
   dueDate: string; // YYYY-MM-DD
 };
 
+/** 一覧の行に付ける属性。完了したタスクだけ `data-done="true"` を付ける。 */
+export function taskRowDoneAttr(status: TaskStatus): { "data-done"?: "true" } {
+  return status === "done" ? { "data-done": "true" } : {};
+}
+
 export const TASK_STATUSES: readonly TaskStatus[] = ["todo", "in_progress", "done"];
 
 export const STATUS_LABELS: Record<TaskStatus, string> = {
