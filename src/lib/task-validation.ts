@@ -96,6 +96,37 @@ export function validateTaskInput(
   return errors.length > 0 ? { ok: false, errors } : { ok: true, value };
 }
 
+const DATE_TIME_RE = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d{1,3})?(?:Z|[+-](\d{2}):(\d{2}))$/;
+
+/** タイムゾーン付きの ISO 8601 の日時として正しいか（2 月 30 日・24 時のような、Date.parse が繰り上げる値も誤りにする）。 */
+function isDateTime(value: unknown): value is string {
+  if (typeof value !== "string") return false;
+  const m = DATE_TIME_RE.exec(value);
+  if (!m) return false;
+  const [y, mo, d, hh, mi, ss, tzh, tzm] = m.slice(1).map((x) => Number(x ?? 0));
+  const day = new Date(Date.UTC(y, mo - 1, d));
+  return (
+    day.getUTCFullYear() === y && day.getUTCMonth() === mo - 1 && day.getUTCDate() === d &&
+    hh < 24 && mi < 60 && ss < 60 && tzh < 24 && tzm < 60 && !Number.isNaN(Date.parse(value))
+  );
+}
+
+/**
+ * 更新の本文の `expectedUpdatedAt`（編集を始めたときのタスクの更新日時）を検証する。
+ * 無ければ undefined（確認せずに上書きする）。あれば、タイムゾーン付きの ISO 8601 の日時だけを受け付け、
+ * サーバーの更新日時と比べられるように UTC の `toISOString()` の形にそろえて返す。
+ */
+export function parseExpectedUpdatedAt(body: unknown): ValidationResult<string | undefined> {
+  if (typeof body !== "object" || body === null || Array.isArray(body) || !("expectedUpdatedAt" in body)) {
+    return { ok: true, value: undefined };
+  }
+  const v = (body as Record<string, unknown>).expectedUpdatedAt;
+  if (!isDateTime(v)) {
+    return { ok: false, errors: ["expectedUpdatedAt は日時（ISO 8601、例: 2026-11-12T09:00:00.000Z）で指定してください"] };
+  }
+  return { ok: true, value: new Date(Date.parse(v)).toISOString() };
+}
+
 /** まとめて完了にできるタスクの最大件数。 */
 export const BULK_COMPLETE_MAX = 100;
 
