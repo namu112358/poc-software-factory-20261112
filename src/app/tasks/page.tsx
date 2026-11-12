@@ -1,7 +1,7 @@
 import { Fragment } from "react";
 import { requireUser } from "@/lib/session";
 import { listTagsByTask } from "@/lib/tags";
-import { STATUS_LABELS, TASK_STATUSES, formatTaskCount, isTaskStatus, listAssignees, listTasks, parseAssignee, parseTagFilter } from "@/lib/tasks";
+import { STATUS_LABELS, TASK_STATUSES, formatTaskCount, isOverdue, isTaskStatus, listAssignees, listTasks, parseAssignee, parseTagFilter, todayInJapan } from "@/lib/tasks";
 
 type Props = {
   searchParams: Promise<{ status?: string; assignee?: string; tag?: string }>;
@@ -15,6 +15,7 @@ export default async function TasksPage({ searchParams }: Props) {
   const tag = parseTagFilter(params.tag);
   const assignees = listAssignees();
   const tasks = listTasks({ status, assignee, tag });
+  const today = todayInJapan();
   const tagsByTask = listTagsByTask(tasks.map((t) => t.id));
 
   return (
@@ -70,7 +71,15 @@ export default async function TasksPage({ searchParams }: Props) {
               </td>
               <td>{STATUS_LABELS[task.status]}</td>
               <td>{task.assignee}</td>
-              <td>{task.dueDate}</td>
+              <td>
+                {task.dueDate}
+                {isOverdue(task, today) && (
+                  <>
+                    {" "}
+                    <strong data-testid="overdue">期限切れ</strong>
+                  </>
+                )}
+              </td>
               <td>
                 {(tagsByTask.get(task.id) ?? []).map((name, i) => (
                   <Fragment key={name}>
