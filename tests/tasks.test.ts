@@ -76,6 +76,7 @@ describe("getTask", () => {
       title: "要件定義書のレビュー",
       status: "done",
       assignee: "sato",
+      estimateMinutes: null,
       dueDate: "2026-11-02",
     });
     assert.equal(getTask(999, db), undefined);
