@@ -58,6 +58,7 @@ flowchart LR
 - `kind:epic`・`kind:kaizen` の付いた Issue は対象にしない。
 - マージ・Approve・`merge:requested` のラベルを付けることはしない（人がする）。Mergify の設定（`.mergify.yml`）を変える PR は、人がキューを通さずにマージする（その前に `claim.ts merge-check`）。AI は管理者の例外を使わない。
 - `.github/`・`.claude/`・`scripts/factory/`・`AGENTS.md`・`CLAUDE.md`・`docs/rulesets/` は変えない（例外は、振り返りの役が draft の PR で出す案だけ）。
+- 起動のラベル（`status:in-progress`・`status:in-progress-hard`）は、その Issue のほかのラベルを付け外ししてから 30 秒以上あけて付ける（同じ数秒にほかのラベルも付くと、実装が重ねて起動した。#429）。
 - push するのは `claude/` で始まるブランチだけ。force push はしない。
 - `claude/issue-` 以外の `claude/` の PR（有人のセッションが出した手順書・スクリプトの PR など）は、出したセッションが直す。修正・巡回の役は扱わない（衝突や指摘で `status:needs-human` を付けない）。レビューと、割り当ての衝突の知らせは同じように行う。
 - PR の draft と Ready の切り替えは、GitHub MCP の `update_pull_request`（`draft: true` / `false`）で行う。

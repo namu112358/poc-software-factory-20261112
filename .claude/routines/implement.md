@@ -17,7 +17,7 @@ Issue に `status:in-progress` か `status:in-progress-hard` が付いたとき�
 
 ## 2. 着手する
 
-1. Issue に `<!-- factory:implement action=start -->` で始まるコメントを書く。割り当ての役の着手の記録（`factory:touch`）と、自分で調べた変えるファイルが違えば、同じコメントに `<!-- factory:touch files=<カンマ区切りのパス> -->` も書く。
+1. Issue に `<!-- factory:implement action=start -->` で始まるコメントを書く。割り当ての役の着手の記録（`factory:touch`）と、自分で調べた変えるファイルが違えば、同じコメントに `<!-- factory:touch files=<カンマ区切りのパス> -->` も書く。書いた直後にコメントを読み直し、起動のラベルが付いた後に、自分より前の着手のコメント（ほかのセッションのもの）があれば、それ以上何もせずに終える（コメントもしない。同じラベルで実装が重ねて起動することがある。#429）。
 2. `main` の最新から `claude/issue-<番号>` のブランチを作る（ほかの名前にしない）。
 
 ## 3. 実装する
