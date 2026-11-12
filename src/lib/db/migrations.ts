@@ -176,4 +176,29 @@ export const MIGRATIONS: readonly Migration[] = [
       CREATE INDEX task_assignee_changes_task ON task_assignee_changes(task_id);
     `,
   },
+  {
+    version: 16,
+    name: "session_devices",
+    sql: `
+      -- ログインした日時。ISO 8601（UTC）。このマイグレーションより前に作られたセッションは NULL（不明）。
+      ALTER TABLE sessions ADD COLUMN created_at TEXT;
+      -- ログインしたときの User-Agent。分からなければ NULL。
+      ALTER TABLE sessions ADD COLUMN user_agent TEXT;
+      -- 画面・API でセッションを指定するための ID（ランダムな 32 桁の 16 進）。トークンを外に出さないために使う。
+      ALTER TABLE sessions ADD COLUMN device_id TEXT;
+      UPDATE sessions SET device_id = lower(hex(randomblob(16)));
+      CREATE UNIQUE INDEX sessions_device_id ON sessions(device_id);
+    `,
+  },
+  {
+    version: 17,
+    name: "failed_logins_since_login",
+    sql: `
+      -- 前回のログインに成功したあと、この利用者の ID でパスワードを誤った（ロック中の試行を含む）ログインの回数。
+      -- ログインに成功すると 0 に戻す。既存の利用者は 0 から始まる。試されたパスワードは保存しない。
+      ALTER TABLE users ADD COLUMN failed_logins_since_login INTEGER NOT NULL DEFAULT 0;
+      -- このセッションでログインした時点の上の回数（ログイン後に知らせる）。既存のセッションは 0。
+      ALTER TABLE sessions ADD COLUMN failed_logins_before INTEGER NOT NULL DEFAULT 0;
+    `,
+  },
 ];
