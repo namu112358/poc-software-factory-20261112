@@ -100,6 +100,13 @@ export const MIGRATIONS: readonly Migration[] = [
   },
   {
     version: 8,
+    name: "task_memo",
+    sql: `
+      ALTER TABLE tasks ADD COLUMN memo TEXT NOT NULL DEFAULT '' CHECK (length(memo) <= 2000);
+    `,
+  },
+  {
+    version: 9,
     name: "task_timestamps",
     sql: `
       ALTER TABLE tasks ADD COLUMN created_at TEXT NOT NULL DEFAULT ''; -- ISO 8601（UTC）

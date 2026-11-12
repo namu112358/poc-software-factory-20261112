@@ -84,6 +84,7 @@ describe("getTask", () => {
       status: "done",
       assignee: "sato",
       estimateMinutes: null,
+      memo: "",
       dueDate: "2026-11-02",
       priority: "medium",
     });
@@ -297,7 +298,7 @@ describe("作成日時・更新日時", () => {
 
   it("既存のタスクには、マイグレーションを入れた時点の日時が入る", () => {
     const old = new DatabaseSync(":memory:");
-    migrate(old, MIGRATIONS.filter((m) => m.version < 8));
+    migrate(old, MIGRATIONS.filter((m) => m.version < 9));
     old.exec("INSERT INTO users (id, name) VALUES ('u', 'U')");
     old.exec("INSERT INTO tasks (title, status, assignee, due_date) VALUES ('既存', 'todo', 'u', '2026-01-01')");
     const t0 = Date.now();
@@ -316,5 +317,39 @@ describe("formatJstDateTime", () => {
   });
   it("解釈できない値は「—」にする", () => {
     assert.equal(formatJstDateTime(""), "—");
+  });
+});
+
+describe("memo", () => {
+  const base = { title: "t", status: "todo", assignee: "sato", dueDate: "2026-12-01" } as const;
+
+  it("is empty for seeded tasks and tasks created without it", () => {
+    const db = openDb();
+    assert.ok(listTasks({}, db).every((t) => t.memo === ""));
+    assert.equal(createTask({ ...base }, db).memo, "");
+  });
+
+  it("can be set on create and updated without touching other fields", () => {
+    const db = openDb();
+    const task = createTask({ ...base, memo: "1 行目\n2 行目" }, db);
+    assert.equal(getTask(task.id, db)?.memo, "1 行目\n2 行目");
+    assert.equal(updateTask(task.id, { memo: "変更後" }, db)?.memo, "変更後");
+    assert.equal(updateTask(task.id, { title: "x" }, db)?.memo, "変更後");
+    assert.equal(updateTask(task.id, { memo: "" }, db)?.memo, "");
+  });
+
+  it("validates type and length (0〜2000 characters)", () => {
+    const db = openDb();
+    const check = (v: unknown) => validateTaskInput({ memo: v }, { partial: true }, db).ok;
+    assert.equal(check(""), true);
+    assert.equal(check("あ".repeat(2000)), true);
+    for (const bad of ["あ".repeat(2001), 1, null, true, ["a"]]) assert.equal(check(bad), false, String(bad));
+    const r = validateTaskInput({ memo: "a".repeat(2001) }, { partial: true }, db);
+    assert.ok(!r.ok && r.errors.length > 0);
+  });
+
+  it("is optional on create", () => {
+    const db = openDb();
+    assert.equal(validateTaskInput({ ...base }, {}, db).ok, true);
   });
 });
