@@ -83,14 +83,22 @@ export function createTask(input: TaskInput, db: Db = getDb()): Task {
 export const COMPLETED_AT_SQL =
   "completed_at = CASE WHEN :status <> 'done' THEN NULL WHEN status = 'done' THEN completed_at ELSE :now END";
 
-/** 指定した項目だけを更新する。タスクが無ければ undefined。完了日時はステータスの変化に合わせて決まる。 */
-export function updateTask(id: number, changes: Partial<TaskInput>, db: Db = getDb()): Task | undefined {
-  const current = getTask(id, db);
-  if (!current) return undefined;
+/**
+ * 更新の後の更新日時。今の時刻が前の更新日時より後でなければ（同じミリ秒に続けて更新したときなど）、前の値の 1 ミリ秒後にする。
+ * 更新するたびに値が必ず変わるので、古い更新日時を付けた確認つきの更新（`updateTaskIfUnchanged`）が一致しない。
+ */
+export function nextUpdatedAt(previous: string, now: Date = new Date()): string {
+  const prev = Date.parse(previous);
+  if (Number.isNaN(prev) || now.getTime() > prev) return now.toISOString();
+  return new Date(prev + 1).toISOString();
+}
+
+const UPDATE_TASK_SQL = `UPDATE tasks SET title = :title, status = :status, assignee = :assignee, due_date = :dueDate, priority = :priority, estimate_minutes = :estimateMinutes, memo = :memo, archived = :archived, updated_at = :now, ${COMPLETED_AT_SQL} WHERE id = :id`;
+
+/** 今のタスクに変更を重ねて書き込む。`onlyIfUpdatedAt` を渡すと、更新日時がその値のときだけ書き込む。書き込んだら true。 */
+function writeTask(current: Task, changes: Partial<TaskInput>, db: Db, onlyIfUpdatedAt?: string): boolean {
   const next = { ...current, ...changes };
-  db.prepare(
-    `UPDATE tasks SET title = :title, status = :status, assignee = :assignee, due_date = :dueDate, priority = :priority, estimate_minutes = :estimateMinutes, memo = :memo, archived = :archived, updated_at = :now, ${COMPLETED_AT_SQL} WHERE id = :id`,
-  ).run({
+  const params = {
     title: next.title,
     status: next.status,
     assignee: next.assignee,
@@ -99,10 +107,47 @@ export function updateTask(id: number, changes: Partial<TaskInput>, db: Db = get
     estimateMinutes: next.estimateMinutes,
     memo: next.memo,
     archived: next.archived ? 1 : 0,
-    now: new Date().toISOString(),
-    id,
-  });
+    now: nextUpdatedAt(current.updatedAt),
+    id: current.id,
+  };
+  const { changes: rows } =
+    onlyIfUpdatedAt === undefined
+      ? db.prepare(UPDATE_TASK_SQL).run(params)
+      : db.prepare(`${UPDATE_TASK_SQL} AND updated_at = :expectedUpdatedAt`).run({ ...params, expectedUpdatedAt: onlyIfUpdatedAt });
+  return Number(rows) > 0;
+}
+
+/** 指定した項目だけを更新する。タスクが無ければ undefined。完了日時はステータスの変化に合わせて決まる。 */
+export function updateTask(id: number, changes: Partial<TaskInput>, db: Db = getDb()): Task | undefined {
+  const current = getTask(id, db);
+  if (!current) return undefined;
+  writeTask(current, changes, db);
   return getTask(id, db);
+}
+
+export type CheckedUpdateResult =
+  | { ok: true; task: Task }
+  | { ok: false; reason: "not_found" }
+  | { ok: false; reason: "conflict"; task: Task };
+
+/**
+ * 編集を始めたときの更新日時 `expectedUpdatedAt`（`toISOString()` の形）が今の更新日時と同じときだけ更新する（楽観的ロック）。
+ * 違えば変更せずに conflict と最新のタスクを返す。確認と書き込みは 1 つの UPDATE 文の条件で行うので、
+ * 読んでから書くまでにほかの更新が入っても、それを上書きせずに conflict になる。
+ */
+export function updateTaskIfUnchanged(
+  id: number,
+  changes: Partial<TaskInput>,
+  expectedUpdatedAt: string,
+  db: Db = getDb(),
+): CheckedUpdateResult {
+  const current = getTask(id, db);
+  if (!current) return { ok: false, reason: "not_found" };
+  if (current.updatedAt === expectedUpdatedAt && writeTask(current, changes, db, expectedUpdatedAt)) {
+    return { ok: true, task: getTask(id, db)! };
+  }
+  const latest = getTask(id, db);
+  return latest ? { ok: false, reason: "conflict", task: latest } : { ok: false, reason: "not_found" };
 }
 
 /**
