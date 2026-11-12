@@ -1,12 +1,13 @@
 import type { ReactNode } from "react";
-import { formatPreviousLogin } from "@/lib/auth";
-import { getCurrentPreviousLogin, getCurrentUser } from "@/lib/session";
+import { formatFailedLoginNotice, formatPreviousLogin } from "@/lib/auth";
+import { getCurrentFailedLoginsBefore, getCurrentPreviousLogin, getCurrentUser } from "@/lib/session";
 
 export const metadata = { title: "PoC タスク管理" };
 
 export default async function RootLayout({ children }: { children: ReactNode }) {
   const user = await getCurrentUser();
   const previousLogin = user ? await getCurrentPreviousLogin() : undefined;
+  const failedLoginNotice = user ? formatFailedLoginNotice(await getCurrentFailedLoginsBefore()) : undefined;
   return (
     <html lang="ja">
       <body style={{ fontFamily: "system-ui, sans-serif", margin: 24 }}>
@@ -30,6 +31,22 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
               <button type="submit">すべての端末からログアウト</button>
             </form>
           </header>
+        )}
+        {user && failedLoginNotice && (
+          <p
+            role="status"
+            data-testid="failed-login-notice"
+            style={{
+              margin: "0 0 16px",
+              padding: "8px 12px",
+              border: "1px solid #d97706",
+              borderRadius: 4,
+              background: "#fffbeb",
+              color: "#78350f",
+            }}
+          >
+            {failedLoginNotice}
+          </p>
         )}
         {children}
       </body>
