@@ -25,6 +25,7 @@ flowchart LR
 | ラベル | 付く場所 | 意味 | 付ける人 |
 |---|---|---|---|
 | `ready` | Issue | 実装してよい（これが承認） | 書き込み権限のある人だけ |
+| `ready:hard` | Issue | 実装してよい。難しいので、難しい用の実装に回す（「難易度」） | 人、または標準の実装の役 |
 | `in-progress` | Issue | 実装の Routine が作業中（PR を Ready にするまで） | 実装 |
 | `blocked:question` | Issue | 確認事項があり止まっている | 実装・修正 |
 | `queued` | Issue | 受け付けたが、空きか依存先を待っている（キュー） | 実装 |
@@ -49,6 +50,20 @@ flowchart LR
   - 割り当ての役が動くとき（`claude/` の PR が閉じたとき）と、巡回の役が動くとき（1 時間ごと）に、空きの数だけ。
 - 同時に起動した役が数え違えて、一時的に 4 件を超えることはある。厳密には止めない。
 
+## 難易度
+
+実装の Routine は 2 つある。標準（`ready` で起動。Sonnet）と、難しい用（`ready:hard` で起動。Opus）。
+
+- 標準の実装の役は、着手する前に難易度を判定する。次の 1 つでも当たれば「難しい」とし、`ready` を外して `ready:hard` を付け、当たった観点をコメントして終える（難しい用が起動する）。
+  - 元に戻しにくい（データの書き換え・削除、外部への送信）
+  - 外部の利用者がいる（ほかのシステム・端末・集計が読む API や列）
+  - 触る場所にテストが無く、理由の書かれていない分岐がある
+  - まとめて処理する・同時に更新される・止められない処理が絡む
+  - 認証・権限・お金が絡む
+- 人が最初から `ready:hard` を付けてもよい。難しい用の役は、判定をやり直さない。`ready` と `ready:hard` を同じ Issue に同時に付けない（2 つの実装の役が同時に起動する）。
+- 難しい用の役は、実装の前に計画を Issue にコメントし（受入条件に書かれていないが守るべきことの一覧を含める）、その一覧の 1 つずつにテストを書く。
+- キューから取り出すときは `ready` を付ける（標準の役が、もう一度判定する）。
+
 ## 高リスク
 
 レビューの役は、PR が次のどれかに触れていれば `risk:high` を付け、レビューのコメントにどれに当たるかを書く（開発標準 §2.6）。
@@ -62,6 +77,7 @@ flowchart LR
 | Routine | イベント | フィルタ | 手順書 |
 |---|---|---|---|
 | 実装 | Issue → ラベル付き | Labels is one of `ready` | [implement.md](implement.md) |
+| 実装（難しい用） | Issue → ラベル付き | Labels is one of `ready:hard` | [implement.md](implement.md) |
 | レビュー | Pull request → Ready for review | Head branch starts with `claude/` | [review.md](review.md) |
 | 修正 | Pull request → Converted to draft | Head branch starts with `claude/` | [fix.md](fix.md) |
 | 割り当て | Pull request → Closed | Head branch starts with `claude/` | [dispatch.md](dispatch.md) |
