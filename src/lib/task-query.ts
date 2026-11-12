@@ -1,6 +1,6 @@
 import type { Db } from "./db/index.ts";
 import { getDb } from "./db/index.ts";
-import { isTaskStatus, listTasks, parseAssignee, parseKeyword, parseSort, parseTagFilter, type Task } from "./tasks.ts";
+import { isTaskStatus, listTasks, parseAssignee, parseDueFilter, parseKeyword, parseSort, parseTagFilter, type Task } from "./tasks.ts";
 
 /** `archived` クエリの型ガード。`include` のときだけ true（アーカイブ済みも含める）。それ以外は指定なし。 */
 export function parseIncludeArchived(value: unknown): boolean {
@@ -15,6 +15,7 @@ export function listTasksByQuery(query: URLSearchParams, db: Db = getDb()): Task
       status: isTaskStatus(status) ? status : undefined,
       assignee: parseAssignee(query.get("assignee"), db),
       tag: parseTagFilter(query.get("tag")),
+      due: parseDueFilter(query.get("due")),
       q: parseKeyword(query.get("q")),
       sort: parseSort(query.get("sort")),
       includeArchived: parseIncludeArchived(query.get("archived")),
