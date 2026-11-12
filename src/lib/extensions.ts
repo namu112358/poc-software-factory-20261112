@@ -303,3 +303,18 @@ const EXTENSION_STATUS_LABEL: Record<ExtensionStatus, string> = {
 export function extensionStatusLabel(status: ExtensionStatus): string {
   return EXTENSION_STATUS_LABEL[status];
 }
+
+export const LONG_WAIT_HOURS = 48;
+const HOUR_MS = 60 * 60 * 1000;
+
+/** 申請から 48 時間以上たっていれば、待っている日数（切り捨て）を返す。48 時間に満たなければ null。UTC の時刻で比べる。 */
+export function longWaitDays(createdAt: string, now: Date = new Date()): number | null {
+  const elapsed = now.getTime() - new Date(createdAt).getTime();
+  if (Number.isNaN(elapsed) || elapsed < LONG_WAIT_HOURS * HOUR_MS) return null;
+  return Math.floor(elapsed / (24 * HOUR_MS));
+}
+
+/** 承認待ちの申請のうち、48 時間以上待っているものの数。 */
+export function countLongWaiting(createdAts: string[], now: Date = new Date()): number {
+  return createdAts.filter((c) => longWaitDays(c, now) !== null).length;
+}
