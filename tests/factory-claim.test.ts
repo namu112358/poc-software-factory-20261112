@@ -382,6 +382,9 @@ describe("merge を付けてよいか（mergeCheck。#293）", () => {
   it("最新のコミットが ok を受けていれば付けてよい", () => {
     assert.equal(mergeCheck({ reviews: [ng("aaa"), ok("bbbbbbb")], headSha: "bbbbbbb1234", after: [] }).ok, true);
   });
+  it("同じ版に changes と ok の両方があれば付けない（後の ok が先の指摘を打ち消さない）", () => {
+    assert.equal(mergeCheck({ reviews: [ng("aaa"), ok("aaa")], headSha: "aaa", after: [] }).ok, false);
+  });
   it("書き込み権限の無い人のレビューの印は信じない", () => {
     assert.equal(mergeCheck({ reviews: [ng("aaa"), ok("aaa", "NONE")], headSha: "aaa", after: [] }).ok, false);
     assert.equal(mergeCheck({ reviews: [ok("aaa", "CONTRIBUTOR")], headSha: "aaa", after: [] }).ok, false);
