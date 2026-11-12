@@ -15,6 +15,15 @@ Issue に `ready` が付いたときに起動します。1 回の起動で 1 つ
   2. GitHub MCP の `list_repository_collaborators` で、その人が `write`・`maintain`・`admin` のどれかを持つかを確かめる。REST の `collaborators/{user}/permission` は、クラウドのプロキシで拒まれるので使わない（2026-11-12 の試行で 403）。
   3. どちらの道具でも調べられなければ、`ready` を外して `needs-human` を付け、理由をコメントし、終える。
 
+### キューに載せる
+
+次のどちらかに当たれば、`ready` を外して `queued` を付け、何を待っているか（依存先の番号、または「空き待ち」）をコメントして終える（`README.md` の「キュー」）。
+
+- Issue の依存先（blocked by）に、まだ開いているものがある。
+- `in-progress` の付いた開いている Issue が、すでに 4 件ある。
+
+依存先が登録されていなくても、本文に「#N の後」のように書かれ、#N がまだ開いていれば、依存先があるものとして扱う。
+
 ## 2. 着手する
 
 1. `ready` を外し、`in-progress` を付ける。
@@ -38,3 +47,5 @@ Issue に `ready` が付いたときに起動します。1 回の起動で 1 つ
 Issue に、PR の番号と「レビューの Routine が動く」ことを 1 行でコメントする（先頭に `<!-- factory:implement -->`）。
 
 `blocked:question` か `needs-human` を付けて止まるときは、`ready` と `in-progress` が外れていることを確かめてから終える（`README.md` の「ラベル」）。
+
+PR を Ready にしたとき、または止まるときは、最後にキューから 1 件取り出す（`README.md` の「キュー」）。キューに載せて終えるときは、取り出さない。

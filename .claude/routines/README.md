@@ -27,7 +27,9 @@ flowchart LR
 | `ready` | Issue | 実装してよい（これが承認） | 書き込み権限のある人だけ |
 | `in-progress` | Issue | 実装の Routine が作業中（PR を Ready にするまで） | 実装 |
 | `blocked:question` | Issue | 確認事項があり止まっている | 実装・修正 |
+| `queued` | Issue | 受け付けたが、空きか依存先を待っている（キュー） | 実装 |
 | `needs-human` | Issue・PR | 上限に達した・手順の外のことが要る | どの役でも |
+| `risk:high` | PR | 高リスクの変更（下の「高リスク」）。人が重点的に見てからマージする | レビュー |
 
 止まるときは、`ready` と `in-progress` を外してから `blocked:question` か `needs-human` を付ける。`ready` が付いたまま止まると、付け直しても「ラベルが付いた」というイベントが起きず、実装が起動しないため。
 
@@ -36,6 +38,24 @@ flowchart LR
 - **実装で止まった（PR が無い）:** `blocked:question`・`needs-human` を外し、Issue に `ready` を付け直す。
 - **修正で止まった（PR が draft）:** `blocked:question`・`needs-human` を外し、PR を Ready にしてから draft に戻す。Ready にしたときはレビューも起動するが、同じ版はレビュー済みなので何もせずに終え、draft に戻したときに修正が起動する。
 
+## キュー（同時に動かす数と依存）
+
+- **同時に実装する Issue は 4 件まで。** `in-progress` の付いた開いている Issue の数で数える。
+- **依存は GitHub の依存関係（blocked by）で表す。** 人が Issue を作るときに、先に終わらせる Issue を「blocked by」に登録する。調べ方は GitHub MCP の `issue_read`、または REST の `GET /repos/{owner}/{repo}/issues/{number}/dependencies/blocked_by`。
+- 実装の役は、着手する前に「依存先がすべて閉じている」「作業中が 4 件未満」を確かめる。どちらかに当たらなければ、`ready` を外して `queued` を付け、何を待っているかをコメントして終える。
+- **キューから取り出す:** `queued` の Issue のうち、依存先がすべて閉じているものを、古い順に 1 件選び、`queued` を外して `ready` を付ける（実装が起動する）。作業中が 4 件以上なら取り出さない。取り出すのは次のとき。
+  - 実装の役が終わるとき（PR を Ready にしたとき、または止まるとき）に 1 件。
+  - 巡回の役が動くとき（1 時間ごとと、PR が閉じたとき）に、空きの数だけ。
+- 同時に起動した役が数え違えて、一時的に 4 件を超えることはある。厳密には止めない。
+
+## 高リスク
+
+レビューの役は、PR が次のどれかに触れていれば `risk:high` を付け、レビューのコメントにどれに当たるかを書く（開発標準 §2.6）。
+
+- DB のスキーマ（`src/lib/db/migrations.ts`）
+- ログイン・セッション・権限の判定（`src/lib/auth.ts`・`src/lib/session.ts`・`src/lib/api.ts` の `requireApiUser` など）
+- 他人のデータを見せる・変える範囲が変わる変更（担当者以外の操作を許す、など）
+
 ## GitHub トリガーの設定
 
 | Routine | イベント | フィルタ | 手順書 |
@@ -43,7 +63,9 @@ flowchart LR
 | 実装 | Issue → ラベル付き | Labels is one of `ready` | [implement.md](implement.md) |
 | レビュー | Pull request → Ready for review | Head branch starts with `claude/` | [review.md](review.md) |
 | 修正 | Pull request → Converted to draft | Head branch starts with `claude/` | [fix.md](fix.md) |
-| 巡回 | 1 時間ごと（Schedule） | — | [patrol.md](patrol.md) |
+| 巡回 | 1 時間ごと（Schedule）と、Pull request → Closed | （Closed は Head branch starts with `claude/`） | [patrol.md](patrol.md) |
+
+巡回は Schedule のトリガーを持つので、Routine の設定でこのリポジトリを選んでおく（GitHub トリガーだけの Routine と違い、選ばないとリポジトリが取り出されない。2026-11-12 の初回で、手順書を読めずに終えた）。
 
 ## どの役にも共通の決まり
 
