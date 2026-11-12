@@ -141,4 +141,12 @@ export const MIGRATIONS: readonly Migration[] = [
       ALTER TABLE tasks ADD COLUMN archived INTEGER NOT NULL DEFAULT 0 CHECK (archived IN (0, 1));
     `,
   },
+  {
+    version: 13,
+    name: "comment_edited_at",
+    sql: `
+      -- コメントの本文を最後に編集した日時。ISO 8601（UTC）。一度も編集していなければ NULL。
+      ALTER TABLE comments ADD COLUMN edited_at TEXT;
+    `,
+  },
 ];
