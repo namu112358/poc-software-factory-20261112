@@ -60,9 +60,14 @@ describe("due query", () => {
     for (const v of ["", "bogus", null, undefined, 1]) assert.equal(parseDueFilter(v), undefined);
   });
   it("invalid due in the URL does not filter", () => {
-    const db = openDb();
-    const all = listTasksByQuery(new URLSearchParams(""), db).length;
-    assert.equal(listTasksByQuery(new URLSearchParams("due=bogus"), db).length, all);
+    const { db } = setup();
+    const filter = parseTaskFilter(new URLSearchParams("due=bogus"), db);
+    assert.equal(filter.due, undefined);
+    assert.equal(listTasks({ ...filter, today: TODAY }, db).length, 4);
+  });
+  it("the API list (GET /api/tasks) does not filter by due (out of scope for #348)", () => {
+    const { db } = setup();
+    assert.equal(listTasksByQuery(new URLSearchParams("due=overdue"), db).length, 4);
   });
   it("CSV export link and parser carry due", () => {
     assert.equal(exportHref({ due: "week" }), "/api/tasks/export?due=week");
