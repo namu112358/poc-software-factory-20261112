@@ -366,19 +366,22 @@ export function formatJstDate(iso: string): string {
 export function duplicateTask(id: number, db: Db = getDb()): Task | undefined {
   const source = getTask(id, db);
   if (!source) return undefined;
-  const copy = createTask(
-    {
-      title: source.title,
-      status: "todo",
-      assignee: source.assignee,
-      dueDate: source.dueDate,
-      priority: source.priority,
-      estimateMinutes: source.estimateMinutes,
-    },
-    db,
-  );
-  db.prepare("INSERT INTO task_tags (task_id, name) SELECT ?, name FROM task_tags WHERE task_id = ? ORDER BY id").run(copy.id, id);
-  return copy;
+  // 複製とタグの写しは 1 つのトランザクションで行い、どちらかだけが残らないようにする。
+  return transaction(db, () => {
+    const copy = createTask(
+      {
+        title: source.title,
+        status: "todo",
+        assignee: source.assignee,
+        dueDate: source.dueDate,
+        priority: source.priority,
+        estimateMinutes: source.estimateMinutes,
+      },
+      db,
+    );
+    db.prepare("INSERT INTO task_tags (task_id, name) SELECT ?, name FROM task_tags WHERE task_id = ? ORDER BY id").run(copy.id, id);
+    return copy;
+  });
 }
 
 /** まとめて完了にできるタスクの最大件数。 */
