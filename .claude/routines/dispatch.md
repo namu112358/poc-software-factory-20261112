@@ -29,7 +29,7 @@
 3. 変えるファイル（テストを除く）を決める。Issue の受入条件から、変える画面・API・表を挙げ、今のリポジトリ（`main` の最新）を検索して決める（`src/lib/db/migrations.ts` も含める）。前に待ったときの `factory:queued` の `files=` は使い回さない（ファイルの構成が変わっていることがあるため。#275）。
 4. `node scripts/factory/claim.ts precheck <番号> --files <カンマ区切りのパス>` を実行する。
    - `"decision": "queue"` なら、結果の `comment` をそのままコメントして次へ（ラベルは変えない。`ready` のまま待つ）。直前のこの Issue の `factory:queued` と待ち先が同じなら、コメントもしない。
-   - `"decision": "error"` なら、出力をコメントして次へ。
+   - `"decision": "error"` なら、`ready` を外して `needs-human` を付け、出力をコメントして次へ（ラベルを変えないと、割り当て・巡回のたびに同じ Issue が選ばれ、同じエラーのコメントが続くため）。
    - `"decision": "go"` なら 5 へ（`note` があれば、着手のコメントに書く）。
 5. 難易度を判定する（`README.md` の「難易度」の観点）。
 6. `ready` を外し、`in-progress`（難しければ `in-progress:hard`）を付ける（実装の Routine が起動する）。続けて、着手のコメントを書く: 先頭に `<!-- factory:touch files=<3 で決めたファイル> -->` を付け、難しいと判定したときは当たった観点を、`precheck` の `note` があればそれを書く。
