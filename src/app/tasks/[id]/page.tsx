@@ -85,7 +85,7 @@ export default async function TaskDetailPage({ params }: Props) {
             {comments.map((c) => (
               <li key={c.id} data-testid="comment">
                 <p>
-                  <strong>{c.authorName}</strong> <time dateTime={c.createdAt}>{c.createdAt}</time>
+                  <strong>{c.authorName}</strong> <time dateTime={c.createdAt}>{formatJstDateTime(c.createdAt)}</time>
                 </p>
                 <p style={{ whiteSpace: "pre-wrap" }}>{c.body}</p>
                 {c.author === user.id && <DeleteCommentButton taskId={task.id} commentId={c.id} />}
