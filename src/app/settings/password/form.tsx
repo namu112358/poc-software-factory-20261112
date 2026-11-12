@@ -8,11 +8,14 @@ import {
   checkPasswordConfirmation,
   passwordErrorMessages,
 } from "@/lib/password-form";
+import { passwordStrengthText } from "@/lib/password-strength";
 
 export function PasswordForm() {
   const [errors, setErrors] = useState<string[]>([]);
   const [done, setDone] = useState(false);
   const [pending, setPending] = useState(false);
+  const [newPassword, setNewPassword] = useState("");
+  const strength = passwordStrengthText(newPassword);
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -36,6 +39,7 @@ export function PasswordForm() {
       });
       if (res.ok) {
         form.reset();
+        setNewPassword("");
         setDone(true);
       } else {
         setErrors(passwordErrorMessages(await res.json().catch(() => undefined)));
@@ -56,8 +60,15 @@ export function PasswordForm() {
       </p>
       <p>
         <label>
-          新しいパスワード <input name="newPassword" type="password" autoComplete="new-password" required />
+          新しいパスワード <input name="newPassword"
+            type="password"
+            autoComplete="new-password"
+            required
+            value={newPassword}
+            onChange={(event) => setNewPassword(event.target.value)}
+          />
         </label>
+        {strength && <span data-testid="password-strength"> {strength}</span>}
       </p>
       <p>
         <label>
