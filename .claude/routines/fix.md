@@ -8,22 +8,22 @@ PR が draft に戻されたときに起動します。直前のレビューの�
 
 - PR が閉じている、draft でない。
 - head のブランチが `claude/` で始まらない。
-- PR に `needs-human` が付いている。
+- PR に `status:needs-human` が付いている。
 - 直すものが無い。直すものは次の 2 つで、どちらにも当たらなければ、人が別の理由で draft に戻したものとして扱う。
   - 最新のレビューのコメント（`<!-- factory:review ... -->`）が `verdict=changes` で、その `commit=` が PR の最新のコミットと同じ（指摘の後に、まだ誰も直していない）。
   - PR が `main` と衝突している（`mergeable` が false）。`mergeable` は、マージの直後は計算中（`null`）のことがある。`null` なら 1 分ほど待って読み直し（2 回まで）、それでも `null` なら衝突しているものとして扱う（直すものが無ければ、`main` を取り込んでも差分は出ない）。
 
 ## 2. 往復の上限を確かめる
 
-PR のレビュー（`pull_request_read` の `get_reviews`。Issue のコメントではない）のうち、`verdict=changes` のものを数える。3 つ以上（2 往復の修正を終えて、まだ指摘がある）なら、`needs-human` を付け、残っている指摘と、これまでの対応をコメントして終える（PR は draft のまま）。
+PR のレビュー（`pull_request_read` の `get_reviews`。Issue のコメントではない）のうち、`verdict=changes` のものを数える。3 つ以上（2 往復の修正を終えて、まだ指摘がある）なら、`status:needs-human` を付け、残っている指摘と、これまでの対応をコメントして終える（PR は draft のまま）。
 
 ## 3. 直す
 
-1. PR に `merge` のラベルが付いていれば外す（直した中身を人がレビューの結果と合わせて見てから、付け直す。付いたままだと、Mergify が直した版をレビューの前にキューに戻してしまう）。
+1. PR に `merge:requested` のラベルが付いていれば外す（直した中身を人がレビューの結果と合わせて見てから、付け直す。付いたままだと、Mergify が直した版をレビューの前にキューに戻してしまう）。
 2. PR の head のブランチを取り出し、`main` を取り込む。衝突があれば、両方の変更の意図が残るように解消する。
 3. 最新の `verdict=changes` のレビューの「必須」の指摘を 1 つずつ直す。指摘が誤っていると判断したものは直さず、理由を書く。「任意」は、変更が小さく受入条件に関わるものだけ直す。
-4. 指摘が受入条件の解釈の違いで、Issue だけでは決められないときは、Issue に `blocked:question` を付けて、決めてほしいことをコメントし、終える（PR は draft のまま）。
-5. `npm run typecheck`・`npm test`・`npm run build` を通して push する。CI（`app-check`）が通るまで直す（同じ失敗は 3 回まで。超えたら `needs-human`）。
+4. 指摘が受入条件の解釈の違いで、Issue だけでは決められないときは、Issue に `status:blocked-question` を付けて、決めてほしいことをコメントし、終える（PR は draft のまま）。
+5. `npm run typecheck`・`npm test`・`npm run build` を通して push する。CI（`app-check`）が通るまで直す（同じ失敗は 3 回まで。超えたら `status:needs-human`）。
 
 ## 4. 終える
 
