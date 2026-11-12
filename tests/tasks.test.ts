@@ -10,6 +10,7 @@ import {
   formatEstimate,
   formatJstDateTime,
   formatTaskCount,
+  TASK_LIST_HELP,
   getTask,
   isTaskStatus,
   listAssignees,
@@ -428,5 +429,11 @@ describe("memo", () => {
   it("is optional on create", () => {
     const db = openDb();
     assert.equal(validateTaskInput({ ...base }, {}, db).ok, true);
+  });
+});
+
+describe("TASK_LIST_HELP", () => {
+  it("使い方の説明が指定の文言である", () => {
+    assert.equal(TASK_LIST_HELP, "ステータス・担当者・タグで絞り込み、優先度の高い順に並べ替えられます。");
   });
 });
