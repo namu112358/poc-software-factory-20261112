@@ -124,10 +124,10 @@ async function main(): Promise<unknown> {
       return { issue: n, ...confirm({ self, inProgress, ownPr: own }) };
     }
     case "pick": {
-      const [queued, inProgress] = await Promise.all([loadLabeled("queued"), getAll<RawIssue>(`/repos/${REPO}/issues?state=open&labels=in-progress`)]);
+      const [queued, inProgress, openPrs] = await Promise.all([loadLabeled("queued"), loadLabeled("in-progress"), loadOpenPrs()]);
       await loadOpen(queued.flatMap(dependencies));
-      const inProgressCount = inProgress.filter((i) => !i.pull_request).length;
-      return { inProgress: inProgressCount, ...pick({ queued, inProgressCount, isOpen }) };
+      const inProgressCount = inProgress.length;
+      return { inProgress: inProgressCount, ...pick({ queued, inProgressCount, isOpen, openPrs, inProgress }) };
     }
     case "handled": {
       const since = arg("since");

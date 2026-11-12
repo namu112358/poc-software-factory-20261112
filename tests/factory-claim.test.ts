@@ -8,6 +8,7 @@ import {
   parseTouch,
   pick,
   precheck,
+  waitingSince,
   type IssueInfo,
 } from "../scripts/factory/claim-core.ts";
 
@@ -59,11 +60,25 @@ describe("着手の前の確かめ（precheck）", () => {
     const r = precheck({ ...base, openPrs, self: issue(10), files: ["a.ts"], inProgress: [] });
     assert.equal(waitOf(r), 51);
   });
-  it("先に待っている（番号が小さい）queued の Issue と重なれば追い越さない。後の Issue とは比べない", () => {
-    const older = issue(8, [queued("wait=slot files=a.ts", "2026-01-01T00:00:00Z")]);
-    const newer = issue(12, [queued("wait=slot files=a.ts", "2026-01-01T00:00:00Z")]);
-    assert.equal(precheck({ ...base, queued: [older], self: issue(10), files: ["a.ts"], inProgress: [] }).decision, "queue");
-    assert.equal(precheck({ ...base, queued: [newer], self: issue(10), files: ["a.ts"], inProgress: [] }).decision, "go");
+  it("キューに載ったことの無い Issue は、同じファイルを変える queued の Issue を、番号にかかわらず追い越さない（#183）", () => {
+    // #84 の再現: 先に待っている #84 を、後から ready になった番号の大きい #108 が追い越していた
+    const waiting84 = issue(84, [queued("wait=#236 files=src/lib/tasks.ts", "2026-11-12T11:12:07Z")]);
+    const r = precheck({ ...base, queued: [waiting84], self: issue(108), files: ["src/lib/tasks.ts"], inProgress: [] });
+    assert.equal(waitOf(r), 84);
+    const waiting12 = issue(12, [queued("wait=slot files=a.ts", "2026-01-01T00:00:00Z")]);
+    assert.equal(waitOf(precheck({ ...base, queued: [waiting12], self: issue(10), files: ["a.ts"], inProgress: [] })), 12);
+  });
+  it("取り出された Issue は、自分より後に待ち始めた queued の Issue には待たされない", () => {
+    const self = issue(92, [queued("wait=#83 files=src/lib/tasks.ts", "2026-11-12T09:05:00Z")]);
+    const later = issue(85, [queued("wait=#83 files=src/lib/tasks.ts", "2026-11-12T10:30:00Z")]);
+    assert.equal(precheck({ ...base, queued: [later, self], self, files: ["src/lib/tasks.ts"], inProgress: [] }).decision, "go");
+    const earlier = issue(101, [queued("wait=#83 files=src/lib/tasks.ts", "2026-11-12T09:00:00Z")]);
+    assert.equal(waitOf(precheck({ ...base, queued: [earlier, self], self, files: ["src/lib/tasks.ts"], inProgress: [] })), 101);
+  });
+  it("待ち始めの時刻は、最初の factory:queued のコメントの時刻", () => {
+    const i = issue(92, [touch("a.ts", "2026-11-12T08:00:00Z"), queued("wait=#83", "2026-11-12T09:05:00Z"), queued("wait=#99", "2026-11-12T11:00:00Z")]);
+    assert.equal(waitingSince(i), "2026-11-12T09:05:00Z");
+    assert.equal(waitingSince(issue(1)), null);
   });
 });
 
@@ -129,6 +144,46 @@ describe("キューから取り出す（pick）", () => {
     assert.deepEqual(r.pick, [1, 3]);
     assert.equal(r.rewait[0].issue, 2);
     assert.match(r.rewait[0].comment, /^<!-- factory:queued wait=#1 files=a\.ts,b\.ts -->/);
+  });
+});
+
+describe("キューから取り出す（pick）: 待っている時間と、開いている PR・作業中の Issue（#183）", () => {
+  it("番号ではなく、待ち始めが早い順に選ぶ", () => {
+    const longWait = issue(92, [queued("wait=slot files=a.ts", "2026-11-12T09:05:00Z")]);
+    const shortWait = issue(85, [queued("wait=slot files=b.ts", "2026-11-12T11:00:00Z")]);
+    assert.deepEqual(pick({ queued: [shortWait, longWait], inProgressCount: 3, isOpen: open() }).pick, [92]);
+  });
+  it("同じファイルを変える開いている PR があれば、取り出さずに待ち先をその PR に付け替える", () => {
+    const q84 = issue(84, [queued("wait=#236 files=src/lib/tasks.ts", "2026-11-12T11:12:07Z")]);
+    const openPrs = [{ number: 238, headRef: "claude/issue-108", files: ["src/lib/tasks.ts"] }];
+    const r = pick({ queued: [q84], inProgressCount: 0, isOpen: open(), openPrs });
+    assert.deepEqual(r.pick, []);
+    assert.equal(r.rewait[0].wait, 238);
+    assert.match(r.rewait[0].comment, /^<!-- factory:queued wait=#238 files=src\/lib\/tasks\.ts -->/);
+  });
+  it("待ち先がすでに同じなら、付け替えのコメントをくり返さない", () => {
+    const q84 = issue(84, [queued("wait=#238 files=src/lib/tasks.ts", "2026-11-12T11:20:00Z")]);
+    const openPrs = [{ number: 238, headRef: "claude/issue-108", files: ["src/lib/tasks.ts"] }];
+    const r = pick({ queued: [q84], inProgressCount: 0, isOpen: open(238), openPrs });
+    assert.deepEqual(r.pick, []);
+    assert.deepEqual(r.rewait, []);
+  });
+  it("作業中の Issue と同じファイルを変えるなら取り出さない。自分の PR は数えない", () => {
+    const q = issue(210, [queued("wait=#93 files=src/app/tasks/page.tsx", "2026-11-12T10:57:47Z")]);
+    const working = issue(213, [touch("src/app/tasks/page.tsx,src/lib/tasks.ts", "2026-11-12T11:30:00Z")]);
+    const r = pick({ queued: [q], inProgressCount: 1, isOpen: open(), inProgress: [working] });
+    assert.deepEqual(r.pick, []);
+    assert.equal(r.rewait[0].wait, 213);
+    const own = [{ number: 300, headRef: "claude/issue-210", files: ["src/app/tasks/page.tsx"] }];
+    assert.deepEqual(pick({ queued: [q], inProgressCount: 0, isOpen: open(), openPrs: own }).pick, [210]);
+  });
+  it("前より長く待っている Issue が、同じファイルを変える新しい待ちより先に出る", () => {
+    const old = issue(92, [queued("wait=slot files=src/lib/tasks.ts", "2026-11-12T09:05:00Z")]);
+    const fresh = issue(85, [queued("wait=slot files=src/lib/tasks.ts", "2026-11-12T11:00:00Z")]);
+    const r = pick({ queued: [fresh, old], inProgressCount: 0, isOpen: open() });
+    assert.deepEqual(r.pick, [92]);
+    assert.equal(r.rewait[0].issue, 85);
+    assert.equal(r.rewait[0].wait, 92);
   });
 });
 

@@ -65,6 +65,27 @@ export function latestQueued(issue: IssueInfo) {
   return latest(issue.comments, parseQueued);
 }
 
+/** 待ち始めた時刻: 最初の factory:queued のコメントの時刻。キューに載ったことが無ければ null（#183） */
+export function waitingSince(issue: IssueInfo): string | null {
+  let first: string | null = null;
+  for (const c of issue.comments) {
+    if (parseQueued(c.body) !== null && (first === null || c.createdAt < first)) first = c.createdAt;
+  }
+  return first;
+}
+
+/** 待っている順: 待ち始めが早いほうが先。キューに載ったことが無いものは最後。同じなら番号が小さいほうが先 */
+export function waitOrder(a: IssueInfo, b: IssueInfo): number {
+  const wa = waitingSince(a);
+  const wb = waitingSince(b);
+  if (wa !== wb) {
+    if (wa === null) return 1;
+    if (wb === null) return -1;
+    return wa < wb ? -1 : 1;
+  }
+  return a.number - b.number;
+}
+
 /** 本文の「#N の後」に書かれた番号 */
 export function bodyDeps(body: string): number[] {
   const out: number[] = [];
@@ -138,7 +159,8 @@ export function precheck(args: {
     const o = overlap(files, latestTouch(i)?.value ?? []);
     if (o.length > 0) return queue("queue", i.number, files, `作業中の #${i.number} が同じファイル（${o.join("、")}）を変える予定なので、閉じるまで待つ。`);
   }
-  const olderQueued = args.queued.filter((i) => i.number < self.number).sort((a, b) => a.number - b.number);
+  // 自分より先に待ち始めた queued の Issue（自分がキューに載ったことが無ければ、queued のすべて）を追い越さない（#183）
+  const olderQueued = args.queued.filter((i) => i.number !== self.number && waitOrder(i, self) < 0).sort(waitOrder);
   for (const i of olderQueued) {
     const o = overlap(files, plannedFiles(i));
     if (o.length > 0) return queue("queue", i.number, files, `先に待っている #${i.number} が同じファイル（${o.join("、")}）を変える予定なので、追い越さずに待つ。`);
@@ -188,8 +210,31 @@ export function confirm(args: { self: IssueInfo; inProgress: IssueInfo[]; ownPr?
   return { decision: "go" };
 }
 
-/** キューから取り出す（README の「キュー」）。ラベルは変えず、取り出してよい Issue を返す */
-export function pick(args: { queued: IssueInfo[]; inProgressCount: number; isOpen: (n: number) => boolean }): {
+/** 開いている PR（自分の PR を除く）と作業中の Issue のうち、files と同じファイルを変えるもの */
+function blocker(self: IssueInfo, files: string[], openPrs: PrInfo[], inProgress: IssueInfo[]): number | null {
+  for (const pr of openPrs) {
+    if (pr.headRef === `claude/issue-${self.number}`) continue;
+    if (overlap(files, pr.files).length > 0) return pr.number;
+  }
+  for (const i of inProgress) {
+    if (i.number === self.number) continue;
+    if (overlap(files, latestTouch(i)?.value ?? []).length > 0) return i.number;
+  }
+  return null;
+}
+
+/**
+ * キューから取り出す（README の「キュー」）。ラベルは変えず、取り出してよい Issue と、待ち先を付け替える Issue を返す。
+ * 待ち始めが早い順に見る。開いている PR・作業中の Issue・同じ回に取り出した Issue と同じファイルを変えるものは、
+ * 取り出さずに待ち先を付け替える（取り出しても着手の前の確かめで戻るだけなので。#183）。待ち先が今と同じなら何もしない。
+ */
+export function pick(args: {
+  queued: IssueInfo[];
+  inProgressCount: number;
+  isOpen: (n: number) => boolean;
+  openPrs?: PrInfo[];
+  inProgress?: IssueInfo[];
+}): {
   slots: number;
   pick: number[];
   rewait: { issue: number; wait: number; files: string[]; comment: string }[];
@@ -197,14 +242,22 @@ export function pick(args: { queued: IssueInfo[]; inProgressCount: number; isOpe
   const slots = Math.max(0, WIP_LIMIT - args.inProgressCount);
   const picked: IssueInfo[] = [];
   const rewait: { issue: number; wait: number; files: string[]; comment: string }[] = [];
-  for (const i of [...args.queued].sort((a, b) => a.number - b.number)) {
+  const addRewait = (i: IssueInfo, wait: number, files: string[], reason: string) => {
+    if (latestQueued(i)?.value.wait === wait) return; // すでに同じ待ち先なら、コメントをくり返さない
+    rewait.push({ issue: i.number, wait, files, comment: queuedComment(wait, files, reason) });
+  };
+  for (const i of [...args.queued].sort(waitOrder)) {
     if (picked.length >= slots) break;
     if (dependencies(i).some((n) => args.isOpen(n))) continue;
     const files = plannedFiles(i);
+    const busy = blocker(i, files, args.openPrs ?? [], args.inProgress ?? []);
+    if (busy !== null) {
+      addRewait(i, busy, files, `#${busy} が同じファイルを変えているので、取り出さずに #${busy} を待つ。`);
+      continue;
+    }
     const clash = picked.find((p) => overlap(files, plannedFiles(p)).length > 0);
     if (clash) {
-      const reason = `同じ回に取り出した #${clash.number} と同じファイルを変えるので、#${clash.number} を待つ。`;
-      rewait.push({ issue: i.number, wait: clash.number, files, comment: queuedComment(clash.number, files, reason) });
+      addRewait(i, clash.number, files, `同じ回に取り出した #${clash.number} と同じファイルを変えるので、#${clash.number} を待つ。`);
       continue;
     }
     picked.push(i);

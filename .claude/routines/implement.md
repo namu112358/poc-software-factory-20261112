@@ -32,7 +32,7 @@ node scripts/factory/claim.ts precheck <番号> --files <カンマ区切りの�
 - `"decision": "queue"` なら、`ready` を外して `queued` を付け、結果の `comment` をそのままコメントして終える（キューからは取り出さない）。`comment` の先頭の `factory:queued` には、どの理由でも `files=` が付いている（後から来た Issue と取り出す役が、重なりを見るのに使う。#216）。
 - `"decision": "error"` なら、`ready` を外して `needs-human` を付け、出力をコメントして終える。
 
-スクリプトが確かめること（`README.md` の「キュー」）: 依存先がすべて閉じているか、自分以外の作業中が 4 件未満か、変えそうなファイルが、開いている `claude/` の PR・作業中のほかの Issue の `factory:touch`・自分より古い `queued` の Issue の `files=` と重ならないか。
+スクリプトが確かめること（`README.md` の「キュー」）: 依存先がすべて閉じているか、自分以外の作業中が 4 件未満か、変えそうなファイルが、開いている `claude/` の PR・作業中のほかの Issue の `factory:touch`・自分より先に待ち始めた `queued` の Issue の `files=` と重ならないか（キューに載ったことの無い Issue は、`queued` の Issue すべてと比べる。待っている Issue を、後から来た Issue が追い越さないため。#183）。
 
 ### 難易度を判定する（標準の役だけ）
 
