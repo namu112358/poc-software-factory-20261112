@@ -213,8 +213,9 @@ describe("お互いを待って止まらない（#253 のレビュー）", () =>
     const waiting20 = issue(20, [queued("wait=#10 files=src/lib/tasks.ts", "2026-11-12T10:00:00Z")]);
     const retreated10 = issue(10, [touch("src/lib/tasks.ts", "2026-11-12T09:59:00Z"), queued("wait=#30 files=src/lib/tasks.ts", "2026-11-12T10:05:00Z")]);
     const r = pick({ queued: [waiting20, retreated10], inProgressCount: 0, isOpen: open(10) });
-    assert.deepEqual(r.pick, [10]);
-    assert.deepEqual(r.rewait, []);
+    // どちらか 1 件だけを出し、もう 1 件は出したほうを待つ（お互いを待たない。#10 はキューにいるだけなので #20 の依存にならず、待ち始めの早い #20 が先。#275）
+    assert.deepEqual(r.pick, [20]);
+    assert.deepEqual(r.rewait.map((x) => [x.issue, x.wait]), [[10, 20]]);
   });
   it("待ち先を間に挟んでも（A→B→C）自分に戻ってくれば、自分を待っているとみなす", () => {
     const a = issue(1, [queued("wait=#2", "2026-01-01T00:00:00Z")]);
@@ -309,6 +310,41 @@ describe("待つ理由が無くなった同じファイル待ちを解く（#262
     assert.equal(r.decision, "go");
     const r2 = precheck({ self, files: ["src/app/tasks/page.tsx"], inProgress: [working213], queued: [self], openPrs: [], isOpen: open(213) });
     assert.equal(r2.decision, "queue");
+  });
+});
+
+describe("#275 の再現: 13:40 UTC のキュー 12 件（待ちの数珠つなぎと古い見積もり）", () => {
+  const q = (n: number, recs: [string, string][]) => issue(n, recs.map(([at, attrs]) => queued(attrs, at)));
+  const queue275 = [
+    q(85, [["2026-11-12T11:25:34Z", "wait=#236 files=src/lib/db/migrations.ts,src/lib/comments.ts,src/app/api/tasks/[id]/comments/[commentId]/route.ts,src/app/tasks/[id]/page.tsx"], ["2026-11-12T13:12:44Z", "wait=#101 files=src/lib/db/migrations.ts,src/lib/comments.ts,src/app/api/tasks/[id]/comments/[commentId]/route.ts,src/app/tasks/[id]/page.tsx"]]),
+    q(94, [["2026-11-12T12:42:18Z", "wait=#84 files=src/app/api/tasks/[id]/route.ts,src/lib/tasks.ts,src/app/tasks/[id]/page.tsx"], ["2026-11-12T13:12:33Z", "wait=#213 files=src/app/api/tasks/[id]/route.ts,src/lib/tasks.ts,src/app/tasks/[id]/page.tsx"]]),
+    q(98, [["2026-11-12T11:25:34Z", "wait=#236 files=src/app/api/tasks/[id]/route.ts,src/lib/tasks.ts"], ["2026-11-12T13:12:32Z", "wait=#213 files=src/app/api/tasks/[id]/route.ts,src/lib/tasks.ts"]]),
+    q(100, [["2026-11-12T13:31:18Z", "wait=#210 files=src/app/tasks/new/page.tsx,src/app/tasks/page.tsx,src/app/layout.tsx,src/lib/task-form.ts"]]),
+    q(101, [["2026-11-12T11:14:06Z", "wait=#236 files=src/app/tasks/[id]/page.tsx,src/lib/tasks.ts,tests/completed-at-display.test.ts"], ["2026-11-12T13:12:30Z", "wait=#213 files=src/app/tasks/[id]/page.tsx,src/lib/tasks.ts,tests/completed-at-display.test.ts"]]),
+    q(102, [["2026-11-12T13:12:21Z", "wait=#92 files=src/app/tasks/page.tsx,src/lib/task-query.ts,src/lib/tasks.ts,src/app/api/tasks/route.ts"], ["2026-11-12T13:30:40Z", "wait=#210 files=src/app/tasks/page.tsx,src/lib/task-query.ts,src/lib/tasks.ts,src/app/api/tasks/route.ts"]]),
+    q(104, [["2026-11-12T12:42:12Z", "wait=#101 files=src/lib/tags.ts,src/app/tasks/[id]/tags.tsx,src/app/tasks/[id]/page.tsx"]]),
+    q(210, [["2026-11-12T10:50:03Z", "wait=slot files=src/app/tasks/page.tsx"], ["2026-11-12T13:12:29Z", "wait=#213 files=src/app/tasks/page.tsx"]]),
+    q(211, [["2026-11-12T10:50:06Z", "wait=slot files=src/app/tasks/page.tsx,src/lib/tasks.ts"], ["2026-11-12T10:58:28Z", "wait=#210 files=src/app/tasks/page.tsx,src/lib/tasks.ts"]]),
+    q(259, [["2026-11-12T13:12:22Z", "wait=#92 files=src/lib/overdue.ts,src/lib/members.ts,src/lib/tasks.ts,src/lib/export.ts,src/lib/board.ts,src/lib/tags.ts"], ["2026-11-12T13:30:41Z", "wait=#211 files=src/lib/overdue.ts,src/lib/members.ts,src/lib/tasks.ts,src/lib/export.ts,src/lib/board.ts,src/lib/tags.ts"]]),
+    q(266, [["2026-11-12T13:23:17Z", "wait=#259 files=src/app/members/page.tsx,src/lib/members.ts"]]),
+    q(267, [["2026-11-12T13:29:31Z", "wait=#104 files=src/app/tags/page.tsx,src/lib/tags.ts"], ["2026-11-12T13:36:26Z", "wait=#104 files=src/app/settings/password/form.tsx,src/lib/password-strength.ts"]]),
+  ];
+  // #213 は PR #272 が Mergify のキューにいて、作業中のラベルは外れている。#84・#92・#236 は閉じている
+  const openPrs = [{ number: 272, headRef: "claude/issue-213", files: ["src/app/tasks/page.tsx", "src/lib/task-format.ts", "tests/unestimated-count.test.ts"] }];
+  const isOpen275 = open(85, 94, 98, 100, 101, 102, 104, 210, 211, 213, 259, 266, 267, 272);
+  it("空き 4 件で、#101・#266・#267 の 3 件を取り出せる（直す前は 0 件）", () => {
+    const r = pick({ queued: queue275, inProgressCount: 0, isOpen: isOpen275, openPrs, inProgress: [] });
+    assert.deepEqual(r.pick, [101, 266, 267]);
+  });
+  it("待ち先は先頭か動いている作業だけになり、数珠つなぎにならない", () => {
+    const r = pick({ queued: queue275, inProgressCount: 0, isOpen: isOpen275, openPrs, inProgress: [] });
+    const heads = new Set([101, 210, 266, 267, 213, 272]);
+    for (const x of r.rewait) assert.ok(heads.has(x.wait), `#${x.issue} → #${x.wait}`);
+  });
+  it("#267（ほかの Issue と重ならない）は、キューにいるだけの #104 を待たずに着手してよい", () => {
+    const self = queue275.find((i) => i.number === 267)!;
+    const r = precheck({ self, files: ["src/app/settings/password/form.tsx", "src/lib/password-strength.ts"], inProgress: [], queued: queue275, openPrs, isOpen: isOpen275 });
+    assert.equal(r.decision, "go");
   });
 });
 
