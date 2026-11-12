@@ -239,6 +239,16 @@ export function updateTask(id: number, changes: Partial<TaskInput>, db: Db = get
   return getTask(id, db);
 }
 
+/** 日本時間の「今日」を YYYY-MM-DD で返す。 */
+export function todayInJapan(now: Date = new Date()): string {
+  return new Intl.DateTimeFormat("sv-SE", { timeZone: "Asia/Tokyo" }).format(now);
+}
+
+/** 期限切れか。未完了で、期限日の翌日以降（期限当日は含めない）。日付は日本時間の YYYY-MM-DD。 */
+export function isOverdue(task: Pick<Task, "status" | "dueDate">, today: string = todayInJapan()): boolean {
+  return task.status !== "done" && task.dueDate < today;
+}
+
 /** 見積もり時間の表示用の文字列。未設定は「—」。 */
 export function formatEstimate(minutes: number | null): string {
   return minutes === null ? "—" : `${minutes} 分`;
