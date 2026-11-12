@@ -16,7 +16,10 @@ export function parseTaskListQuery(query: URLSearchParams, db: Db = getDb()): Ta
   return { ...parseTaskFilter(query, db), includeArchived: parseIncludeArchived(query.get("archived")) };
 }
 
-/** タスク一覧のクエリを画面と同じ規則で検証し、絞り込んだ一覧を返す。期限の「今日」は `now` の日本時間の日付。 */
+/**
+ * タスク一覧のクエリを画面と同じ規則で検証し、絞り込んだ一覧を返す。期限の「今日」は `now` の日本時間の日付。
+ * キーワード（q）は、一覧画面・CSV と同じく、タイトル・メモに加えてコメントの本文からも探す。
+ */
 export function listTasksByQuery(query: URLSearchParams, db: Db = getDb(), now: Date = new Date()): Task[] {
-  return listTasks({ ...parseTaskListQuery(query, db), today: todayInJapan(now) }, db);
+  return listTasks({ ...parseTaskListQuery(query, db), qInComments: true, today: todayInJapan(now) }, db);
 }
