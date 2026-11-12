@@ -34,7 +34,7 @@ PR が高リスクの変更（DB のスキーマ `src/lib/db/migrations.ts`／�
 
 ## 3. 結果を書く
 
-PR にレビューのコメントを 1 つ書く（`pull_request_review_write` の `COMMENT`。Approve はしない）。先頭は次の形にする。
+書く直前に PR のレビューを読み直し、同じコミット（`commit=`）へのレビューがもうあれば、書かずに終える（同じ版に 2 つのレビューが付くと、どちらが有効か分からなくなる。#296）。無ければ、PR にレビューのコメントを 1 つ書く（`pull_request_review_write` の `COMMENT`。Approve はしない）。先頭は次の形にする。
 
 ```
 <!-- factory:review verdict=<ok|changes> round=<この PR で何回目のレビューか> commit=<レビューしたコミットの SHA> -->
