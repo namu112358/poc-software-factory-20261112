@@ -6,5 +6,5 @@ export * from "./task-format.ts";
 
 /** 一覧が 0 件のときだけ、絞り込みを解除するリンク先（クエリなしの一覧）を返す。1 件以上なら null。 */
 export function clearFilterHref(taskCount: number): string | null {
-  return taskCount === 0 ? "/tasks" : null;
+  return taskCount === 0 ? "/tasks?reset=1" : null;
 }

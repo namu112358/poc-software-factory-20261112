@@ -213,4 +213,16 @@ export const MIGRATIONS: readonly Migration[] = [
       CREATE INDEX tasks_deleted_at ON tasks(deleted_at);
     `,
   },
+  {
+    version: 19,
+    name: "task_view_prefs",
+    sql: `
+      -- 利用者ごとに覚えておく、タスク一覧の絞り込みと並べ替え。クエリ文字列（status・assignee・tag・q・due・sort・archived）をそのまま 1 行に入れる。
+      -- 行が無い利用者は「覚えた条件なし」。利用者を消すと一緒に消える。
+      CREATE TABLE task_view_prefs (
+        user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+        query   TEXT NOT NULL
+      );
+    `,
+  },
 ];
