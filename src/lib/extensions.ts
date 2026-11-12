@@ -106,9 +106,14 @@ export function createExtension(
 export type DecideResult =
   | { result: "decided"; extension: Extension; task: Task }
   | { result: "not_found" }
+  | { result: "forbidden" } // 申請した本人（自分の申請は自分で判断できない）
   | { result: "conflict" }; // すでに判断済み
 
-/** 申請を承認（approved）または却下（rejected）する。承認のときはタスクの期限も変える。 */
+/**
+ * 申請を承認（approved）または却下（rejected）する。承認のときはタスクの期限も変える。
+ * 判定の順は「申請が無い（not_found）→ 申請した本人（forbidden）→ 判断済み（conflict）」。
+ * 申請の更新は保留中のときだけ行い、先にほかの人が判断していればタスクも変えずに conflict を返す。
+ */
 export function decideExtension(
   taskId: number,
   extensionId: number,
@@ -119,15 +124,19 @@ export function decideExtension(
 ): DecideResult {
   const current = getExtension(extensionId, db);
   if (!current || current.taskId !== taskId) return { result: "not_found" };
+  if (current.requester === userId) return { result: "forbidden" };
   if (current.status !== "pending") return { result: "conflict" };
   db.exec("BEGIN");
   try {
-    db.prepare("UPDATE due_date_extensions SET status = ?, decided_by = ?, decided_at = ? WHERE id = ?").run(
-      decision,
-      userId,
-      now.toISOString(),
-      extensionId,
-    );
+    const { changes } = db
+      .prepare(
+        "UPDATE due_date_extensions SET status = ?, decided_by = ?, decided_at = ? WHERE id = ? AND status = 'pending'",
+      )
+      .run(decision, userId, now.toISOString(), extensionId);
+    if (Number(changes) === 0) {
+      db.exec("ROLLBACK");
+      return { result: "conflict" };
+    }
     if (decision === "approved") {
       db.prepare("UPDATE tasks SET due_date = ?, updated_at = ? WHERE id = ?").run(
         current.newDueDate,
