@@ -7,6 +7,8 @@ import {
   parseTouch,
   pick,
   precheck,
+  precheckActions,
+  relabelTargets,
   readyBudget,
   READY_EVENTS_PER_HOUR_BUDGET,
   waitingSince,
@@ -334,5 +336,37 @@ describe("1 時間あたりの起動の数（budget。#250）", () => {
     assert.deepEqual(pick({ queued: queuedIssues, inProgressCount: 0, isOpen: open(), readyRemaining: 1 }).pick, [1]);
     assert.deepEqual(pick({ queued: queuedIssues, inProgressCount: 0, isOpen: open(), readyRemaining: 0 }).pick, []);
     assert.deepEqual(pick({ queued: queuedIssues, inProgressCount: 2, isOpen: open() }).pick, [1, 2]);
+  });
+});
+
+describe("役がそのまま行う操作（precheckActions・relabelTargets）", () => {
+  it("go なら ready を外して in-progress を付け、着手の記録を書く", () => {
+    const a = precheckActions(issue(5), ["a.ts"], { decision: "go" });
+    assert.deepEqual(a.removeLabels, ["ready"]);
+    assert.deepEqual(a.addLabels, ["in-progress"]);
+    assert.match(a.comment ?? "", /^<!-- factory:touch files=a\.ts -->/);
+  });
+  it("queue ならラベルを変えず、待ち先が前と同じならコメントもしない", () => {
+    const d = { decision: "queue" as const, wait: 3 as const, files: ["a.ts"], reason: "r", comment: "c" };
+    assert.equal(precheckActions(issue(5), ["a.ts"], d).comment, "c");
+    const waited = issue(5, [queued("wait=#3 files=a.ts", "2026-01-01T00:00:00Z")]);
+    assert.equal(precheckActions(waited, ["a.ts"], d).comment, null);
+  });
+  it("付け直しは、時間がたち・着手のコメントも PR も無いものを、残りの回数まで。2 回目は人に回す", () => {
+    const base = { label: "in-progress", hasPr: false };
+    const r = relabelTargets({
+      now: "2026-11-12T12:00:00Z",
+      minMinutes: 15,
+      remaining: 1,
+      issues: [
+        { ...base, number: 1, labeledAt: "2026-11-12T11:30:00Z", comments: [] },
+        { ...base, number: 2, labeledAt: "2026-11-12T11:31:00Z", comments: [] },
+        { ...base, number: 3, labeledAt: "2026-11-12T11:55:00Z", comments: [] },
+        { ...base, number: 4, labeledAt: "2026-11-12T11:00:00Z", comments: [{ body: "<!-- factory:implement action=start -->", createdAt: "2026-11-12T11:01:00Z" }] },
+        { ...base, number: 5, labeledAt: "2026-11-12T11:00:00Z", comments: [{ body: "<!-- factory:patrol action=relabel-start -->", createdAt: "2026-11-12T11:20:00Z" }] },
+      ],
+    });
+    assert.deepEqual(r.relabel, [{ issue: 1, label: "in-progress" }]);
+    assert.deepEqual(r.needsHuman, [5]);
   });
 });

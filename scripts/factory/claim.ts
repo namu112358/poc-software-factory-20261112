@@ -1,7 +1,8 @@
 // Factory の Routine が使う判定のスクリプト（GitHub を読むだけ。書き込みはしない）。
 // 使い方（結果は JSON で標準出力に出る。役は decision に従い、ラベルとコメントを GitHub MCP で変える）:
 //   node scripts/factory/claim.ts pick                                  待っている Issue（ready あり・in-progress なし）のうち、着手させる候補
-//   node scripts/factory/claim.ts precheck <Issue> --files a.ts,b.ts   候補 1 件を着手させてよいかの確かめ
+//   node scripts/factory/claim.ts precheck <Issue> --files a.ts,b.ts   候補 1 件を着手させてよいかの確かめ（actions に、そのまま行う操作）
+//   node scripts/factory/claim.ts relabel --minutes 15                  起動しなかった実装の付け直しの対象（付け直す数は budget の残りまで）
 //   node scripts/factory/claim.ts handled --since <ISO 8601>            ほかの割り当てがもう処理した Issue・PR
 //   node scripts/factory/claim.ts budget                                直近 60 分に in-progress を付けた回数と、あと何回付けてよいか
 // Node 22.18 以上（型を外して .ts をそのまま動かす）。クラウドのプロキシを通すため、NODE_USE_ENV_PROXY=1 で自分を起動し直す。
@@ -12,8 +13,11 @@ import {
   makeIsStalled,
   pick,
   STALLED_LABELS,
+  errorActions,
   precheck,
+  precheckActions,
   readyBudget,
+  relabelTargets,
   splitFiles,
   type Comment,
   type IssueInfo,
@@ -168,7 +172,8 @@ async function main(): Promise<unknown> {
       const files = splitFiles(arg("files")).filter((f) => !f.startsWith("tests/"));
       const [self, inProgress, queued, openPrs, own] = await Promise.all([loadIssue(n), loadInProgress(), loadWaiting(), loadOpenPrs(), ownPr(n)]);
       await loadOpen(dependencies(self));
-      return { issue: n, files, ...precheck({ self, files, inProgress, queued, openPrs, isOpen, isStalled, ownPr: own }) };
+      const d = precheck({ self, files, inProgress, queued, openPrs, isOpen, isStalled, ownPr: own });
+      return { issue: n, files, ...d, actions: precheckActions(self, files, d) };
     }
     case "pick": {
       const [queued, inProgress, openPrs, b] = await Promise.all([loadWaiting(), loadInProgress(), loadOpenPrs(), loadBudget()]);
@@ -178,6 +183,19 @@ async function main(): Promise<unknown> {
     }
     case "budget":
       return loadBudget();
+    case "relabel": {
+      const minutes = Number(arg("minutes") ?? "15");
+      const [inProgress, b] = await Promise.all([loadInProgress(), loadBudget()]);
+      const issues = await Promise.all(
+        inProgress.map(async (i) => {
+          const events = await getAll<{ event: string; created_at: string; label?: { name: string } }>(`/repos/${REPO}/issues/${i.number}/events`);
+          const last = events.filter((e) => e.event === "labeled" && START_LABELS.includes(e.label?.name ?? "")).pop();
+          return { number: i.number, label: last?.label?.name ?? "in-progress", labeledAt: last?.created_at ?? "", comments: i.comments, hasPr: (await ownPr(i.number)) !== null };
+        }),
+      );
+      const r = relabelTargets({ issues: issues.filter((i) => i.labeledAt), now: new Date().toISOString(), minMinutes: minutes, remaining: b.remaining });
+      return { ...b, minutes, ...r };
+    }
     case "handled": {
       const since = arg("since");
       if (!since) throw new Error("--since <ISO 8601> を指定する");
@@ -186,12 +204,14 @@ async function main(): Promise<unknown> {
       return { since, mySession: mySession(), handled: handledByOthers({ comments, since, mySession: mySession() }) };
     }
     default:
-      throw new Error("pick / precheck / handled / budget のどれかを指定する");
+      throw new Error("pick / precheck / relabel / handled / budget のどれかを指定する");
   }
 }
 
 main().then(
   (r) => {
+    const res = r as { decision?: string; reason?: string; actions?: unknown };
+    if (res.decision === "error" && !res.actions) res.actions = errorActions(res.reason ?? "");
     console.log(JSON.stringify(r, null, 2));
     // decision が error（記録が無いなど）のときも、例外のときと同じ終了コード 2 にそろえる
     if ((r as { decision?: string }).decision === "error") process.exit(2);
