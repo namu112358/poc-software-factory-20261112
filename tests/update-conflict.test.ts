@@ -51,7 +51,10 @@ describe("updateTaskIfUnchanged（expectedUpdatedAt つきの更新）", () => {
     // 確認つきの UPDATE 文を用意する直前に、ほかの人の更新を割り込ませる。
     const racy = new Proxy(db, {
       get(target, prop) {
-        if (prop !== "prepare") return Reflect.get(target, prop, target);
+        if (prop !== "prepare") {
+          const value = Reflect.get(target, prop, target);
+          return typeof value === "function" ? value.bind(target) : value;
+        }
         return (sql: string) => {
           if (!interleaved && sql.startsWith("UPDATE tasks") && sql.includes(":expectedUpdatedAt")) {
             interleaved = true;
