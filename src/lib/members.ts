@@ -36,6 +36,13 @@ export function listMemberWorkload(db: Db = getDb(), today: string = todayInJapa
   });
 }
 
+/** 期限切れの件数の多い順、同じなら未完了の件数の多い順、それも同じなら今の順（ID 順）に並べた新しい配列。 */
+export function sortMembersByOverdue<T extends Pick<MemberRow, "id" | "openCount" | "overdueCount">>(members: T[]): T[] {
+  return [...members].sort(
+    (a, b) => b.overdueCount - a.overdueCount || b.openCount - a.openCount || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0),
+  );
+}
+
 /**
  * 担当者の選択肢の文言。「佐藤（未完了 5・期限切れ 1）」。期限切れが 0 件なら「佐藤（未完了 5）」。
  * 休み中なら末尾に「（休み: 11/20 まで）」を付ける（知らせるだけで、選ぶことは止めない）。

@@ -2,7 +2,7 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { openDb } from "../src/lib/db/index.ts";
 import { createTask } from "../src/lib/tasks.ts";
-import { listMemberWorkload, truncateTitle } from "../src/lib/members.ts";
+import { listMemberWorkload, sortMembersByOverdue, truncateTitle } from "../src/lib/members.ts";
 
 describe("truncateTitle", () => {
   it("keeps 10 characters or fewer and cuts longer titles with …", () => {
@@ -62,5 +62,29 @@ describe("担当者の選択肢（件数つき）", () => {
     assert.equal(member.overdueCount, 1);
     assert.equal(sato.label, `佐藤（未完了 ${member.openCount}・期限切れ 1）`.replace("佐藤", sato.name));
     assert.deepEqual(listAssigneeOptions(db, today).map((o) => o.id), ["sato", "suzuki", "tanaka"]);
+  });
+});
+
+describe("sortMembersByOverdue", () => {
+  const m = (id: string, overdueCount: number, openCount: number) => ({ id, overdueCount, openCount });
+
+  it("orders by overdue count desc, then open count desc, then id", () => {
+    const sorted = sortMembersByOverdue([m("a", 0, 5), m("b", 2, 1), m("c", 2, 3), m("d", 1, 9), m("e", 1, 9), m("f", 0, 5)]);
+    assert.deepEqual(sorted.map((r) => r.id), ["c", "b", "d", "e", "a", "f"]);
+  });
+
+  it("does not change the input and keeps members without tasks", () => {
+    const input = [m("a", 0, 0), m("b", 1, 1)];
+    assert.deepEqual(sortMembersByOverdue(input).map((r) => r.id), ["b", "a"]);
+    assert.deepEqual(input.map((r) => r.id), ["a", "b"]);
+  });
+
+  it("uses the same overdue count as the list (archived and deleted tasks are not counted)", () => {
+    const db = openDb();
+    db.prepare("UPDATE tasks SET status = 'todo', archived = 0, deleted_at = NULL, due_date = '2000-01-01', assignee = 'tanaka'").run();
+    db.prepare("UPDATE tasks SET archived = 1 WHERE id = (SELECT MIN(id) FROM tasks)").run();
+    const rows = listMemberWorkload(db, "2026-01-01");
+    assert.equal(rows.find((r) => r.id === "tanaka")!.overdueCount, rows.find((r) => r.id === "tanaka")!.openCount);
+    assert.equal(sortMembersByOverdue(rows)[0].id, "tanaka");
   });
 });

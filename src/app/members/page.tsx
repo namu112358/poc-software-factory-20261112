@@ -1,10 +1,10 @@
 import { formatMonthDay } from "@/lib/absence";
-import { listMemberWorkload } from "@/lib/members";
+import { listMemberWorkload, sortMembersByOverdue } from "@/lib/members";
 import { requireUser } from "@/lib/session";
 
 export default async function MembersPage() {
   await requireUser();
-  const members = listMemberWorkload();
+  const members = sortMembersByOverdue(listMemberWorkload());
 
   return (
     <main>
@@ -20,8 +20,16 @@ export default async function MembersPage() {
         </thead>
         <tbody>
           {members.map((m) => (
-            <tr key={m.id} data-testid="member-row">
-              <td>{m.name}</td>
+            <tr key={m.id} data-testid="member-row" style={m.overdueCount > 0 ? { background: "#fdecea", fontWeight: "bold" } : undefined}>
+              <td>
+                {m.name}
+                {m.overdueCount > 0 && (
+                  <>
+                    {" "}
+                    <span data-testid="member-overdue-flag">期限切れあり（{m.overdueCount} 件）</span>
+                  </>
+                )}
+              </td>
               <td data-testid="member-leave">{m.leaveUntil ? `休み中（${formatMonthDay(m.leaveUntil)} まで）` : "—"}</td>
               <td data-testid="member-open-count">{m.openCount}</td>
               <td>
