@@ -5,6 +5,7 @@ import {
   createTask,
   isOverdue,
   todayInJapan,
+  formatEstimate,
   formatTaskCount,
   getTask,
   isTaskStatus,
@@ -77,6 +78,7 @@ describe("getTask", () => {
       title: "要件定義書のレビュー",
       status: "done",
       assignee: "sato",
+      estimateMinutes: null,
       dueDate: "2026-11-02",
       priority: "medium",
     });
@@ -202,5 +204,41 @@ describe("isOverdue", () => {
   it("「今日」は日本時間で判断する", () => {
     assert.equal(todayInJapan(new Date("2026-11-11T15:00:00Z")), "2026-11-12");
     assert.equal(todayInJapan(new Date("2026-11-11T14:59:59Z")), "2026-11-11");
+  });
+});
+
+describe("estimateMinutes", () => {
+  const base = { title: "t", status: "todo", assignee: "sato", dueDate: "2026-12-01" };
+
+  it("is null for seeded tasks and tasks created without it", () => {
+    const db = openDb();
+    assert.ok(listTasks({}, db).every((t) => t.estimateMinutes === null));
+    const task = createTask({ ...base, status: "todo" }, db);
+    assert.equal(task.estimateMinutes, null);
+  });
+
+  it("can be set on create, updated, and reset to null", () => {
+    const db = openDb();
+    const task = createTask({ ...base, status: "todo", estimateMinutes: 90 }, db);
+    assert.equal(getTask(task.id, db)?.estimateMinutes, 90);
+    assert.equal(updateTask(task.id, { estimateMinutes: 120 }, db)?.estimateMinutes, 120);
+    assert.equal(updateTask(task.id, { title: "x" }, db)?.estimateMinutes, 120);
+    assert.equal(updateTask(task.id, { estimateMinutes: null }, db)?.estimateMinutes, null);
+  });
+
+  it("validates range and integer-ness", () => {
+    const db = openDb();
+    const check = (v: unknown) => validateTaskInput({ estimateMinutes: v }, { partial: true }, db).ok;
+    assert.equal(check(1), true);
+    assert.equal(check(10000), true);
+    assert.equal(check(null), true);
+    for (const bad of [0, 10001, -5, 1.5, "90", NaN, true]) assert.equal(check(bad), false, String(bad));
+    const r = validateTaskInput({ estimateMinutes: 0 }, { partial: true }, db);
+    assert.ok(!r.ok && r.errors.length > 0);
+  });
+
+  it("formats for display", () => {
+    assert.equal(formatEstimate(90), "90 分");
+    assert.equal(formatEstimate(null), "—");
   });
 });
