@@ -8,6 +8,8 @@ import {
   parseTouch,
   pick,
   precheck,
+  readyBudget,
+  READY_EVENTS_PER_HOUR_BUDGET,
   waitingSince,
   waitsOn,
   blockingDeps,
@@ -319,5 +321,19 @@ describe("割り当ての重複（handled）", () => {
       comments: [c(157, "2026-11-12T09:23:20Z", "session_OTHER"), c(163, "2026-11-12T09:23:21Z", "session_ME"), c(174, "2026-11-12T09:22:00Z", "session_OTHER")],
     });
     assert.deepEqual(r, [157]);
+  });
+});
+
+describe("1 時間あたりの起動の数（budget。#250）", () => {
+  const q = (n: number) => issue(n, [queued("wait=slot", "2026-01-01T00:00:00Z")]);
+  it("残りの数は、上限の推定から直近 60 分の数を引いたもの（0 未満にしない）", () => {
+    assert.equal(readyBudget(40).remaining, READY_EVENTS_PER_HOUR_BUDGET - 40);
+    assert.equal(readyBudget(99).remaining, 0);
+  });
+  it("取り出す数は、空きと残りの数の小さいほう。残りが 0 なら取り出さない", () => {
+    const queuedIssues = [q(1), q(2), q(3)];
+    assert.deepEqual(pick({ queued: queuedIssues, inProgressCount: 0, isOpen: open(), readyRemaining: 1 }).pick, [1]);
+    assert.deepEqual(pick({ queued: queuedIssues, inProgressCount: 0, isOpen: open(), readyRemaining: 0 }).pick, []);
+    assert.deepEqual(pick({ queued: queuedIssues, inProgressCount: 2, isOpen: open() }).pick, [1, 2]);
   });
 });
