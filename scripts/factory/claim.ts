@@ -10,7 +10,9 @@ import {
   confirm,
   dependencies,
   handledByOthers,
+  makeIsStalled,
   pick,
+  STALLED_LABELS,
   precheck,
   splitFiles,
   type Comment,
@@ -29,7 +31,7 @@ if ((process.env.HTTPS_PROXY || process.env.https_proxy) && process.env.NODE_USE
   process.exit(r.status ?? 1);
 }
 
-type RawIssue = { number: number; body: string | null; state: string; pull_request?: unknown };
+type RawIssue = { number: number; body: string | null; state: string; pull_request?: unknown; labels?: { name: string }[] };
 type RawComment = { body: string | null; created_at: string; issue_url: string; user?: { login: string } };
 
 async function get<T>(path: string): Promise<{ status: number; data: T }> {
@@ -51,14 +53,30 @@ async function getAll<T>(path: string): Promise<T[]> {
 }
 
 const openCache = new Map<number, boolean>();
+const labelCache = new Map<number, string[]>();
+const prIssueCache = new Map<number, number>(); // PR の番号 → その Issue（claude/issue-<番号>）の番号
+const issueOf = (ref: string) => Number(/^claude\/issue-(\d+)$/.exec(ref)?.[1] ?? NaN);
 async function loadOpen(numbers: number[]): Promise<void> {
   for (const n of numbers) {
     if (openCache.has(n)) continue;
     const { status, data } = await get<RawIssue>(`/repos/${REPO}/issues/${n}`);
-    openCache.set(n, status !== 404 && (data as RawIssue).state === "open");
+    const raw = data as RawIssue;
+    openCache.set(n, status !== 404 && raw.state === "open");
+    labelCache.set(n, status === 404 ? [] : (raw.labels ?? []).map((l) => l.name));
+    if (status !== 404 && raw.pull_request) {
+      // 待ち先が PR なら、その Issue のラベルも読む（止まった印は Issue に付くことが多い）
+      const pr = (await get<{ head: { ref: string } }>(`/repos/${REPO}/pulls/${n}`)).data;
+      const issue = issueOf(pr.head?.ref ?? "");
+      if (Number.isInteger(issue)) {
+        prIssueCache.set(n, issue);
+        await loadOpen([issue]);
+      }
+    }
   }
 }
 const isOpen = (n: number) => openCache.get(n) ?? false;
+/** Issue か PR（番号）が needs-human・blocked:question で人を待っているか（#255） */
+const isStalled = (n: number) => makeIsStalled(labelCache, prIssueCache)(n);
 
 async function loadIssue(n: number, raw?: RawIssue): Promise<IssueInfo> {
   const issue = raw ?? (await get<RawIssue>(`/repos/${REPO}/issues/${n}`)).data;
@@ -78,13 +96,15 @@ async function loadLabeled(label: string): Promise<IssueInfo[]> {
 }
 
 async function loadOpenPrs(): Promise<PrInfo[]> {
-  const prs = await getAll<{ number: number; head: { ref: string } }>(`/repos/${REPO}/pulls?state=open`);
+  const prs = await getAll<{ number: number; head: { ref: string }; labels?: { name: string }[] }>(`/repos/${REPO}/pulls?state=open`);
   const mine = prs.filter((p) => p.head.ref.startsWith("claude/"));
+  await loadOpen(mine.map((p) => issueOf(p.head.ref)).filter((n) => Number.isInteger(n)));
   return Promise.all(
     mine.map(async (p) => ({
       number: p.number,
       headRef: p.head.ref,
       files: (await getAll<{ filename: string }>(`/repos/${REPO}/pulls/${p.number}/files`)).map((f) => f.filename),
+      stalled: (p.labels ?? []).some((l) => STALLED_LABELS.includes(l.name)) || isStalled(issueOf(p.head.ref)),
     })),
   );
 }
@@ -114,7 +134,7 @@ async function main(): Promise<unknown> {
       const files = splitFiles(arg("files")).filter((f) => !f.startsWith("tests/"));
       const [self, inProgress, queued, openPrs, own] = await Promise.all([loadIssue(n), loadLabeled("in-progress"), loadLabeled("queued"), loadOpenPrs(), ownPr(n)]);
       await loadOpen(dependencies(self));
-      return { issue: n, files, ...precheck({ self, files, inProgress, queued, openPrs, isOpen, ownPr: own }) };
+      return { issue: n, files, ...precheck({ self, files, inProgress, queued, openPrs, isOpen, isStalled, ownPr: own }) };
     }
     case "confirm": {
       if (!Number.isInteger(n)) throw new Error("Issue の番号を指定する");
@@ -127,7 +147,7 @@ async function main(): Promise<unknown> {
       const [queued, inProgress, openPrs] = await Promise.all([loadLabeled("queued"), loadLabeled("in-progress"), loadOpenPrs()]);
       await loadOpen(queued.flatMap(dependencies));
       const inProgressCount = inProgress.length;
-      return { inProgress: inProgressCount, ...pick({ queued, inProgressCount, isOpen, openPrs, inProgress }) };
+      return { inProgress: inProgressCount, ...pick({ queued, inProgressCount, isOpen, isStalled, openPrs, inProgress }) };
     }
     case "handled": {
       const since = arg("since");
