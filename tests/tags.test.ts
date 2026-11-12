@@ -1,7 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { openDb } from "../src/lib/db/index.ts";
-import { addTag, listTags, listTagsByTask, removeTag, validateTagInput } from "../src/lib/tags.ts";
+import { addTag, listTagCounts, listTags, listTagsByTask, removeTag, validateTagInput } from "../src/lib/tags.ts";
 import { listTasks, parseTagFilter } from "../src/lib/tasks.ts";
 
 describe("validateTagInput", () => {
@@ -93,5 +93,34 @@ describe("parseTagFilter", () => {
     assert.equal(parseTagFilter("  "), undefined);
     assert.equal(parseTagFilter(null), undefined);
     assert.equal(parseTagFilter(["a"]), undefined);
+  });
+});
+
+describe("listTagCounts", () => {
+  it("returns an empty array when no tag is used", () => {
+    assert.deepEqual(listTagCounts(openDb()), []);
+  });
+
+  it("counts tasks per tag, sorted by count desc then name asc", () => {
+    const db = openDb();
+    addTag(1, "b", db);
+    addTag(2, "b", db);
+    addTag(1, "c", db);
+    addTag(2, "a", db);
+    addTag(3, "a", db);
+    addTag(3, "z", db);
+    assert.deepEqual(listTagCounts(db), [
+      { name: "a", count: 2 },
+      { name: "b", count: 2 },
+      { name: "c", count: 1 },
+      { name: "z", count: 1 },
+    ]);
+  });
+
+  it("does not list a tag once it is removed from every task", () => {
+    const db = openDb();
+    addTag(1, "x", db);
+    removeTag(1, "x", db);
+    assert.deepEqual(listTagCounts(db), []);
   });
 });
