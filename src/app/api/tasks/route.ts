@@ -1,15 +1,13 @@
-// GET /api/tasks?status=… — タスク一覧 / POST /api/tasks — タスクを作成する。いずれもログインが必要。
+// GET /api/tasks?status=…&assignee=…&tag=…&sort=… — タスク一覧 / POST /api/tasks — タスクを作成する。いずれもログインが必要。
 import { NextResponse } from "next/server";
 import { jsonError, readJson, requireApiUser } from "@/lib/api";
-import { createTask, isTaskStatus, listTasks, parseTagFilter, validateTaskInput, type TaskInput } from "@/lib/tasks";
+import { listTasksByQuery } from "@/lib/task-query";
+import { createTask, validateTaskInput, type TaskInput } from "@/lib/tasks";
 
 export async function GET(request: Request) {
   const user = await requireApiUser();
   if (user instanceof NextResponse) return user;
-  const query = new URL(request.url).searchParams;
-  const status = query.get("status");
-  const tag = parseTagFilter(query.get("tag"));
-  return NextResponse.json({ tasks: listTasks({ status: isTaskStatus(status) ? status : undefined, tag }) });
+  return NextResponse.json({ tasks: listTasksByQuery(new URL(request.url).searchParams) });
 }
 
 export async function POST(request: Request) {

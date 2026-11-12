@@ -1,8 +1,9 @@
 import { Fragment } from "react";
 import { listCommentersByTask } from "@/lib/comments";
+import { exportHref } from "@/lib/export";
 import { requireUser } from "@/lib/session";
 import { listTagsByTask } from "@/lib/tags";
-import { PRIORITY_LABELS, STATUS_LABELS, SORT_LABELS, TASK_LIST_HELP, TASK_SORTS, TASK_STATUSES, formatCurrentUser, formatEstimate, formatJstDate, formatDaysLeft, formatEstimateTotal, formatMemoPreview, formatTaskCount, priorityFontWeight, formatOverdueCount, countOverdue, memoTooltip, isOverdue, isTaskStatus, listAssignees, listTasks, parseAssignee, parseSort, parseTagFilter, sumEstimateMinutes, taskRowDoneAttr, todayInJapan } from "@/lib/tasks";
+import { assigneeName, PRIORITY_LABELS, STATUS_LABELS, SORT_LABELS, TASK_LIST_HELP, TASK_SORTS, TASK_STATUSES, formatCurrentUser, formatEstimate, formatJstDate, formatDaysLeft, formatEstimateTotal, formatMemoPreview, formatTaskCount, priorityFontWeight, formatOverdueCount, countOverdue, memoTooltip, isOverdue, isTaskStatus, listAssignees, listTasks, parseAssignee, parseSort, parseTagFilter, sumEstimateMinutes, taskRowDoneAttr, todayInJapan } from "@/lib/tasks";
 
 type Props = {
   searchParams: Promise<{ status?: string; assignee?: string; tag?: string; sort?: string }>;
@@ -70,6 +71,11 @@ export default async function TasksPage({ searchParams }: Props) {
         <button type="submit">絞り込む</button>
       </form>
       <p data-testid="task-count">{formatTaskCount(tasks.length)}</p>
+      <p>
+        <a href={exportHref({ status, assignee, tag, sort })} data-testid="export-link">
+          CSV でダウンロード
+        </a>
+      </p>
       {overdueText !== null && (
         <p>
           <strong data-testid="overdue-count">{overdueText}</strong>
@@ -108,7 +114,7 @@ export default async function TasksPage({ searchParams }: Props) {
                 )}
               </td>
               <td>{STATUS_LABELS[task.status]}</td>
-              <td>{task.assignee}</td>
+              <td data-testid="task-assignee">{assigneeName(task.assignee, assignees)}</td>
               <td data-testid="task-priority" style={{ fontWeight: priorityFontWeight(task.priority) }}>{PRIORITY_LABELS[task.priority]}</td>
               <td>
                 {task.dueDate}
