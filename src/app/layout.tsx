@@ -11,6 +11,7 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
         {user && (
           <header style={{ display: "flex", gap: 12, alignItems: "center", marginBottom: 16 }}>
             <a href="/tasks">タスク一覧</a>
+            <a href="/tasks/new">新しいタスク</a>
             <a href="/overdue">期限切れ</a>
             <a href="/tags">タグ一覧</a>
             <a href="/members">メンバー</a>
