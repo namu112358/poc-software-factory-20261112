@@ -1,7 +1,7 @@
 import { notFound } from "next/navigation";
 import { commentEditedLabel, listComments, splitCommentBody } from "@/lib/comments";
 import { requireUser } from "@/lib/session";
-import { listTags } from "@/lib/tags";
+import { listTags, listTagSuggestions } from "@/lib/tags";
 import { PRIORITY_LABELS, STATUS_LABELS, formatCompletedAt, formatEstimate, formatJstDateTime, formatTaskNumber, getTask, isDueSoon, isOverdue, parseTaskId, todayInJapan } from "@/lib/tasks";
 import { getUser } from "@/lib/users";
 import { DuplicateButton } from "./duplicate";
@@ -20,6 +20,7 @@ export default async function TaskDetailPage({ params }: Props) {
   const assignee = getUser(task.assignee);
   const comments = listComments(task.id);
   const tags = listTags(task.id);
+  const tagSuggestions = listTagSuggestions(task.id);
 
   return (
     <main>
@@ -94,7 +95,7 @@ export default async function TaskDetailPage({ params }: Props) {
             ))}
           </ul>
         )}
-        <TagForm taskId={task.id} />
+        <TagForm taskId={task.id} suggestions={tagSuggestions} />
       </section>
       <section>
         <h2>コメント</h2>
