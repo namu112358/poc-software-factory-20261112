@@ -1,7 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { openDb } from "../src/lib/db/index.ts";
-import { createComment, deleteComment, listCommentersByTask, listComments, validateCommentInput } from "../src/lib/comments.ts";
+import { createComment, deleteComment, listCommentersByTask, listComments, splitCommentBody, validateCommentInput } from "../src/lib/comments.ts";
 
 describe("validateCommentInput", () => {
   it("trims the body and accepts 1-1000 characters", () => {
@@ -81,5 +81,49 @@ describe("listCommentersByTask", () => {
     const db = openDb();
     assert.equal(listCommentersByTask([1], db).has(1), false);
     assert.equal(listCommentersByTask([], db).size, 0);
+  });
+});
+
+describe("splitCommentBody", () => {
+  const text = (t: string) => ({ type: "text", text: t });
+  const link = (url: string) => ({ type: "link", url });
+
+  it("turns an http(s) URL into a link and keeps the other text", () => {
+    assert.deepEqual(splitCommentBody("資料: https://example.com/a?b=1 を見て"), [
+      text("資料: "),
+      link("https://example.com/a?b=1"),
+      text(" を見て"),
+    ]);
+    assert.deepEqual(splitCommentBody("http://example.com"), [link("http://example.com")]);
+  });
+
+  it("links several URLs and leaves trailing punctuation out of the link", () => {
+    assert.deepEqual(splitCommentBody("(https://a.example/x). と https://b.example/y,"), [
+      text("("),
+      link("https://a.example/x"),
+      text("). と "),
+      link("https://b.example/y"),
+      text(","),
+    ]);
+  });
+
+  it("stops the URL at Japanese text", () => {
+    assert.deepEqual(splitCommentBody("https://example.com/a。次"), [link("https://example.com/a"), text("。次")]);
+  });
+
+  it("does not link schemes other than http and https", () => {
+    for (const s of ["javascript:alert(1)", "ftp://example.com", "data:text/html,x", "https://", "http:// x"]) {
+      assert.ok(splitCommentBody(s).every((p) => p.type === "text"), s);
+    }
+  });
+
+  it("keeps HTML as plain text and keeps line breaks", () => {
+    assert.deepEqual(splitCommentBody("<script>alert(1)</script>\nhttps://example.com/<b>"), [
+      text("<script>alert(1)</script>\n"),
+      link("https://example.com/"),
+      text("<b>"),
+    ]);
+    const joined = (s: string) => splitCommentBody(s).map((p) => (p.type === "text" ? p.text : p.url)).join("");
+    for (const s of ["a\nb\r\nhttps://x.example\n\nc", "", "plain"]) assert.equal(joined(s), s);
   });
 });
