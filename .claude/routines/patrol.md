@@ -13,7 +13,7 @@
 | `claude/issue-<番号>` の draft の PR で、CI（`app-check`）が成功、最新のレビューの後に「取り込みだけのコミット」でないコミットがある（レビューが無ければよい）、`main` と衝突していない、最後の動きから 15 分以上 | PR を Ready にし、Issue の `status:in-progress` を外す |
 | Issue に `status:in-progress`、draft の PR の CI（`app-check`）が失敗したまま最後の動き（コメント・コミット・ラベルの変化）から 30 分以上、または PR が無いか draft のまま 60 分以上（上に当たらないもの） | `status:in-progress` を外し、経過をコメントして `status:needs-human` を付ける |
 | draft の PR の CI（`app-check`）が失敗か終わっておらず、Issue に `status:in-progress` が無く、最後の動きから 60 分以上（下の 2 行に当たらないもの） | 経過をコメントして `status:needs-human` を付ける |
-| Ready の PR に、最新のコミットに対するレビュー（`commit=`）が無い（最新の `verdict=ok` の後が「取り込みだけのコミット」だけなら対象外） | PR を draft にしてから Ready に戻す |
+| Ready の PR に、最新のコミットに対するレビュー（`commit=`）が無い（最新の `verdict=ok` の後が「取り込みだけのコミット」だけなら対象外） | PR を draft にしてから Ready に戻す（`rereview`）。同じ最新のコミットに、割り当てか巡回の `action=rereview` のコメントがもうあれば、起こし直さずに `status:needs-human` を付けて理由をコメントする |
 | draft の PR で、最新のレビューが `verdict=changes` で `commit=` が最新のコミット | `status:needs-human` を付けて理由をコメントする |
 | draft の PR が `main` と衝突している | PR を Ready にしてから draft に戻す |
 | Ready の PR が `main` と衝突している | 衝突していることをコメントし、draft に戻す |
