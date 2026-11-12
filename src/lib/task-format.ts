@@ -12,6 +12,12 @@ export function formatTaskCount(count: number): string {
   return `${count} 件`;
 }
 
+/** 表示中のタスクのうち、完了したものの件数の表示（「完了 N 件 / 全 M 件」）。 */
+export function formatDoneCount(tasks: { status: TaskStatus }[]): string {
+  const done = tasks.filter((t) => t.status === "done").length;
+  return `完了 ${done} 件 / 全 ${tasks.length} 件`;
+}
+
 /** 一覧の見出しの下に出す、ログイン中のユーザーの表示。ログイン ID ではなく表示名を使う。 */
 export function formatCurrentUser(name: string): string {
   return `ログイン中: ${name}`;
@@ -84,6 +90,12 @@ export function formatJstDateTime(iso: string): string {
   if (Number.isNaN(t)) return "—";
   const jst = new Date(t + 9 * 60 * 60 * 1000).toISOString();
   return `${jst.slice(0, 10).replaceAll("-", "/")} ${jst.slice(11, 16)}`;
+}
+
+/** 詳細画面の「完了」欄の表示。完了済みで完了日時が記録されているときだけ日時を返し、それ以外は「—」。 */
+export function formatCompletedAt(task: Pick<Task, "status" | "completedAt">): string {
+  if (task.status !== "done" || task.completedAt === null) return "—";
+  return formatJstDateTime(task.completedAt);
 }
 
 /** ISO 8601（UTC）の日時を、日本時間の日付「YYYY-MM-DD」にする。解釈できなければ「—」。 */
