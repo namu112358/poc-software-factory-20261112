@@ -1,9 +1,10 @@
 // タスクのステータス・担当者をまとめて変える処理（POST /api/tasks/bulk-update）。
+import { BULK_SELECT_MAX } from "./bulk-select.ts";
 import { getDb, transaction, type Db } from "./db/index.ts";
 import { COMPLETED_AT_SQL, getTask, isTaskStatus, type Task, type TaskStatus, type ValidationResult } from "./tasks.ts";
 
 /** まとめて変えられるタスクの最大件数（一括完了と同じ）。 */
-export const BULK_UPDATE_MAX = 100;
+export const BULK_UPDATE_MAX = BULK_SELECT_MAX;
 
 /** まとめて変えられる項目。 */
 export const BULK_UPDATE_FIELDS = ["status", "assignee"] as const;
