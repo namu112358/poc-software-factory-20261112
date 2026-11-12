@@ -2,12 +2,15 @@ import { getDb, type Db } from "./db/index.ts";
 
 export type TaskStatus = "todo" | "in_progress" | "done";
 
+export type TaskPriority = "high" | "medium" | "low";
+
 export type Task = {
   id: number;
   title: string;
   status: TaskStatus;
   assignee: string;
   dueDate: string; // YYYY-MM-DD
+  priority: TaskPriority;
   estimateMinutes: number | null; // 見積もり時間（分）。未設定は null
 };
 
@@ -18,6 +21,18 @@ export const STATUS_LABELS: Record<TaskStatus, string> = {
   in_progress: "進行中",
   done: "完了",
 };
+
+export const TASK_PRIORITIES: readonly TaskPriority[] = ["high", "medium", "low"];
+
+export const PRIORITY_LABELS: Record<TaskPriority, string> = {
+  high: "高",
+  medium: "中",
+  low: "低",
+};
+
+export function isTaskPriority(value: unknown): value is TaskPriority {
+  return typeof value === "string" && (TASK_PRIORITIES as readonly string[]).includes(value);
+}
 
 export function isTaskStatus(value: unknown): value is TaskStatus {
   return typeof value === "string" && (TASK_STATUSES as readonly string[]).includes(value);
@@ -52,15 +67,18 @@ type TaskRow = {
   status: TaskStatus;
   assignee: string;
   due_date: string;
+  priority: TaskPriority;
   estimate_minutes: number | null;
 };
 
 function toTask(row: TaskRow): Task {
   return {
     id: row.id,
-    title: row.title, status: row.status,
+    title: row.title,
+    status: row.status,
     assignee: row.assignee,
     dueDate: row.due_date,
+    priority: row.priority,
     estimateMinutes: row.estimate_minutes,
   };
 }
@@ -68,7 +86,7 @@ function toTask(row: TaskRow): Task {
 export function listTasks(filter: TaskFilter = {}, db: Db = getDb()): Task[] {
   const rows = db
     .prepare(
-      "SELECT id, title, status, assignee, due_date, estimate_minutes FROM tasks WHERE (:status IS NULL OR status = :status) AND (:assignee IS NULL OR assignee = :assignee) AND (:tag IS NULL OR EXISTS (SELECT 1 FROM task_tags g WHERE g.task_id = tasks.id AND g.name = :tag)) ORDER BY id",
+      "SELECT id, title, status, assignee, due_date, priority, estimate_minutes FROM tasks WHERE (:status IS NULL OR status = :status) AND (:assignee IS NULL OR assignee = :assignee) AND (:tag IS NULL OR EXISTS (SELECT 1 FROM task_tags g WHERE g.task_id = tasks.id AND g.name = :tag)) ORDER BY id",
     )
     .all({ status: filter.status ?? null, assignee: filter.assignee ?? null, tag: filter.tag ?? null }) as TaskRow[];
   return rows.map(toTask);
@@ -86,7 +104,7 @@ export function formatTaskCount(count: number): string {
 }
 
 export function getTask(id: number, db: Db = getDb()): Task | undefined {
-  const row = db.prepare("SELECT id, title, status, assignee, due_date, estimate_minutes FROM tasks WHERE id = ?").get(id) as
+  const row = db.prepare("SELECT id, title, status, assignee, due_date, priority, estimate_minutes FROM tasks WHERE id = ?").get(id) as
     | TaskRow
     | undefined;
   return row && toTask(row);
@@ -98,7 +116,10 @@ export function parseTaskId(value: unknown): number | undefined {
   return Number(value);
 }
 
-export type TaskInput = Omit<Task, "id" | "estimateMinutes"> & { estimateMinutes?: number | null };
+export type TaskInput = Omit<Task, "id" | "priority" | "estimateMinutes"> & {
+  priority?: TaskPriority;
+  estimateMinutes?: number | null;
+};
 
 export type ValidationResult<T> = { ok: true; value: T } | { ok: false; errors: string[] };
 
@@ -141,6 +162,10 @@ export function validateTaskInput(
       errors.push("期限は YYYY-MM-DD 形式で入力してください");
     } else value.dueDate = b.dueDate;
   }
+  if ("priority" in b) {
+    if (!isTaskPriority(b.priority)) errors.push("優先度は high・medium・low のいずれかにしてください");
+    else value.priority = b.priority;
+  }
   if ("estimateMinutes" in b) {
     const m = b.estimateMinutes;
     if (m === null) value.estimateMinutes = null;
@@ -153,8 +178,8 @@ export function validateTaskInput(
 
 export function createTask(input: TaskInput, db: Db = getDb()): Task {
   const { lastInsertRowid } = db
-    .prepare("INSERT INTO tasks (title, status, assignee, due_date, estimate_minutes) VALUES (?, ?, ?, ?, ?)")
-    .run(input.title, input.status, input.assignee, input.dueDate, input.estimateMinutes ?? null);
+    .prepare("INSERT INTO tasks (title, status, assignee, due_date, priority, estimate_minutes) VALUES (?, ?, ?, ?, ?, ?)")
+    .run(input.title, input.status, input.assignee, input.dueDate, input.priority ?? "medium", input.estimateMinutes ?? null);
   return getTask(Number(lastInsertRowid), db)!;
 }
 
@@ -163,11 +188,12 @@ export function updateTask(id: number, changes: Partial<TaskInput>, db: Db = get
   const current = getTask(id, db);
   if (!current) return undefined;
   const next = { ...current, ...changes };
-  db.prepare("UPDATE tasks SET title = ?, status = ?, assignee = ?, due_date = ?, estimate_minutes = ? WHERE id = ?").run(
+  db.prepare("UPDATE tasks SET title = ?, status = ?, assignee = ?, due_date = ?, priority = ?, estimate_minutes = ? WHERE id = ?").run(
     next.title,
     next.status,
     next.assignee,
     next.dueDate,
+    next.priority,
     next.estimateMinutes,
     id,
   );

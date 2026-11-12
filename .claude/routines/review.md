@@ -20,6 +20,8 @@ PR が `Closes #<番号>` で参照する Issue を読み、次の 2 段を順�
 
 あわせて、PR が `main` と衝突していないか（`mergeable`）を見る。衝突していれば、それを「必須」の指摘にする。
 
+PR が高リスクの変更（`README.md` の「高リスク」）に当たれば、PR に `risk:high` を付け、レビューのコメントにどれに当たるかを書く。verdict には影響させない。
+
 ## 3. 結果を書く
 
 PR にレビューのコメントを 1 つ書く（`pull_request_review_write` の `COMMENT`。Approve はしない）。先頭は次の形にする。

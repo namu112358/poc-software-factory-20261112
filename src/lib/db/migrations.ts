@@ -86,6 +86,13 @@ export const MIGRATIONS: readonly Migration[] = [
   },
   {
     version: 6,
+    name: "task_priority",
+    sql: `
+      ALTER TABLE tasks ADD COLUMN priority TEXT NOT NULL DEFAULT 'medium' CHECK (priority IN ('high', 'medium', 'low'));
+    `,
+  },
+  {
+    version: 7,
     name: "task_estimate_minutes",
     sql: `
       ALTER TABLE tasks ADD COLUMN estimate_minutes INTEGER CHECK (estimate_minutes IS NULL OR (estimate_minutes BETWEEN 1 AND 10000));
