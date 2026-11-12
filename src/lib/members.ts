@@ -22,3 +22,11 @@ export function listMemberWorkload(db: Db = getDb()): MemberRow[] {
     return { id: u.id, name: u.name, openCount: mine.length, tasks: mine };
   });
 }
+
+/** 担当者が空で、ステータスが完了以外のタスクの数。 */
+export function countUnassignedOpenTasks(db: Db = getDb()): number {
+  const row = db
+    .prepare("SELECT COUNT(*) AS n FROM tasks WHERE status <> 'done' AND (assignee IS NULL OR assignee = '')")
+    .get() as { n: number };
+  return row.n;
+}

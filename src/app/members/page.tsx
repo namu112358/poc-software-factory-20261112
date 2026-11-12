@@ -1,9 +1,10 @@
-import { listMemberWorkload } from "@/lib/members";
+import { countUnassignedOpenTasks, listMemberWorkload } from "@/lib/members";
 import { requireUser } from "@/lib/session";
 
 export default async function MembersPage() {
   await requireUser();
   const members = listMemberWorkload();
+  const unassignedCount = countUnassignedOpenTasks();
 
   return (
     <main>
@@ -38,6 +39,7 @@ export default async function MembersPage() {
           ))}
         </tbody>
       </table>
+      <p data-testid="unassigned-count">担当者なし: {unassignedCount} 件</p>
     </main>
   );
 }

@@ -2,7 +2,7 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { openDb } from "../src/lib/db/index.ts";
 import { createTask } from "../src/lib/tasks.ts";
-import { listMemberWorkload, truncateTitle } from "../src/lib/members.ts";
+import { countUnassignedOpenTasks, listMemberWorkload, truncateTitle } from "../src/lib/members.ts";
 
 describe("truncateTitle", () => {
   it("keeps 10 characters or fewer and cuts longer titles with …", () => {
@@ -33,5 +33,19 @@ describe("listMemberWorkload", () => {
     const t = listMemberWorkload(db).find((r) => r.id === "tanaka")!.tasks[0];
     assert.equal(t.label, "とても長い題名のタス…");
     assert.equal(t.title, "とても長い題名のタスクです");
+  });
+});
+
+describe("countUnassignedOpenTasks", () => {
+  it("returns 0 when every task has an assignee", () => {
+    assert.equal(countUnassignedOpenTasks(openDb()), 0);
+  });
+
+  it("counts only open tasks with an empty assignee", () => {
+    const db = openDb();
+    db.exec("PRAGMA foreign_keys = OFF");
+    db.prepare("UPDATE tasks SET assignee = '' WHERE id IN (SELECT id FROM tasks ORDER BY id LIMIT 3)").run();
+    db.prepare("UPDATE tasks SET status = 'done' WHERE id = (SELECT id FROM tasks WHERE assignee = '' ORDER BY id LIMIT 1)").run();
+    assert.equal(countUnassignedOpenTasks(db), 2);
   });
 });
