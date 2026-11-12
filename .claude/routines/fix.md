@@ -19,10 +19,11 @@ PR のレビュー（`pull_request_read` の `get_reviews`。Issue のコメン�
 
 ## 3. 直す
 
-1. PR の head のブランチを取り出し、`main` を取り込む。衝突があれば、両方の変更の意図が残るように解消する。
-2. 最新の `verdict=changes` のレビューの「必須」の指摘を 1 つずつ直す。指摘が誤っていると判断したものは直さず、理由を書く。「任意」は、変更が小さく受入条件に関わるものだけ直す。
-3. 指摘が受入条件の解釈の違いで、Issue だけでは決められないときは、Issue に `blocked:question` を付けて、決めてほしいことをコメントし、終える（PR は draft のまま）。
-4. `npm run typecheck`・`npm test`・`npm run build` を通して push する。CI（`app-check`）が通るまで直す（同じ失敗は 3 回まで。超えたら `needs-human`）。
+1. PR に `merge` のラベルが付いていれば外す（直した中身を人がレビューの結果と合わせて見てから、付け直す。付いたままだと、Mergify が直した版をレビューの前にキューに戻してしまう）。
+2. PR の head のブランチを取り出し、`main` を取り込む。衝突があれば、両方の変更の意図が残るように解消する。
+3. 最新の `verdict=changes` のレビューの「必須」の指摘を 1 つずつ直す。指摘が誤っていると判断したものは直さず、理由を書く。「任意」は、変更が小さく受入条件に関わるものだけ直す。
+4. 指摘が受入条件の解釈の違いで、Issue だけでは決められないときは、Issue に `blocked:question` を付けて、決めてほしいことをコメントし、終える（PR は draft のまま）。
+5. `npm run typecheck`・`npm test`・`npm run build` を通して push する。CI（`app-check`）が通るまで直す（同じ失敗は 3 回まで。超えたら `needs-human`）。
 
 ## 4. 終える
 
