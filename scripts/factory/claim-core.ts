@@ -86,6 +86,27 @@ export function waitOrder(a: IssueInfo, b: IssueInfo): number {
   return a.number - b.number;
 }
 
+/**
+ * from の依存先をたどると target に着くか（queued の Issue の中だけをたどる）。
+ * 自分を待っている Issue を「先に待っている」として待つと、お互いを待って止まるので、それを見分ける（#253 のレビュー）。
+ */
+export function waitsOn(from: IssueInfo, target: number, queued: IssueInfo[]): boolean {
+  const byNumber = new Map(queued.map((i) => [i.number, i]));
+  const seen = new Set<number>();
+  const stack = [from];
+  while (stack.length > 0) {
+    const cur = stack.pop()!;
+    if (seen.has(cur.number)) continue;
+    seen.add(cur.number);
+    for (const d of dependencies(cur)) {
+      if (d === target) return true;
+      const next = byNumber.get(d);
+      if (next) stack.push(next);
+    }
+  }
+  return false;
+}
+
 /** 本文の「#N の後」に書かれた番号 */
 export function bodyDeps(body: string): number[] {
   const out: number[] = [];
@@ -160,7 +181,10 @@ export function precheck(args: {
     if (o.length > 0) return queue("queue", i.number, files, `作業中の #${i.number} が同じファイル（${o.join("、")}）を変える予定なので、閉じるまで待つ。`);
   }
   // 自分より先に待ち始めた queued の Issue（自分がキューに載ったことが無ければ、queued のすべて）を追い越さない（#183）
-  const olderQueued = args.queued.filter((i) => i.number !== self.number && waitOrder(i, self) < 0).sort(waitOrder);
+  // ただし、待ち先をたどると自分に着く Issue（自分を待っている Issue）は除く（お互いを待って止まらないため）
+  const olderQueued = args.queued
+    .filter((i) => i.number !== self.number && waitOrder(i, self) < 0 && !waitsOn(i, self.number, args.queued))
+    .sort(waitOrder);
   for (const i of olderQueued) {
     const o = overlap(files, plannedFiles(i));
     if (o.length > 0) return queue("queue", i.number, files, `先に待っている #${i.number} が同じファイル（${o.join("、")}）を変える予定なので、追い越さずに待つ。`);
@@ -254,7 +278,7 @@ export function pick(args: {
       continue;
     }
     const files = plannedFiles(i);
-    const ahead = skipped.find((s) => overlap(files, plannedFiles(s)).length > 0);
+    const ahead = skipped.find((s) => overlap(files, plannedFiles(s)).length > 0 && !waitsOn(s, i.number, args.queued));
     if (ahead) {
       addRewait(i, ahead.number, files, `先に待っている #${ahead.number} が同じファイルを変える予定なので、取り出さずに #${ahead.number} を待つ。`);
       continue;

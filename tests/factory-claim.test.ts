@@ -9,6 +9,7 @@ import {
   pick,
   precheck,
   waitingSince,
+  waitsOn,
   type IssueInfo,
 } from "../scripts/factory/claim-core.ts";
 
@@ -193,6 +194,32 @@ describe("キューから取り出す（pick）: 待っている時間と、開�
     assert.deepEqual(r.pick, [92]);
     assert.equal(r.rewait[0].issue, 85);
     assert.equal(r.rewait[0].wait, 92);
+  });
+});
+
+describe("お互いを待って止まらない（#253 のレビュー）", () => {
+  const base = { openPrs: [], isOpen: open() };
+  it("難しい用に回された作業中の Issue は、自分を待っている queued の Issue の後ろに並ばない", () => {
+    const waiting20 = issue(20, [queued("wait=#10 files=src/lib/tasks.ts", "2026-11-12T10:00:00Z")]);
+    const self10 = issue(10, [touch("src/lib/tasks.ts", "2026-11-12T09:59:00Z")]);
+    const r = precheck({ ...base, queued: [waiting20], self: self10, files: ["src/lib/tasks.ts"], inProgress: [], isOpen: open(10) });
+    assert.equal(r.decision, "go");
+  });
+  it("引き下がった Issue を、自分を待っている Issue に付け替えない", () => {
+    const waiting20 = issue(20, [queued("wait=#10 files=src/lib/tasks.ts", "2026-11-12T10:00:00Z")]);
+    const retreated10 = issue(10, [touch("src/lib/tasks.ts", "2026-11-12T09:59:00Z"), queued("wait=#30 files=src/lib/tasks.ts", "2026-11-12T10:05:00Z")]);
+    const r = pick({ queued: [waiting20, retreated10], inProgressCount: 0, isOpen: open(10) });
+    assert.deepEqual(r.pick, [10]);
+    assert.deepEqual(r.rewait, []);
+  });
+  it("待ち先を間に挟んでも（A→B→C）自分に戻ってくれば、自分を待っているとみなす", () => {
+    const a = issue(1, [queued("wait=#2", "2026-01-01T00:00:00Z")]);
+    const b = issue(2, [queued("wait=#3", "2026-01-01T00:00:00Z")]);
+    assert.equal(waitsOn(a, 3, [a, b]), true);
+    assert.equal(waitsOn(a, 4, [a, b]), false);
+    const loop = issue(5, [queued("wait=#6", "2026-01-01T00:00:00Z")]);
+    const loop2 = issue(6, [queued("wait=#5", "2026-01-01T00:00:00Z")]);
+    assert.equal(waitsOn(loop, 7, [loop, loop2]), false); // 輪になっていても止まる
   });
 });
 
