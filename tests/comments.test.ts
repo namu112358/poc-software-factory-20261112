@@ -1,7 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { openDb } from "../src/lib/db/index.ts";
-import { createComment, deleteComment, listComments, validateCommentInput } from "../src/lib/comments.ts";
+import { createComment, deleteComment, listCommentersByTask, listComments, validateCommentInput } from "../src/lib/comments.ts";
 
 describe("validateCommentInput", () => {
   it("trims the body and accepts 1-1000 characters", () => {
@@ -61,5 +61,25 @@ describe("deleteComment", () => {
     assert.equal(deleteComment(1, 999, "sato", db), "not_found");
     assert.equal(deleteComment(2, c.id, "sato", db), "not_found");
     assert.equal(listComments(1, db).length, 1);
+  });
+});
+
+describe("listCommentersByTask", () => {
+  it("lists each commenter once, in order of first comment, per task", () => {
+    const db = openDb();
+    createComment({ taskId: 1, author: "suzuki", body: "a" }, db);
+    createComment({ taskId: 1, author: "sato", body: "b" }, db);
+    createComment({ taskId: 1, author: "suzuki", body: "c" }, db);
+    createComment({ taskId: 2, author: "tanaka", body: "d" }, db);
+    const map = listCommentersByTask([1, 2, 3], db);
+    const name = (id: string) => (db.prepare("SELECT name FROM users WHERE id = ?").get(id) as { name: string }).name;
+    assert.deepEqual(map.get(1), [name("suzuki"), name("sato")]);
+    assert.deepEqual(map.get(2), [name("tanaka")]);
+  });
+
+  it("omits tasks without comments and handles an empty list", () => {
+    const db = openDb();
+    assert.equal(listCommentersByTask([1], db).has(1), false);
+    assert.equal(listCommentersByTask([], db).size, 0);
   });
 });
