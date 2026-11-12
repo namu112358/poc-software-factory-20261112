@@ -6,6 +6,8 @@ import {
   decideExtension,
   getExtension,
   listExtensions,
+  listPendingExtensions,
+  formatExtensionRequestedAt,
   validateExtensionInput,
   withdrawExtension,
 } from "../src/lib/extensions.ts";
@@ -209,5 +211,39 @@ describe("withdrawExtension", () => {
     const again = createExtension({ ...input, newDueDate: "2026-11-25" }, db);
     assert.notEqual(again, "conflict");
     assert.deepEqual(listExtensions(3, db).map((e) => [e.newDueDate, e.status]), [["2026-11-25", "pending"]]);
+  });
+});
+
+describe("listPendingExtensions", () => {
+  it("returns only pending requests, oldest first, with task and requester info", () => {
+    const db = openDb();
+    createExtension({ ...input, taskId: 4, reason: "後の申請" }, db, new Date("2026-11-09T05:00:00.000Z"));
+    createExtension({ ...input, taskId: 3, reason: "先の申請" }, db, new Date("2026-11-09T01:00:00.000Z"));
+    const approved = createExtension({ ...input, taskId: 5 }, db)!;
+    const rejected = createExtension({ ...input, taskId: 6 }, db)!;
+    const withdrawn = createExtension({ ...input, taskId: 7 }, db)!;
+    if (approved === "conflict" || rejected === "conflict" || withdrawn === "conflict") throw new Error("setup");
+    decideExtension(5, approved.id, "approved", "sato", db);
+    decideExtension(6, rejected.id, "rejected", "sato", db);
+    withdrawExtension(7, withdrawn.id, "sato", db);
+
+    const rows = listPendingExtensions(db);
+    assert.deepEqual(rows.map((r) => r.reason), ["先の申請", "後の申請"]);
+    assert.equal(rows[0].taskId, 3);
+    assert.equal(rows[0].taskTitle, getTask(3, db)!.title);
+    assert.equal(rows[0].currentDueDate, getTask(3, db)!.dueDate);
+    assert.equal(rows[0].newDueDate, "2026-11-20");
+    assert.equal(rows[0].requester, "sato");
+  });
+
+  it("is empty when nothing is pending", () => {
+    assert.deepEqual(listPendingExtensions(openDb()), []);
+  });
+});
+
+describe("formatExtensionRequestedAt", () => {
+  it("formats in Japan time as YYYY/MM/DD HH:mm", () => {
+    assert.equal(formatExtensionRequestedAt("2026-11-09T03:04:05.000Z"), "2026/11/09 12:04");
+    assert.equal(formatExtensionRequestedAt("2026-11-09T15:30:00.000Z"), "2026/11/10 00:30");
   });
 });
