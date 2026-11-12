@@ -83,7 +83,7 @@ export function updateTasks(
     const found = ids.map((id) => getTask(id, db));
     const missingIds = ids.filter((_, i) => found[i] === undefined);
     if (missingIds.length > 0) return { ok: false, missingIds };
-    const update = db.prepare(`UPDATE tasks SET status = :status, assignee = :assignee, updated_at = :now, ${COMPLETED_AT_SQL} WHERE id = :id`);
+    const update = db.prepare(`UPDATE tasks SET status = :status, assignee = :assignee, updated_at = :now, ${COMPLETED_AT_SQL} WHERE id = :id AND deleted_at IS NULL`);
     const recordAssigneeChange = db.prepare(
       "INSERT INTO task_assignee_changes (task_id, from_assignee, to_assignee, changed_by, changed_at) VALUES (?, ?, ?, ?, ?)",
     );

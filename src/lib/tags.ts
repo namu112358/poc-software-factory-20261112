@@ -105,7 +105,7 @@ export type TagCount = { name: string; count: number };
 /** 使われているタグと、付いているタスク（アーカイブしたものを除く）の件数を返す。件数の多い順、同じ件数なら名前の昇順。 */
 export function listTagCounts(db: Db = getDb()): TagCount[] {
   const rows = db
-    .prepare("SELECT g.name AS name, COUNT(*) AS count FROM task_tags g JOIN tasks t ON t.id = g.task_id WHERE t.archived = 0 GROUP BY g.name ORDER BY count DESC, g.name ASC")
+    .prepare("SELECT g.name AS name, COUNT(*) AS count FROM task_tags g JOIN tasks t ON t.id = g.task_id WHERE t.archived = 0 AND t.deleted_at IS NULL GROUP BY g.name ORDER BY count DESC, g.name ASC")
     .all() as { name: string; count: number }[];
   return rows.map((r) => ({ name: r.name, count: Number(r.count) }));
 }

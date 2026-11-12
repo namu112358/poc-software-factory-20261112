@@ -85,7 +85,7 @@ export function listNewlyAssignedTasks(
          LEFT JOIN users f ON f.id = c.from_assignee
          LEFT JOIN users b ON b.id = c.changed_by
         WHERE c.to_assignee = ? AND c.changed_at > ?
-          AND t.status <> 'done' AND t.archived = 0
+          AND t.status <> 'done' AND t.archived = 0 AND t.deleted_at IS NULL
           AND (c.changed_by IS NULL OR c.changed_by <> ?)
         ORDER BY c.changed_at DESC, c.id DESC`,
     )

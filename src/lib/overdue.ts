@@ -23,7 +23,7 @@ export function listOverdueTasks(db: Db = getDb(), today: string = todayInJapan(
     .prepare(
       `SELECT t.id AS id, t.title AS title, t.due_date AS dueDate, u.name AS assigneeName
        FROM tasks t LEFT JOIN users u ON u.id = t.assignee
-       WHERE t.status <> 'done' AND t.archived = 0 AND t.due_date < ?
+       WHERE t.status <> 'done' AND t.archived = 0 AND t.deleted_at IS NULL AND t.due_date < ?
        ORDER BY t.due_date, t.id`,
     )
     .all(today) as { id: number; title: string; dueDate: string; assigneeName: string | null }[];

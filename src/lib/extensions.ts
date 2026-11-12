@@ -138,7 +138,7 @@ export function decideExtension(
       return { result: "conflict" };
     }
     if (decision === "approved") {
-      db.prepare("UPDATE tasks SET due_date = ?, updated_at = ? WHERE id = ?").run(
+      db.prepare("UPDATE tasks SET due_date = ?, updated_at = ? WHERE id = ? AND deleted_at IS NULL").run(
         current.newDueDate,
         now.toISOString(),
         taskId,
@@ -200,7 +200,7 @@ export function listPendingExtensions(db: Db = getDb()): PendingExtensionRow[] {
        FROM due_date_extensions e
        JOIN tasks t ON t.id = e.task_id
        LEFT JOIN users u ON u.id = e.requester
-       WHERE e.status = 'pending'
+       WHERE e.status = 'pending' AND t.deleted_at IS NULL
        ORDER BY e.created_at, e.id`,
     )
     .all() as {
@@ -267,7 +267,7 @@ export function listMyExtensions(userId: string, db: Db = getDb(), now: Date = n
        FROM due_date_extensions e
        JOIN tasks t ON t.id = e.task_id
        LEFT JOIN users d ON d.id = e.decided_by
-       WHERE e.requester = ? AND e.created_at >= ?
+       WHERE e.requester = ? AND e.created_at >= ? AND t.deleted_at IS NULL
        ORDER BY e.created_at DESC, e.id DESC`,
     )
     .all(userId, since) as {
