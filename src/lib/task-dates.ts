@@ -1,10 +1,20 @@
-import type { Task } from "./task-types.ts";
+import { TASK_DUE_FILTERS, type Task, type TaskDueFilter } from "./task-types.ts";
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 
 /** 日本時間の「今日」を YYYY-MM-DD で返す。 */
 export function todayInJapan(now: Date = new Date()): string {
   return new Intl.DateTimeFormat("sv-SE", { timeZone: "Asia/Tokyo" }).format(now);
+}
+
+/** YYYY-MM-DD の日付に日数を足した YYYY-MM-DD。 */
+export function addDays(date: string, days: number): string {
+  return new Date(Date.parse(date) + days * MS_PER_DAY).toISOString().slice(0, 10);
+}
+
+/** `due` クエリの型ガード。不正な値は指定なし（undefined）。 */
+export function parseDueFilter(value: unknown): TaskDueFilter | undefined {
+  return typeof value === "string" && (TASK_DUE_FILTERS as readonly string[]).includes(value) ? (value as TaskDueFilter) : undefined;
 }
 
 /** 期限までの残り日数の表示文言。完了したタスクは undefined（表示しない）。 */

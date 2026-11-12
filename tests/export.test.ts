@@ -138,13 +138,13 @@ describe("parseTaskFilter", () => {
   it("treats invalid values as not specified", () => {
     const db = openDb();
     const filter = parseTaskFilter(new URLSearchParams("status=bogus&assignee=nobody&tag=%20&sort=zzz"), db);
-    assert.deepEqual(filter, { status: undefined, assignee: undefined, tag: undefined, q: undefined, sort: "created" });
+    assert.deepEqual(filter, { status: undefined, assignee: undefined, tag: undefined, due: undefined, q: undefined, sort: "created" });
   });
 
   it("accepts valid values", () => {
     const db = openDb();
     const filter = parseTaskFilter(new URLSearchParams("status=done&assignee=none&tag=x&sort=priority"), db);
-    assert.deepEqual(filter, { status: "done", assignee: "none", tag: "x", q: undefined, sort: "priority" });
+    assert.deepEqual(filter, { status: "done", assignee: "none", tag: "x", due: undefined, q: undefined, sort: "priority" });
   });
 });
 
