@@ -45,11 +45,12 @@ flowchart LR
 - **同時に実装する Issue は 4 件まで。** `in-progress` の付いた開いている Issue の数で数える。
 - **依存は GitHub の依存関係（blocked by）で表す。** 人が Issue を作るときに、先に終わらせる Issue を「blocked by」に登録する。調べ方は GitHub MCP の `issue_read`、または REST の `GET /repos/{owner}/{repo}/issues/{number}/dependencies/blocked_by`。
 - **依存先**は、blocked by に登録された Issue と、本文に「#N の後」のように書かれた #N と、実装の役が「同じファイルを変える作業」として記録した PR か Issue（`<!-- factory:queued wait=#N -->` のコメント。閉じたら待ち終わり）の 3 つを指す。空き待ちで引き下がったときの `<!-- factory:queued wait=slot -->` は依存先ではない。キューに載せる側も取り出す側も、この定義を使う。
-- 実装の役は、着手する前に「依存先がすべて閉じている」「作業中が 4 件未満」を確かめる。どちらかに当たらなければ、`ready` を外して `queued` を付け、何を待っているかをコメントして終える。
-- **キューから取り出す:** `queued` の Issue のうち、依存先がすべて閉じているものを、古い順（Issue の番号が小さい順）に 1 件選び、`queued` を外して `ready` を付ける（実装が起動する）。作業中が 4 件以上なら取り出さない。依存先は、その Issue の最新の `factory:queued` のコメントで見る。ラベルを変える直前に、その Issue のラベルを読み直し、`queued` が付いていなければ（ほかの役が先に取り出した）何もせず、コメントもしない。同じ回に 2 件以上を取り出すときは、先に取り出した Issue と変えるファイル（最新の `factory:queued` の `files=`。無ければ最新の `factory:touch` の `files=`）が重なる Issue は取り出さず、`<!-- factory:queued wait=#<先に取り出した Issue の番号> files=<その Issue の files> -->` とコメントして待ち先を付け替える（取り出しても、着手の後の読み直しで引き下がるだけのセッションが立つため）。取り出すのは次のとき。
-  - 実装の役が終わるとき（PR を Ready にしたとき、または止まるとき）に 1 件。
-  - 割り当ての役が動くとき（`claude/` の PR が閉じたとき）と、巡回の役が動くとき（1 時間ごと）に、空きの数だけ。
-- ほぼ同時に着手した役は、着手の後の読み直し（`implement.md` の「2. 着手する」）で、先に記録したほうから 4 件を残して引き下がる。読み直しの間に入れ違えば、一時的に 4 件を超えることはある。厳密には止めない。
+- **判定は `scripts/factory/claim.ts` が行う。** 役は、件数・依存先・ファイルの重なりを手順書の文を読んで数えず、スクリプトを実行して結果に従う（手順書の一文で書いた読み直しを、5 件中 4 件の実装の役が飛ばしたため。#137）。スクリプトは GitHub を読むだけで、ラベルとコメントは役が GitHub MCP で変える。結果が `error` なら、その Issue に `needs-human` を付けて出力をコメントする。
+- 実装の役は、着手の前に `precheck`、着手の記録の後に `confirm` を実行する（`implement.md` の「1.」「2.」）。
+- **キューから取り出す:** `node scripts/factory/claim.ts pick` を実行する。スクリプトは、空き（4 − 作業中の件数）の数だけ、依存先がすべて閉じた `queued` の Issue を古い順（番号が小さい順）に選び、同じ回に選んだ Issue と変えるファイル（最新の `factory:queued` の `files=`。無ければ最新の `factory:touch` の `files=`）が重なるものは外して `rewait` に入れる。役は、`pick` の Issue ごとに、ラベルを読み直して `queued` が付いていれば外して `ready` を付ける（付いていなければ、ほかの役が先に取り出したので何もせず、コメントもしない）。`rewait` の Issue には、結果の `comment` をそのままコメントする（待ち先の付け替え）。作業中が 4 件以上なら `pick` は空になる（#218）。取り出すのは次のとき。
+  - 実装の役が終わるとき（PR を Ready にしたとき、または止まるとき）に、`pick` の先頭の 1 件。
+  - 割り当ての役が動くとき（`claude/` の PR が閉じたとき）と、巡回の役が動くとき（1 時間ごと）に、`pick` のすべて。
+- スクリプトを使っても、読み直しの間に入れ違えば、一時的に 4 件を超えることはある。厳密には止めない。
 
 ## 難易度
 
@@ -95,7 +96,7 @@ flowchart LR
 - マージ、PR の Approve、`merge` のラベルを付けること（Mergify のキューに入れること）はしない。人がする。
 - Mergify の設定（`.mergify.yml`）を変える PR は、キューを通さず、人（管理者）がマージする。キューは `main` にある古い設定で判定するので、条件を直す PR がその条件で外されることがあるため（#68・#145）。AI は、管理者の例外（Ruleset の迂回）を使わない。
 - `ready` を最初に付けるのは人だけ。役が `ready` を付けてよいのは、人が一度付けた Issue を、キューから取り出すとき（「キュー」）と、巡回が取りこぼしを付け直すとき（`patrol.md`）だけ。
-- `.github/`・`.claude/`・`AGENTS.md`・`CLAUDE.md`・`docs/rulesets/` は変えない。例外は、振り返りの役が `AGENTS.md` の「このプロジェクトの罠」に足す案と、`.claude/routines/` の手順書を直す案を、draft の PR として出すことだけ（マージは人が判断する）。
+- `.github/`・`.claude/`・`scripts/factory/`・`AGENTS.md`・`CLAUDE.md`・`docs/rulesets/` は変えない。例外は、振り返りの役が `AGENTS.md` の「このプロジェクトの罠」に足す案と、`.claude/routines/` の手順書を直す案を、draft の PR として出すことだけ（マージは人が判断する）。
 - push するのは `claude/` で始まるブランチだけ。force push はしない。
 - PR の draft と Ready の切り替えは、GitHub MCP の `update_pull_request`（`draft: true` / `false`）で行う。
 - 権限で拒まれた操作は、言い換えて通そうとせず、拒まれたコマンドをコメントに書いて `needs-human` を付けて止まる。
