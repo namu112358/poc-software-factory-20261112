@@ -25,7 +25,7 @@ node scripts/factory/claim.ts precheck <番号> --files <カンマ区切りの�
 ```
 
 - `"decision": "go"` なら次に進む。
-- `"decision": "queue"` なら、`ready` を外して `queued` を付け、結果の `comment` をそのままコメントして終える（キューからは取り出さない）。
+- `"decision": "queue"` なら、`ready` を外して `queued` を付け、結果の `comment` をそのままコメントして終える（キューからは取り出さない）。`comment` の先頭の `factory:queued` には、どの理由でも `files=` が付いている（後から来た Issue と取り出す役が、重なりを見るのに使う。#216）。
 - `"decision": "error"` なら、`ready` を外して `needs-human` を付け、出力をコメントして終える。
 
 スクリプトが確かめること（`README.md` の「キュー」）: 依存先がすべて閉じているか、自分以外の作業中が 4 件未満か、変えそうなファイルが、開いている `claude/` の PR・作業中のほかの Issue の `factory:touch`・自分より古い `queued` の Issue の `files=` と重ならないか。
@@ -60,4 +60,4 @@ Issue に、PR の番号と「レビューの Routine が動く」ことを 1 �
 
 `blocked:question` か `needs-human` を付けて止まるときは、`ready` と `in-progress` が外れていることを確かめてから終える（`README.md` の「ラベル」）。
 
-PR を Ready にしたとき、または止まるときは、最後にキューから 1 件取り出す（`README.md` の「キュー」。`claim.ts pick` の `pick` の先頭の 1 件だけ）。キューに載せて終えるときは、取り出さない。
+PR を Ready にしたとき、または止まるときは、最後にキューから 1 件取り出す（`README.md` の「キュー」。`claim.ts pick` の `pick` の先頭の 1 件だけ。`rewait` は、2 件目以降を取り出す役のためのものなので書かない）。`pick` が `error` なら取り出さず、終えるコメントに出力を書く（割り当て・巡回が後で取り出す）。キューに載せて終えるときは、取り出さない。

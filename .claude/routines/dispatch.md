@@ -4,7 +4,7 @@
 
 ## 0. ほかの割り当てと重ならないようにする
 
-起動のきっかけの PR が閉じた時刻を T として、`node scripts/factory/claim.ts handled --since <T>` を実行する。`handled` に挙がった Issue・PR は、T より後にほかの割り当てのセッションが処理したものなので、1〜4 で触らない（PR が続けて閉じると割り当てが同時に動き、同じ PR を二重に更新していたため。#220）。
+起動のきっかけの PR が閉じた時刻を T として、`node scripts/factory/claim.ts handled --since <T>` を実行する。`handled` に挙がった Issue・PR は、T より後にほかの割り当てのセッションが処理したものなので、1〜4 で触らない（PR が続けて閉じると割り当てが同時に動き、同じ PR を二重に更新していたため。#220）。2 つの割り当てがほぼ同時に始まると、どちらもまだ相手のコメントが無いので防げない（片方が終わってから始まる重なりだけを防ぐ）。`handled` が `error` なら、この確かめを飛ばして 1 から進める（二重になっても、それぞれの処理は読み直してから行うので壊れない）。
 
 ## 1. 衝突した PR を修正に回す
 
@@ -20,7 +20,7 @@ Mergify のキューに入っている PR（チェック「Mergify Merge Queue�
 
 ## 3. キューから取り出す
 
-`README.md` の「キュー」のとおり、`node scripts/factory/claim.ts pick` の結果に従って `queued` の Issue を取り出す。閉じた PR が依存先の Issue を閉じたときは、それを待っていた Issue が取り出せるようになっている。
+`README.md` の「キュー」のとおり、`node scripts/factory/claim.ts pick` の結果に従って `queued` の Issue を取り出す。`pick` が `error` なら取り出さず、出力を終えるコメントに書く（巡回が後で取り出す）。閉じた PR が依存先の Issue を閉じたときは、それを待っていた Issue が取り出せるようになっている。
 
 ## 4. 起動しなかった実装を起こし直す
 

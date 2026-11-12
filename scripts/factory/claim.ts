@@ -136,7 +136,11 @@ async function main(): Promise<unknown> {
 }
 
 main().then(
-  (r) => console.log(JSON.stringify(r, null, 2)),
+  (r) => {
+    console.log(JSON.stringify(r, null, 2));
+    // decision が error（記録が無いなど）のときも、例外のときと同じ終了コード 2 にそろえる
+    if ((r as { decision?: string }).decision === "error") process.exit(2);
+  },
   (e: unknown) => {
     console.log(JSON.stringify({ decision: "error", reason: e instanceof Error ? e.message : String(e) }, null, 2));
     process.exit(2);

@@ -35,6 +35,8 @@ flowchart LR
 
 止まるときは、`ready` と `in-progress` を外してから `blocked:question` か `needs-human` を付ける。`ready` が付いたまま止まると、付け直しても「ラベルが付いた」というイベントが起きず、実装が起動しないため。
 
+人が Ready の PR に中身を足すときは、先に draft にしてから push し、Ready に戻す（Ready のまま push しても、レビューは起動しない。#195）。
+
 人が答えた後の再開のしかたは、どこで止まったかで変わる。
 
 - **実装で止まった（PR が無い）:** `blocked:question`・`needs-human` を外し、Issue に `ready` を付け直す。
@@ -45,7 +47,7 @@ flowchart LR
 - **同時に実装する Issue は 4 件まで。** `in-progress` の付いた開いている Issue の数で数える。
 - **依存は GitHub の依存関係（blocked by）で表す。** 人が Issue を作るときに、先に終わらせる Issue を「blocked by」に登録する。調べ方は GitHub MCP の `issue_read`、または REST の `GET /repos/{owner}/{repo}/issues/{number}/dependencies/blocked_by`。
 - **依存先**は、blocked by に登録された Issue と、本文に「#N の後」のように書かれた #N と、実装の役が「同じファイルを変える作業」として記録した PR か Issue（`<!-- factory:queued wait=#N -->` のコメント。閉じたら待ち終わり）の 3 つを指す。空き待ちで引き下がったときの `<!-- factory:queued wait=slot -->` は依存先ではない。キューに載せる側も取り出す側も、この定義を使う。
-- **判定は `scripts/factory/claim.ts` が行う。** 役は、件数・依存先・ファイルの重なりを手順書の文を読んで数えず、スクリプトを実行して結果に従う（手順書の一文で書いた読み直しを、5 件中 4 件の実装の役が飛ばしたため。#137）。スクリプトは GitHub を読むだけで、ラベルとコメントは役が GitHub MCP で変える。結果が `error` なら、その Issue に `needs-human` を付けて出力をコメントする。
+- **判定は `scripts/factory/claim.ts` が行う。** 役は、件数・依存先・ファイルの重なりを手順書の文を読んで数えず、スクリプトを実行して結果に従う（手順書の一文で書いた読み直しを、5 件中 4 件の実装の役が飛ばしたため。#137）。スクリプトは GitHub を読むだけで、ラベルとコメントは役が GitHub MCP で変える。`precheck`・`confirm` の結果が `error` なら、その Issue に `needs-human` を付けて出力をコメントする（`pick`・`handled` の `error` の扱いは、それぞれの手順書に書く）。
 - 実装の役は、着手の前に `precheck`、着手の記録の後に `confirm` を実行する（`implement.md` の「1.」「2.」）。
 - **キューから取り出す:** `node scripts/factory/claim.ts pick` を実行する。スクリプトは、空き（4 − 作業中の件数）の数だけ、依存先がすべて閉じた `queued` の Issue を古い順（番号が小さい順）に選び、同じ回に選んだ Issue と変えるファイル（最新の `factory:queued` の `files=`。無ければ最新の `factory:touch` の `files=`）が重なるものは外して `rewait` に入れる。役は、`pick` の Issue ごとに、ラベルを読み直して `queued` が付いていれば外して `ready` を付ける（付いていなければ、ほかの役が先に取り出したので何もせず、コメントもしない）。`rewait` の Issue には、結果の `comment` をそのままコメントする（待ち先の付け替え）。作業中が 4 件以上なら `pick` は空になる（#218）。取り出すのは次のとき。
   - 実装の役が終わるとき（PR を Ready にしたとき、または止まるとき）に、`pick` の先頭の 1 件。
@@ -98,6 +100,7 @@ flowchart LR
 - `ready` を最初に付けるのは人だけ。役が `ready` を付けてよいのは、人が一度付けた Issue を、キューから取り出すとき（「キュー」）と、巡回が取りこぼしを付け直すとき（`patrol.md`）だけ。
 - `.github/`・`.claude/`・`scripts/factory/`・`AGENTS.md`・`CLAUDE.md`・`docs/rulesets/` は変えない。例外は、振り返りの役が `AGENTS.md` の「このプロジェクトの罠」に足す案と、`.claude/routines/` の手順書を直す案を、draft の PR として出すことだけ（マージは人が判断する）。
 - push するのは `claude/` で始まるブランチだけ。force push はしない。
+- **取り込みだけのコミット**は、`main` を取り込んだマージのコミットで、衝突の解消などの手の入っていないもの（`git show <コミット>` の差分が空）を指す。割り当ての役と Mergify が、レビューの後に PR へ足す。中身は変わらないので、レビュー済みかを判定するときは数えない（`commit=` が最新でなくても、レビュー済みとして扱う。#195）。
 - PR の draft と Ready の切り替えは、GitHub MCP の `update_pull_request`（`draft: true` / `false`）で行う。
 - 権限で拒まれた操作は、言い換えて通そうとせず、拒まれたコマンドをコメントに書いて `needs-human` を付けて止まる。
 - 役の最後に、Issue か PR に「何をしたか・次に誰が何をするか」を 1〜3 行でコメントする。コメントの先頭には `<!-- factory:<役> -->` を付ける（巡回と集計が数える）。コメントの最後に、そのセッションの URL を 1 行書く（`セッション: https://claude.ai/code/session_<ID>`。コミットの `Claude-Session:` の行と同じもの。無ければ、環境変数 `CLAUDE_CODE_REMOTE_SDK_URL` の末尾の `cse_<ID>` の `<ID>` を使う）。Routine のセッションは名前を変えられないので、Issue・PR からセッションをたどれるようにするため（#144）。
