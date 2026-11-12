@@ -245,9 +245,24 @@ export function updateTask(id: number, changes: Partial<TaskInput>, db: Db = get
   return getTask(id, db);
 }
 
+const MS_PER_DAY = 24 * 60 * 60 * 1000;
+
 /** 日本時間の「今日」を YYYY-MM-DD で返す。 */
 export function todayInJapan(now: Date = new Date()): string {
   return new Intl.DateTimeFormat("sv-SE", { timeZone: "Asia/Tokyo" }).format(now);
+}
+
+/** 期限までの残り日数の表示文言。完了したタスクは undefined（表示しない）。 */
+export function formatDaysLeft(
+  task: Pick<Task, "status" | "dueDate">,
+  today: string = todayInJapan(),
+): string | undefined {
+  if (task.status === "done") return undefined;
+  const diff = Math.round((Date.parse(task.dueDate) - Date.parse(today)) / MS_PER_DAY);
+  if (Number.isNaN(diff)) return undefined;
+  if (diff > 0) return `あと ${diff} 日`;
+  if (diff === 0) return "今日まで";
+  return `${-diff} 日超過`;
 }
 
 /** 期限切れか。未完了で、期限日の翌日以降（期限当日は含めない）。日付は日本時間の YYYY-MM-DD。 */
