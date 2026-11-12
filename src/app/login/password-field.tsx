@@ -19,7 +19,8 @@ export function PasswordField() {
           onBlur={() => setCapsLock(false)}
         />
       </label>
-      {capsLock && <span data-testid="caps-lock-warning" role="status"> {CAPS_LOCK_MESSAGE}</span>}
+      {/* 読み上げを確実にするため、role="status" の要素は最初から置き、中の文言だけを切り替える。 */}
+      <span role="status">{capsLock && <span data-testid="caps-lock-warning"> {CAPS_LOCK_MESSAGE}</span>}</span>
     </>
   );
 }
