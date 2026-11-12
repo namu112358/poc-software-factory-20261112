@@ -1,7 +1,7 @@
 // Cookie からログイン中のユーザーを取り出す（Server Component・Route Handler 用）。
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
-import { SESSION_COOKIE, getPreviousLogin, getSessionUser } from "./auth.ts";
+import { SESSION_COOKIE, getFailedLoginsBefore, getPreviousLogin, getSessionUser } from "./auth.ts";
 import type { User } from "./users.ts";
 
 export async function getCurrentUser(): Promise<User | undefined> {
@@ -13,6 +13,12 @@ export async function getCurrentUser(): Promise<User | undefined> {
 export async function getCurrentPreviousLogin(): Promise<string | null | undefined> {
   const store = await cookies();
   return getPreviousLogin(store.get(SESSION_COOKIE)?.value);
+}
+
+/** ログイン中のセッションで、ログインした時点の「前回のログインのあとにパスワードを誤ったログインの回数」。未ログインなら undefined。 */
+export async function getCurrentFailedLoginsBefore(): Promise<number | undefined> {
+  const store = await cookies();
+  return getFailedLoginsBefore(store.get(SESSION_COOKIE)?.value);
 }
 
 /** ページ用: 未ログインならログイン画面へ移動する。 */
