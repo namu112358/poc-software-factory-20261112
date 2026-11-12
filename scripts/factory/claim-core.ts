@@ -145,13 +145,42 @@ export function makeIsStalled(labels: Map<number, string[]>, prIssue: Map<number
  * factory:queued の wait=#N（同じファイルを変える作業を待つもの）は、開いていても、
  * 待ち先が needs-human・blocked:question で人を待っているなら待たない（無期限に止まらないため。#255）。
  */
-export function blockingDeps(issue: IssueInfo, isOpen: (n: number) => boolean, isStalled: (n: number) => boolean = () => false): number[] {
+export function blockingDeps(
+  issue: IssueInfo,
+  isOpen: (n: number) => boolean,
+  isStalled: (n: number) => boolean = () => false,
+  currentFilesOf: (n: number) => string[] | null = () => null,
+  files: string[] = plannedFiles(issue),
+): number[] {
   const hard = new Set<number>([...(issue.blockedBy ?? []), ...bodyDeps(issue.body)]);
   const out = new Set<number>([...hard].filter((n) => isOpen(n)));
   const q = latestQueued(issue);
-  if (q && typeof q.value.wait === "number" && !hard.has(q.value.wait) && isOpen(q.value.wait) && !isStalled(q.value.wait)) out.add(q.value.wait);
+  if (q && typeof q.value.wait === "number" && !hard.has(q.value.wait) && isOpen(q.value.wait) && !isStalled(q.value.wait)) {
+    // 待ち先の今のファイルが分かり、自分の変えるファイルと重ならなければ、待つ理由が無くなったので待たない（#262）
+    const now = currentFilesOf(q.value.wait);
+    if (now === null || files.length === 0 || overlap(files, now).length > 0) out.add(q.value.wait);
+  }
   out.delete(issue.number);
   return [...out].sort((a, b) => a - b);
+}
+
+/**
+ * 待ち先（Issue か PR）の今の変えるファイル。分からなければ null（そのときは待ち続ける）。
+ * PR は変更ファイル。Issue は、PR があればその変更ファイル、無ければ作業中なら最新の factory:touch、queued なら記録の files=。
+ */
+export function makeCurrentFilesOf(ctx: { openPrs: PrInfo[]; inProgress: IssueInfo[]; queued: IssueInfo[] }): (n: number) => string[] | null {
+  return (n: number) => {
+    const pr = ctx.openPrs.find((p) => p.number === n);
+    if (pr) return pr.files;
+    const working = ctx.inProgress.find((i) => i.number === n);
+    const waiting = ctx.queued.find((i) => i.number === n);
+    const ownPr = ctx.openPrs.find((p) => p.headRef === `claude/issue-${n}`);
+    if (!working && !waiting && !ownPr) return null;
+    // PR があれば、実際の変更ファイルを使う（factory:touch・files= は着手の前の見積もりで、分けたファイルの古い名前が残ることがある）
+    if (ownPr) return ownPr.files;
+    if (working) return latestTouch(working)?.value ?? [];
+    return waiting ? plannedFiles(waiting) : null;
+  };
 }
 
 /** 変えるファイル: 最新の factory:queued の files=、無ければ最新の factory:touch の files= */
@@ -195,7 +224,7 @@ export function precheck(args: {
 }): Decision {
   const { self, files } = args;
   if (args.ownPr) return ownPrGo(args.ownPr);
-  const openDeps = blockingDeps(self, args.isOpen, args.isStalled);
+  const openDeps = blockingDeps(self, args.isOpen, args.isStalled, makeCurrentFilesOf(args), files);
   if (openDeps.length > 0) {
     return queue("queue", openDeps[0], files, `依存先 #${openDeps.join("・#")} がまだ開いているので待つ。`);
   }
@@ -287,7 +316,9 @@ function blocker(self: IssueInfo, files: string[], openPrs: PrInfo[], inProgress
   }
   for (const i of inProgress) {
     if (i.number === self.number) continue;
-    if (overlap(files, latestTouch(i)?.value ?? []).length > 0) return i.number;
+    // 作業中の Issue に PR があれば、着手の記録（見積もり）ではなく PR の実際の変更ファイルで見る（#262）
+    const pr = openPrs.find((p) => p.headRef === `claude/issue-${i.number}`);
+    if (overlap(files, pr ? pr.files : (latestTouch(i)?.value ?? [])).length > 0) return i.number;
   }
   return null;
 }
@@ -316,10 +347,11 @@ export function pick(args: {
     if (latestQueued(i)?.value.wait === wait) return; // すでに同じ待ち先なら、コメントをくり返さない
     rewait.push({ issue: i.number, wait, files, comment: queuedComment(wait, files, reason) });
   };
+  const currentFilesOf = makeCurrentFilesOf({ openPrs: args.openPrs ?? [], inProgress: args.inProgress ?? [], queued: args.queued });
   const skipped: IssueInfo[] = []; // 依存先が開いているので飛ばした、先に待っている Issue（予約として扱う）
   for (const i of [...args.queued].sort(waitOrder)) {
     if (picked.length >= slots) break;
-    if (blockingDeps(i, args.isOpen, args.isStalled).length > 0) {
+    if (blockingDeps(i, args.isOpen, args.isStalled, currentFilesOf).length > 0) {
       skipped.push(i);
       continue;
     }

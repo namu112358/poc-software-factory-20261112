@@ -267,6 +267,45 @@ describe("待ち先が人を待って止まっているとき（#255）", () => 
   });
 });
 
+describe("待つ理由が無くなった同じファイル待ちを解く（#262）", () => {
+  // #98 の再現: tasks.ts の重なりで #213 を待ったが、tasks.ts を分けた後は #213 と重ならない
+  const q98 = issue(98, [queued("wait=#213 files=src/app/api/tasks/[id]/route.ts,src/lib/tasks.ts", "2026-11-12T11:25:34Z")]);
+  const working213 = issue(213, [touch("src/app/tasks/page.tsx,src/lib/task-format.ts", "2026-11-12T13:30:30Z")]);
+  it("待ち先の今のファイル（作業中なら最新の factory:touch）と重ならなければ、待ち終わりとして取り出す", () => {
+    const r = pick({ queued: [q98], inProgressCount: 1, isOpen: open(213), inProgress: [working213] });
+    assert.deepEqual(r.pick, [98]);
+  });
+  it("待ち先の今のファイルとまだ重なるなら待つ", () => {
+    const still = issue(213, [touch("src/app/api/tasks/[id]/route.ts", "2026-11-12T13:30:30Z")]);
+    assert.deepEqual(pick({ queued: [q98], inProgressCount: 1, isOpen: open(213), inProgress: [still] }).pick, []);
+  });
+  it("待ち先が PR なら、その変更ファイルで判定する。今のファイルが分からなければ待つ", () => {
+    const q = issue(98, [queued("wait=#300 files=src/lib/tasks.ts", "2026-11-12T11:25:34Z")]);
+    const openPrs = [{ number: 300, headRef: "claude/issue-92", files: ["src/lib/task-store.ts"] }];
+    assert.deepEqual(pick({ queued: [q], inProgressCount: 0, isOpen: open(300), openPrs }).pick, [98]);
+    assert.deepEqual(pick({ queued: [q], inProgressCount: 0, isOpen: open(300) }).pick, []); // #300 のファイルが分からない
+  });
+  it("待ち先の Issue に PR があれば、着手の記録（見積もり）より PR の実際の変更ファイルで判定する", () => {
+    // 13:31 の #213 の再現: 着手の記録は tasks.ts を含むが、PR #272 が変えたのは task-format.ts
+    const w213 = issue(213, [touch("src/app/tasks/page.tsx,src/lib/tasks.ts", "2026-11-12T13:31:10Z")]);
+    const openPrs = [{ number: 272, headRef: "claude/issue-213", files: ["src/app/tasks/page.tsx", "src/lib/task-format.ts", "tests/unestimated-count.test.ts"] }];
+    assert.deepEqual(pick({ queued: [q98], inProgressCount: 1, isOpen: open(213), inProgress: [w213], openPrs }).pick, [98]);
+    assert.deepEqual(pick({ queued: [q98], inProgressCount: 1, isOpen: open(213), inProgress: [w213] }).pick, []); // PR が無ければ記録で判定
+  });
+  it("人が決めた依存（blocked by・「#N の後」）は、重ならなくても判定し直さずに待つ", () => {
+    const human = issue(98, [queued("wait=slot files=a.ts", "2026-11-12T11:25:34Z")], "#213 の後", [214]);
+    const r = pick({ queued: [human], inProgressCount: 1, isOpen: open(213, 214), inProgress: [working213] });
+    assert.deepEqual(r.pick, []);
+  });
+  it("precheck は、自分の今のファイル（--files）で判定し直す", () => {
+    const self = issue(98, [queued("wait=#213 files=src/lib/tasks.ts", "2026-11-12T11:25:34Z")]);
+    const r = precheck({ self, files: ["src/app/api/tasks/[id]/route.ts"], inProgress: [working213], queued: [self], openPrs: [], isOpen: open(213) });
+    assert.equal(r.decision, "go");
+    const r2 = precheck({ self, files: ["src/app/tasks/page.tsx"], inProgress: [working213], queued: [self], openPrs: [], isOpen: open(213) });
+    assert.equal(r2.decision, "queue");
+  });
+});
+
 describe("割り当ての重複（handled）", () => {
   it("since より後に、ほかのセッションが factory:dispatch を書いたものだけを返す", () => {
     const c = (issueNo: number, at: string, session: string) => ({
