@@ -1,10 +1,12 @@
 import type { ReactNode } from "react";
-import { getCurrentUser } from "@/lib/session";
+import { formatPreviousLogin } from "@/lib/auth";
+import { getCurrentPreviousLogin, getCurrentUser } from "@/lib/session";
 
 export const metadata = { title: "PoC タスク管理" };
 
 export default async function RootLayout({ children }: { children: ReactNode }) {
   const user = await getCurrentUser();
+  const previousLogin = user ? await getCurrentPreviousLogin() : undefined;
   return (
     <html lang="ja">
       <body style={{ fontFamily: "system-ui, sans-serif", margin: 24 }}>
@@ -18,6 +20,7 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
             <a href="/board">ステータス別</a>
             <a href="/settings/password">パスワード変更</a>
             <span data-testid="header-user">{user.name}（{user.id}）</span>
+            <span data-testid="previous-login">{formatPreviousLogin(previousLogin ?? null)}</span>
             <form method="post" action="/api/logout">
               <button type="submit">ログアウト</button>
             </form>
