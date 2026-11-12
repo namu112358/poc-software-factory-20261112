@@ -54,6 +54,23 @@ export function transaction<T>(db: Db, fn: () => T): T {
   }
 }
 
+/**
+ * fn をセーブポイントの中で実行する。例外が出たらセーブポイントまで戻して投げ直す。
+ * `transaction` と違い、ほかのトランザクションの中からも呼べる（入れ子にできる）。
+ */
+export function savepoint<T>(db: Db, fn: () => T): T {
+  db.exec("SAVEPOINT sp");
+  try {
+    const result = fn();
+    db.exec("RELEASE sp");
+    return result;
+  } catch (e) {
+    db.exec("ROLLBACK TO sp");
+    db.exec("RELEASE sp");
+    throw e;
+  }
+}
+
 // 開発サーバーの再読み込みで接続が増えないよう、globalThis に保持する。
 const globalForDb = globalThis as unknown as { __pocDb?: Db };
 
