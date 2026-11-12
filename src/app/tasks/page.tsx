@@ -2,7 +2,7 @@ import { Fragment } from "react";
 import { bulkSelectionKey } from "@/lib/bulk-select";
 import { listCommentersByTask } from "@/lib/comments";
 import { NOTHING_TO_DO_TEXT, listExtensionsAwaitingMe, listMyDueTasks } from "@/lib/my-attention";
-import { listUserOptions } from "@/lib/users";
+import { listAssigneeOptions } from "@/lib/members";
 import { BulkBar, BulkCheckbox, BulkSelection } from "./BulkActions";
 import { exportHref } from "@/lib/export";
 import { parseIncludeArchived } from "@/lib/task-query";
@@ -34,7 +34,7 @@ export default async function TasksPage({ searchParams }: Props) {
   const overdueText = formatOverdueCount(countOverdue(tasks, today));
   const tagsByTask = listTagsByTask(tasks.map((t) => t.id));
   const commentersByTask = listCommentersByTask(tasks.map((t) => t.id));
-  const users = listUserOptions();
+  const users = listAssigneeOptions();
   const myTasks = listMyDueTasks(user.id, undefined, today);
   const myExtensions = listExtensionsAwaitingMe(user.id);
   const loginWindow = await getCurrentLoginWindow();
