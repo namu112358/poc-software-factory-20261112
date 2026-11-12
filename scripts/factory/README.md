@@ -31,6 +31,8 @@ Routine（`.claude/routines/`）が使う判定のスクリプトです。GitHub
 
 PR に `merge:requested` を付ける前に、必ず `node scripts/factory/claim.ts merge-check <PR>` を実行し、`ok` が `true` のときだけ付ける。`false` なら `reason` のとおりにする（レビューを起こし直す、など）。レビューの ok が無いまま `merge:requested` が付いた PR が 4 本あったため（#293）。キューを通さずにマージするとき（`.mergify.yml` を変える PR など）も、マージの前に同じように実行する（#323 は、レビューの後に足した衝突の解消が未レビューのままマージされた）。
 
+`merge:requested` は、今のラベルに**足して**付ける（REST の `POST /repos/{owner}/{repo}/issues/{番号}/labels`）。GitHub MCP の `issue_write` の `labels` はラベルを丸ごと置き換えるので、ほかの役が付けた `risk:high` などを消してしまう（#400）。`issue_write` を使うときは、直前に今のラベルを読み直し、全部を含めて渡す。
+
 ## 人の手順: 最初に動かすとき
 
 割り当ての Routine は PR が閉じたときにしか動かない。作業中が 0 件のときは、人（有人のセッション）が `pick` を実行し、`.claude/routines/dispatch.md` の「2.」と同じ手順で `status:in-progress`（`status:in-progress-hard`）を付ける。その後は、PR が閉じるたびに割り当てが、1 時間ごとに巡回が着手させる。
