@@ -260,6 +260,17 @@ export function formatEstimate(minutes: number | null): string {
   return minutes === null ? "—" : `${minutes} 分`;
 }
 
+/** 見積もり時間（分）の合計。未設定（null）のタスクは数えない。 */
+export function sumEstimateMinutes(tasks: { estimateMinutes: number | null }[]): number {
+  return tasks.reduce((sum, t) => sum + (t.estimateMinutes ?? 0), 0);
+}
+
+/** 合計の表示用の文字列。60 分未満は「M 分」、それ以上は「H 時間 M 分」（ちょうど何時間でも「H 時間 0 分」）。 */
+export function formatEstimateTotal(minutes: number): string {
+  if (minutes < 60) return `${minutes} 分`;
+  return `${Math.floor(minutes / 60)} 時間 ${minutes % 60} 分`;
+}
+
 /** タスクの番号の表示用の文字列（例: #3）。 */
 export function formatTaskNumber(id: number): string {
   return `#${id}`;

@@ -8,6 +8,8 @@ import {
   isOverdue,
   todayInJapan,
   formatEstimate,
+  formatEstimateTotal,
+  sumEstimateMinutes,
   formatJstDateTime,
   formatMemoPreview,
   formatTaskNumber,
@@ -458,5 +460,27 @@ describe("formatMemoPreview", () => {
 describe("TASK_LIST_HELP", () => {
   it("使い方の説明が指定の文言である", () => {
     assert.equal(TASK_LIST_HELP, "ステータス・担当者・タグで絞り込み、優先度の高い順に並べ替えられます。");
+  });
+});
+
+describe("見積もり時間の合計", () => {
+  it("未設定のタスクは数えない", () => {
+    assert.equal(sumEstimateMinutes([{ estimateMinutes: 90 }, { estimateMinutes: null }, { estimateMinutes: 300 }]), 390);
+    assert.equal(sumEstimateMinutes([]), 0);
+  });
+
+  it("60 分未満は「M 分」、それ以上は「H 時間 M 分」で表示する", () => {
+    assert.equal(formatEstimateTotal(0), "0 分");
+    assert.equal(formatEstimateTotal(59), "59 分");
+    assert.equal(formatEstimateTotal(60), "1 時間 0 分");
+    assert.equal(formatEstimateTotal(390), "6 時間 30 分");
+  });
+
+  it("絞り込んだ後のタスクの合計になる", () => {
+    const db = openDb();
+    const all = sumEstimateMinutes(listTasks({}, db));
+    const todo = sumEstimateMinutes(listTasks({ status: "todo" }, db));
+    assert.ok(todo <= all);
+    assert.equal(todo, listTasks({ status: "todo" }, db).reduce((s, t) => s + (t.estimateMinutes ?? 0), 0));
   });
 });
