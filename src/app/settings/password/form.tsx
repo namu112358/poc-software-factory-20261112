@@ -68,8 +68,8 @@ export function PasswordForm() {
             onChange={(event) => setNewPassword(event.target.value)}
           />
         </label>
-        {strength && <span data-testid="password-strength"> {strength}</span>}
       </p>
+      {strength && <p data-testid="password-strength">{strength}</p>}
       <p>
         <label>
           新しいパスワード（確認） <input name="confirmPassword" type="password" autoComplete="new-password" required />
