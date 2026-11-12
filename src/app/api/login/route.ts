@@ -18,7 +18,7 @@ export async function POST(request: Request) {
     password = form.get("password");
   }
 
-  const result = login(userId, password);
+  const result = login(userId, password, undefined, undefined, request.headers.get("user-agent"));
   if (!result.ok && result.reason === "locked") {
     return isJson
       ? jsonError(429, "ログインに続けて失敗したため、しばらくログインできません", [
