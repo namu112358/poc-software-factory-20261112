@@ -12,6 +12,8 @@ import {
   READY_EVENTS_PER_HOUR_BUDGET,
   waitingSince,
   waitsOn,
+  blockingDeps,
+  makeIsStalled,
   type IssueInfo,
 } from "../scripts/factory/claim-core.ts";
 
@@ -222,6 +224,48 @@ describe("お互いを待って止まらない（#253 のレビュー）", () =>
     const loop = issue(5, [queued("wait=#6", "2026-01-01T00:00:00Z")]);
     const loop2 = issue(6, [queued("wait=#5", "2026-01-01T00:00:00Z")]);
     assert.equal(waitsOn(loop, 7, [loop, loop2]), false); // 輪になっていても止まる
+  });
+});
+
+describe("待ち先が人を待って止まっているとき（#255）", () => {
+  const stalled = (...ns: number[]) => (n: number) => ns.includes(n);
+  it("同じファイル待ち（wait=#N）の待ち先が needs-human なら、その待ちは数えない", () => {
+    const i210 = issue(210, [queued("wait=#84 files=src/app/tasks/page.tsx", "2026-11-12T11:19:40Z")]);
+    assert.deepEqual(blockingDeps(i210, open(84), stalled(84)), []);
+    assert.deepEqual(blockingDeps(i210, open(84), stalled()), [84]);
+  });
+  it("人が決めた依存（blocked by・「#N の後」）は、待ち先が needs-human でも待つ", () => {
+    const i = issue(10, [queued("wait=#5", "2026-01-01T00:00:00Z")], "#7 の後", [6]);
+    assert.deepEqual(blockingDeps(i, open(5, 6, 7), stalled(5, 6, 7)), [6, 7]);
+  });
+  it("pick: 待ち先が needs-human の Issue を取り出す", () => {
+    const i210 = issue(210, [queued("wait=#84 files=src/app/tasks/page.tsx", "2026-11-12T11:19:40Z")]);
+    assert.deepEqual(pick({ queued: [i210], inProgressCount: 0, isOpen: open(84), isStalled: stalled(84) }).pick, [210]);
+    assert.deepEqual(pick({ queued: [i210], inProgressCount: 0, isOpen: open(84) }).pick, []);
+  });
+  it("pick: 人を待って止まった PR と同じファイルを変えていても、取り出す", () => {
+    const q = issue(210, [queued("wait=slot files=a.ts", "2026-11-12T11:00:00Z")]);
+    const openPrs = [{ number: 300, headRef: "claude/issue-84", files: ["a.ts"], stalled: true }];
+    assert.deepEqual(pick({ queued: [q], inProgressCount: 0, isOpen: open(), openPrs }).pick, [210]);
+  });
+  it("待ち先が PR で、止まった印がその Issue にだけ付いていても、待ちを解く（#257 のレビュー）", () => {
+    const isStalled = makeIsStalled(new Map([[84, ["enhancement", "needs-human"]], [300, []]]), new Map([[300, 84]]));
+    assert.equal(isStalled(300), true);
+    assert.equal(isStalled(84), true);
+    assert.equal(makeIsStalled(new Map([[300, []]]), new Map([[300, 84]]))(300), false);
+    const i210 = issue(210, [queued("wait=#300 files=a.ts", "2026-11-12T11:19:40Z")]);
+    const openPrs = [{ number: 300, headRef: "claude/issue-84", files: ["a.ts"], stalled: true }];
+    assert.deepEqual(pick({ queued: [i210], inProgressCount: 0, isOpen: open(300, 84), isStalled, openPrs }).pick, [210]);
+    const r = precheck({ self: i210, files: ["a.ts"], inProgress: [], queued: [i210], openPrs, isOpen: open(300, 84), isStalled });
+    assert.equal(r.decision, "go");
+  });
+  it("precheck: 止まった PR と同じファイルを変えるなら、待たずに着手し、そのことを note で伝える", () => {
+    const openPrs = [{ number: 300, headRef: "claude/issue-84", files: ["a.ts"], stalled: true }];
+    const r = precheck({ self: issue(210), files: ["a.ts"], inProgress: [], queued: [], openPrs, isOpen: open() });
+    assert.equal(r.decision, "go");
+    assert.match(r.decision === "go" ? (r.note ?? "") : "", /#300/);
+    const live = [{ number: 301, headRef: "claude/issue-85", files: ["a.ts"] }];
+    assert.equal(waitOf(precheck({ self: issue(210), files: ["a.ts"], inProgress: [], queued: [], openPrs: live, isOpen: open() })), 301);
   });
 });
 

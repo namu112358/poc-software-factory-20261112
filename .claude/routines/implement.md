@@ -28,7 +28,7 @@ Issue に `ready` か `ready:hard` が付いたときに起動します。1 回�
 node scripts/factory/claim.ts precheck <番号> --files <カンマ区切りのパス>
 ```
 
-- `"decision": "go"` なら次に進む。`note` があれば、それに従う（自分の PR がすでに開いていれば、引き下がらずに「残った PR を引き継ぐ」に進む）。
+- `"decision": "go"` なら次に進む。`note` があれば、それに従う（自分の PR がすでに開いていれば、引き下がらずに「残った PR を引き継ぐ」に進む。人を待って止まった PR と同じファイルを変えるときは、そのことを着手のコメントに書いてから進む。#255）。
 - `"decision": "queue"` なら、`ready` を外して `queued` を付け、結果の `comment` をそのままコメントして終える（キューからは取り出さない）。`comment` の先頭の `factory:queued` には、どの理由でも `files=` が付いている（後から来た Issue と取り出す役が、重なりを見るのに使う。#216）。
 - `"decision": "error"` なら、`ready` を外して `needs-human` を付け、出力をコメントして終える。
 
