@@ -27,7 +27,7 @@ flowchart LR
 | `ready` | Issue | 着手してよい（承認） | 書き込み権限のある人だけ |
 | `in-progress` | Issue | 実装の開始の合図・作業中 | 割り当て・巡回（作業中が 0 件のときは人） |
 | `in-progress:hard` | Issue | 同じ。難しい用の実装に回す | 割り当て・巡回、途中で難しいと分かった標準の実装 |
-| `blocked:question` | Issue | 確認事項があり止まっている | 実装・修正 |
+| `blocked:question` | Issue | 確認事項があり止まっている | 実装・修正、未決の点が残る Issue を返す割り当て・巡回 |
 | `needs-human` | Issue・PR | 上限に達した・手順の外のことが要る | どの役でも |
 | `risk:high` | PR | 高リスクの変更。人が重点的に見る | レビュー |
 | `merge` | PR | マージしてよい（Mergify のキューに入る） | 人だけ（付ける前に `claim.ts merge-check`） |
