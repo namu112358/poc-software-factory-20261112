@@ -3,6 +3,8 @@ import assert from "node:assert/strict";
 import { openDb } from "../src/lib/db/index.ts";
 import {
   createTask,
+  isOverdue,
+  todayInJapan,
   formatEstimate,
   formatTaskCount,
   getTask,
@@ -185,6 +187,25 @@ describe("formatTaskCount", () => {
 
   it("shows 「0 件」 when nothing matches", () => {
     assert.equal(formatTaskCount(0), "0 件");
+  });
+});
+
+describe("isOverdue", () => {
+  const today = "2026-11-12";
+  it("期限日の翌日以降の未完了タスクは期限切れ", () => {
+    assert.equal(isOverdue({ status: "todo", dueDate: "2026-11-11" }, today), true);
+    assert.equal(isOverdue({ status: "in_progress", dueDate: "2026-01-01" }, today), true);
+  });
+  it("期限当日と期限前は期限切れではない", () => {
+    assert.equal(isOverdue({ status: "todo", dueDate: today }, today), false);
+    assert.equal(isOverdue({ status: "todo", dueDate: "2026-11-13" }, today), false);
+  });
+  it("完了したタスクは期限を過ぎても期限切れではない", () => {
+    assert.equal(isOverdue({ status: "done", dueDate: "2026-11-01" }, today), false);
+  });
+  it("「今日」は日本時間で判断する", () => {
+    assert.equal(todayInJapan(new Date("2026-11-11T15:00:00Z")), "2026-11-12");
+    assert.equal(todayInJapan(new Date("2026-11-11T14:59:59Z")), "2026-11-11");
   });
 });
 
