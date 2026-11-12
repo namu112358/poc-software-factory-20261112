@@ -44,10 +44,54 @@ export function listTagsByTask(taskIds: number[], db: Db = getDb()): Map<number,
   return result;
 }
 
-/** タグを付ける。すでに付いていれば "duplicate"。 */
+/** 全角の英数字（Ａ〜Ｚ・ａ〜ｚ・０〜９）を半角にする。ほかの文字（日本語・記号・半角カナなど）と大文字・小文字は変えない。 */
+export function toHalfWidthAlnum(name: string): string {
+  return name.replace(/[Ａ-Ｚａ-ｚ０-９]/g, (c) => String.fromCharCode(c.charCodeAt(0) - 0xfee0));
+}
+
+/** 書き方だけが違うタグを同じものとして比べるための形。全角の英数字を半角にし、英字（A〜Z）を小文字にする。 */
+export function tagKey(name: string): string {
+  return toHalfWidthAlnum(name).replace(/[A-Z]/g, (c) => c.toLowerCase());
+}
+
+export type UsedTag = { name: string; count: number; firstId: number };
+
+/**
+ * タグを付けるときの名前を決める。使われているタグ（`used`）に、比べる形（`tagKey`）が同じものがあれば、その書き方にする。
+ * 複数あれば、付いているタスクの数がいちばん多い書き方、同数なら先に作られた方（`firstId` が小さい方）。
+ * 無ければ、全角の英数字を半角にした書き方（大文字・小文字は入力のまま）。
+ */
+export function resolveTagName(name: string, used: UsedTag[]): string {
+  const key = tagKey(name);
+  let best: UsedTag | undefined;
+  for (const t of used) {
+    if (tagKey(t.name) !== key) continue;
+    if (!best || t.count > best.count || (t.count === best.count && t.firstId < best.firstId)) best = t;
+  }
+  return best ? best.name : toHalfWidthAlnum(name);
+}
+
+/** 使われているタグ（アーカイブしたタスクのものを含む）と、付いているタスクの件数・最初に付けた行の ID を返す。 */
+function listUsedTags(db: Db): UsedTag[] {
+  const rows = db
+    .prepare("SELECT name, COUNT(*) AS count, MIN(id) AS firstId FROM task_tags GROUP BY name")
+    .all() as { name: string; count: number; firstId: number }[];
+  return rows.map((r) => ({ name: r.name, count: Number(r.count), firstId: Number(r.firstId) }));
+}
+
+/**
+ * タグを付ける。名前は `resolveTagName` で、使われている書き方に揃える。
+ * そのタスクに、書き方だけが違うものを含めて同じタグがもう付いていれば、何も付けずに "duplicate"。
+ * 判定と追加は 1 つのトランザクションで行う。すでに保存されているタグは書き換えない。
+ */
 export function addTag(taskId: number, name: string, db: Db = getDb()): "added" | "duplicate" {
-  const { changes } = db.prepare("INSERT OR IGNORE INTO task_tags (task_id, name) VALUES (?, ?)").run(taskId, name);
-  return Number(changes) === 1 ? "added" : "duplicate";
+  return transaction(db, () => {
+    const key = tagKey(name);
+    if (listTags(taskId, db).some((t) => tagKey(t) === key)) return "duplicate";
+    const resolved = resolveTagName(name, listUsedTags(db));
+    const { changes } = db.prepare("INSERT OR IGNORE INTO task_tags (task_id, name) VALUES (?, ?)").run(taskId, resolved);
+    return Number(changes) === 1 ? "added" : "duplicate";
+  });
 }
 
 /** タグを外す。付いていなければ "not_found"。 */
