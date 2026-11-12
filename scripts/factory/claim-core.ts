@@ -225,7 +225,7 @@ function blocker(self: IssueInfo, files: string[], openPrs: PrInfo[], inProgress
 
 /**
  * キューから取り出す（README の「キュー」）。ラベルは変えず、取り出してよい Issue と、待ち先を付け替える Issue を返す。
- * 待ち始めが早い順に見る。開いている PR・作業中の Issue・同じ回に取り出した Issue と同じファイルを変えるものは、
+ * 待ち始めが早い順に見る。先に待っている（依存先が開いていて飛ばした）Issue・開いている PR・作業中の Issue・同じ回に取り出した Issue と同じファイルを変えるものは、
  * 取り出さずに待ち先を付け替える（取り出しても着手の前の確かめで戻るだけなので。#183）。待ち先が今と同じなら何もしない。
  */
 export function pick(args: {
@@ -246,10 +246,19 @@ export function pick(args: {
     if (latestQueued(i)?.value.wait === wait) return; // すでに同じ待ち先なら、コメントをくり返さない
     rewait.push({ issue: i.number, wait, files, comment: queuedComment(wait, files, reason) });
   };
+  const skipped: IssueInfo[] = []; // 依存先が開いているので飛ばした、先に待っている Issue（予約として扱う）
   for (const i of [...args.queued].sort(waitOrder)) {
     if (picked.length >= slots) break;
-    if (dependencies(i).some((n) => args.isOpen(n))) continue;
+    if (dependencies(i).some((n) => args.isOpen(n))) {
+      skipped.push(i);
+      continue;
+    }
     const files = plannedFiles(i);
+    const ahead = skipped.find((s) => overlap(files, plannedFiles(s)).length > 0);
+    if (ahead) {
+      addRewait(i, ahead.number, files, `先に待っている #${ahead.number} が同じファイルを変える予定なので、取り出さずに #${ahead.number} を待つ。`);
+      continue;
+    }
     const busy = blocker(i, files, args.openPrs ?? [], args.inProgress ?? []);
     if (busy !== null) {
       addRewait(i, busy, files, `#${busy} が同じファイルを変えているので、取り出さずに #${busy} を待つ。`);

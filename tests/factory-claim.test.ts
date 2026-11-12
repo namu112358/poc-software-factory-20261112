@@ -177,6 +177,15 @@ describe("キューから取り出す（pick）: 待っている時間と、開�
     const own = [{ number: 300, headRef: "claude/issue-210", files: ["src/app/tasks/page.tsx"] }];
     assert.deepEqual(pick({ queued: [q], inProgressCount: 0, isOpen: open(), openPrs: own }).pick, [210]);
   });
+  it("依存先が開いていて飛ばした、先に待っている Issue と同じファイルを変える Issue は取り出さない", () => {
+    const a = issue(92, [queued("wait=#300 files=src/lib/tasks.ts", "2026-11-12T09:05:00Z")]);
+    const b = issue(98, [queued("wait=slot files=src/lib/tasks.ts", "2026-11-12T10:00:00Z")]);
+    const c = issue(99, [queued("wait=slot files=other.ts", "2026-11-12T10:10:00Z")]);
+    const r = pick({ queued: [a, b, c], inProgressCount: 0, isOpen: open(300) });
+    assert.deepEqual(r.pick, [99]);
+    assert.equal(r.rewait[0].issue, 98);
+    assert.equal(r.rewait[0].wait, 92);
+  });
   it("前より長く待っている Issue が、同じファイルを変える新しい待ちより先に出る", () => {
     const old = issue(92, [queued("wait=slot files=src/lib/tasks.ts", "2026-11-12T09:05:00Z")]);
     const fresh = issue(85, [queued("wait=slot files=src/lib/tasks.ts", "2026-11-12T11:00:00Z")]);
