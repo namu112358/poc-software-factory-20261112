@@ -5,7 +5,7 @@ import type { FormEvent } from "react";
 import { TASK_CREATE_FAILED_MESSAGE, buildTaskBody, taskDetailHref, taskFormErrorMessages } from "@/lib/task-form";
 import { STATUS_LABELS, TASK_STATUSES, isTaskStatus } from "@/lib/task-types";
 
-type Props = { users: { id: string; name: string }[]; defaultAssignee: string };
+type Props = { users: { id: string; name: string; label?: string }[]; defaultAssignee: string };
 
 export function TaskForm({ users, defaultAssignee }: Props) {
   const [errors, setErrors] = useState<string[]>([]);
@@ -66,7 +66,7 @@ export function TaskForm({ users, defaultAssignee }: Props) {
           <select name="assignee" defaultValue={defaultAssignee}>
             {users.map((u) => (
               <option key={u.id} value={u.id}>
-                {u.name}
+                {u.label ?? u.name}
               </option>
             ))}
           </select>

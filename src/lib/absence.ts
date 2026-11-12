@@ -79,6 +79,17 @@ export function listLeaveEndDates(db: Db = getDb(), today: string = todayInJapan
   return new Map(rows.map((r) => [r.userId, r.endDate]));
 }
 
+/**
+ * 登録済みで、まだ終わっていない休み（休み中と、これから始まる休み）の終了日（ユーザー ID → YYYY-MM-DD）。
+ * 担当者の選択肢で、先の休みにも気づけるようにするために使う。
+ */
+export function listUpcomingLeaveEndDates(db: Db = getDb(), today: string = todayInJapan()): Map<string, string> {
+  const rows = db
+    .prepare("SELECT user_id AS userId, end_date AS endDate FROM user_absences WHERE ? <= end_date")
+    .all(today) as { userId: string; endDate: string }[];
+  return new Map(rows.map((r) => [r.userId, r.endDate]));
+}
+
 /** YYYY-MM-DD を「M/D」にする（先頭の 0 は付けない）。 */
 export function formatMonthDay(date: string): string {
   const [, month, day] = date.split("-");
