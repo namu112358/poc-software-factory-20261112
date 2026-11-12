@@ -17,13 +17,13 @@ export function daysOverdue(dueDate: string, today: string): number {
   return Math.round((Date.parse(today) - Date.parse(dueDate)) / MS_PER_DAY);
 }
 
-/** 期限が今日（日本時間）より前で、完了以外のタスク。何日過ぎたかの多い順（同じなら ID 順）。 */
+/** 期限が今日（日本時間）より前で、完了以外で、アーカイブしていないタスク。何日過ぎたかの多い順（同じなら ID 順）。 */
 export function listOverdueTasks(db: Db = getDb(), today: string = todayInJapan()): OverdueRow[] {
   const rows = db
     .prepare(
       `SELECT t.id AS id, t.title AS title, t.due_date AS dueDate, u.name AS assigneeName
        FROM tasks t LEFT JOIN users u ON u.id = t.assignee
-       WHERE t.status <> 'done' AND t.due_date < ?
+       WHERE t.status <> 'done' AND t.archived = 0 AND t.due_date < ?
        ORDER BY t.due_date, t.id`,
     )
     .all(today) as { id: number; title: string; dueDate: string; assigneeName: string | null }[];
