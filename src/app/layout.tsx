@@ -15,6 +15,9 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
             <form method="post" action="/api/logout">
               <button type="submit">ログアウト</button>
             </form>
+            <form method="post" action="/api/logout-all">
+              <button type="submit">すべての端末からログアウト</button>
+            </form>
           </header>
         )}
         {children}
