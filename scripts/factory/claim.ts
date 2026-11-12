@@ -201,8 +201,11 @@ async function main(): Promise<unknown> {
         .at(-1);
       let after: { sha: string; mergeOnly: boolean }[] | null = [];
       if (last && !pr.head.sha.startsWith(last)) {
-        const fetched = git("fetch", "-q", "origin", `pull/${n}/head:refs/factory/pr-${n}`, "main:refs/factory/main");
+        const fetched = git("fetch", "-q", "origin", `+pull/${n}/head:refs/factory/pr-${n}`, "+main:refs/factory/main");
         if (fetched.status !== 0) throw new Error(`git fetch に失敗した（${fetched.stderr.trim()}）。付けずに、後でやり直す。`);
+        // 手元の参照が古いまま判定しないよう、取り込んだ PR の先頭が GitHub の head と同じかを確かめる
+        const local = git("rev-parse", `refs/factory/pr-${n}`).stdout.trim();
+        if (local !== pr.head.sha) throw new Error(`手元の PR の先頭（${local.slice(0, 7)}）が GitHub の head（${pr.head.sha.slice(0, 7)}）と違う。付けずに、後でやり直す。`);
         const list = git("rev-list", "--first-parent", `${last}..refs/factory/pr-${n}`);
         if (list.status !== 0) after = null;
         else
