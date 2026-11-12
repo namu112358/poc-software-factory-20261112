@@ -24,6 +24,14 @@ export function escapeCsvField(value: string): string {
   return /[",\r\n]/.test(value) ? `"${value.replaceAll('"', '""')}"` : value;
 }
 
+/**
+ * 利用者が入力した文字の欄を、表計算ソフトが数式として動かさないようにする（CSV インジェクション対策）。
+ * 先頭が `=`・`+`・`-`・`@`・タブ・CR のときだけ、先頭に `'` を付ける。エスケープ（escapeCsvField）の前に使う。
+ */
+export function neutralizeFormula(value: string): string {
+  return /^[=+\-@\t\r]/.test(value) ? `'${value}` : value;
+}
+
 /** 欄の配列を 1 行の CSV にする（行末は含めない）。 */
 export function toCsvRow(fields: readonly string[]): string {
   return fields.map(escapeCsvField).join(",");
@@ -59,12 +67,12 @@ export function exportTasksCsv(filter: TaskFilter = {}, db: Db = getDb()): strin
   const rows = tasks.map((t) =>
     toCsvRow([
       String(t.id),
-      t.title,
+      neutralizeFormula(t.title),
       STATUS_LABELS[t.status],
       PRIORITY_LABELS[t.priority],
       userNames.get(t.assignee) ?? t.assignee,
       t.dueDate,
-      (tagsByTask.get(t.id) ?? []).join("、"),
+      neutralizeFormula((tagsByTask.get(t.id) ?? []).join("、")),
     ]),
   );
   return CSV_BOM + [toCsvRow(CSV_HEADERS), ...rows].map((line) => line + "\r\n").join("");
