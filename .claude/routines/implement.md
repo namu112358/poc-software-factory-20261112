@@ -10,7 +10,10 @@ Issue に `ready` が付いたときに起動します。1 回の起動で 1 つ
 - Issue が閉じている。
 - Issue に `in-progress`・`blocked:question`・`needs-human` のどれかが付いている。
 - その Issue を `Closes #<番号>` で参照する、開いている PR がある。
-- `ready` を付けた人が、リポジトリへの書き込み権限を持たない。Issue のイベント（`GET /repos/{owner}/{repo}/issues/{number}/events` の `labeled`）で付けた人を調べ、`GET /repos/{owner}/{repo}/collaborators/{user}/permission` で `write` 以上かを確かめる。調べられなければ、`needs-human` を付けて理由をコメントし、終える。
+- `ready` を付けた人が、リポジトリへの書き込み権限を持たない。次の順に確かめる。
+  1. Issue のイベント（GitHub MCP の `issue_read`、または REST の `GET /repos/{owner}/{repo}/issues/{number}/events`）の最後の `labeled`（ラベル `ready`）から、付けた人を調べる。
+  2. GitHub MCP の `list_repository_collaborators` で、その人が `write`・`maintain`・`admin` のどれかを持つかを確かめる。REST の `collaborators/{user}/permission` は、クラウドのプロキシで拒まれるので使わない（2026-11-12 の試行で 403）。
+  3. どちらの道具でも調べられなければ、`needs-human` を付けて理由をコメントし、終える。
 
 ## 2. 着手する
 
