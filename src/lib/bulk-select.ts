@@ -10,9 +10,15 @@ export type BulkChoice = { assignee: string; status: string };
 
 export type BulkChanges = { assignee?: string; status?: TaskStatus };
 
+/** 変えた本人が元に戻せる期間（分）。 */
+export const BULK_UNDO_MINUTES = 10;
+
+/** 元に戻すための記録の ID と、値が実際に変わったタスクの数（API の応答の `undo`）。 */
+export type BulkUndoOffer = { id: number; count: number };
+
 export type BulkSubmitResult =
   | { status: "cancelled" }
-  | { status: "updated"; count: number; message: string }
+  | { status: "updated"; count: number; message: string; undo?: BulkUndoOffer }
   | { status: "error"; message: string };
 
 type Deps = {
@@ -98,6 +104,24 @@ export function bulkDoneMessage(count: number): string {
   return `${count} 件を変更しました`;
 }
 
+/** 元に戻すを出すときの文言。例: 「3 件の担当者を変えました。」（変えた項目が両方なら「担当者とステータス」）。 */
+export function bulkUndoOfferMessage(count: number, changes: BulkChanges): string {
+  const parts: string[] = [];
+  if (changes.assignee !== undefined) parts.push("担当者");
+  if (changes.status !== undefined) parts.push("ステータス");
+  return `${count} 件の${parts.join("と")}を変えました。`;
+}
+
+/** API の応答の `undo` を読む。正の整数の id と 1 以上の count があるときだけ返す（0 件なら元に戻すものが無い）。 */
+export function parseUndoOffer(data: unknown): BulkUndoOffer | undefined {
+  const undo = (data as { undo?: unknown } | null)?.undo as { id?: unknown; count?: unknown } | null | undefined;
+  if (typeof undo !== "object" || undo === null) return undefined;
+  const { id, count } = undo;
+  if (typeof id !== "number" || !Number.isSafeInteger(id) || id <= 0) return undefined;
+  if (typeof count !== "number" || !Number.isSafeInteger(count) || count <= 0) return undefined;
+  return { id, count };
+}
+
 /** 失敗したときの文言。API の応答の状態と本文から、日本語の理由を作る。 */
 export function bulkErrorMessage(httpStatus: number, body: unknown): string {
   if (httpStatus === 404) return "見つからないタスクがあります。1 件も変更していません。";
@@ -129,10 +153,51 @@ export async function confirmAndBulkUpdate(
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ ids, changes }),
     });
-    if (res.ok) return { status: "updated", count: ids.length, message: bulkDoneMessage(ids.length) };
     const data = await res.json().catch(() => null);
+    if (res.ok) {
+      const undo = parseUndoOffer(data);
+      if (undo === undefined) return { status: "updated", count: ids.length, message: bulkDoneMessage(ids.length) };
+      return { status: "updated", count: ids.length, message: bulkUndoOfferMessage(undo.count, changes), undo };
+    }
     return { status: "error", message: bulkErrorMessage(res.status, data) };
   } catch {
     return { status: "error", message: bulkErrorMessage(0, null) };
+  }
+}
+
+export type BulkUndoSubmitResult = { status: "undone" | "error"; message: string };
+
+type UndoDeps = {
+  fetch: (
+    url: string,
+    init: { method: "POST"; headers: Record<string, string>; body: string },
+  ) => Promise<{ ok: boolean; status: number; json(): Promise<unknown> }>;
+};
+
+/** 元に戻した結果の文言。戻せなかったタスクがあれば、その件数と理由も出す。 */
+export function bulkUndoDoneMessage(restored: number, skipped: number): string {
+  const done = `${restored} 件を元に戻しました。`;
+  if (skipped === 0) return done;
+  return `${done}${skipped} 件は、変えた後にほかの変更があった（または削除された）ため、戻していません。`;
+}
+
+/** POST /api/tasks/bulk-update/undo を 1 回送る。断られたら API のエラー文言を、通信に失敗したら決まった文言を返す。 */
+export async function requestBulkUndo(id: number, deps: UndoDeps): Promise<BulkUndoSubmitResult> {
+  const fallback = "元に戻せませんでした。";
+  try {
+    const res = await deps.fetch("/api/tasks/bulk-update/undo", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id }),
+    });
+    const data = (await res.json().catch(() => null)) as { restoredIds?: unknown; skippedIds?: unknown; error?: unknown } | null;
+    if (res.ok) {
+      const restored = Array.isArray(data?.restoredIds) ? data.restoredIds.length : 0;
+      const skipped = Array.isArray(data?.skippedIds) ? data.skippedIds.length : 0;
+      return { status: "undone", message: bulkUndoDoneMessage(restored, skipped) };
+    }
+    return { status: "error", message: typeof data?.error === "string" ? data.error : fallback };
+  } catch {
+    return { status: "error", message: fallback };
   }
 }
