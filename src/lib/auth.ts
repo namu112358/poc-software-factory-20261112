@@ -92,12 +92,13 @@ export function createSession(
   const token = randomBytes(32).toString("hex");
   const expiresAt = new Date(now.getTime() + SESSION_TTL_MS).toISOString();
   db.prepare(
-    "INSERT INTO sessions (token, user_id, expires_at, previous_login_at, created_at, user_agent, device_id, failed_logins_before) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+    "INSERT INTO sessions (token, user_id, expires_at, previous_login_at, created_at, last_used_at, user_agent, device_id, failed_logins_before) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
   ).run(
     token,
     userId,
     expiresAt,
     previousLoginAt,
+    now.toISOString(),
     now.toISOString(),
     normalizeUserAgent(userAgent),
     newDeviceId(),
@@ -188,6 +189,33 @@ export function getSessionUser(token: string | undefined, db: Db = getDb(), now:
   return db
     .prepare("SELECT u.id, u.name FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token = ? AND s.expires_at > ?")
     .get(token, now.toISOString()) as User | undefined;
+}
+
+/** 最後に使った日時を更新しない間隔（ミリ秒）。前の値からこの時間を過ぎた利用のときだけ更新する。 */
+export const LAST_USED_UPDATE_INTERVAL_MS = 5 * 60 * 1000;
+
+/**
+ * 有効なセッションの「最後に使った日時」を now にする。ただし前の値から LAST_USED_UPDATE_INTERVAL_MS を
+ * 過ぎていなければ（ちょうどを含む）更新しない。前の値が無い（記録が始まる前のセッション）なら更新する。
+ * 前の値が now より後（時計のずれ）なら戻さない。判定は 1 つの UPDATE の中で行い、token の行だけを変える。
+ * 有効期限は延ばさない。更新したら true。
+ */
+export function touchSession(token: string | undefined, db: Db = getDb(), now: Date = new Date()): boolean {
+  if (!token) return false;
+  const threshold = new Date(now.getTime() - LAST_USED_UPDATE_INTERVAL_MS).toISOString();
+  const result = db
+    .prepare(
+      "UPDATE sessions SET last_used_at = ? WHERE token = ? AND expires_at > ? AND (last_used_at IS NULL OR last_used_at < ?)",
+    )
+    .run(now.toISOString(), token, now.toISOString(), threshold);
+  return Number(result.changes) > 0;
+}
+
+/** 有効なセッションのユーザーを返し、そのセッションの最後に使った日時を更新する（touchSession）。画面・API の利用で使う。 */
+export function getSessionUserAndTouch(token: string | undefined, db: Db = getDb(), now: Date = new Date()): User | undefined {
+  const user = getSessionUser(token, db, now);
+  if (user) touchSession(token, db, now);
+  return user;
 }
 
 export function deleteSession(token: string, db: Db = getDb()): void {
