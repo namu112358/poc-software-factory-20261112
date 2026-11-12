@@ -13,6 +13,8 @@ permissions:
 
 jobs:
   check:
+    # Ruleset の必須チェックはこの name で指定する。他のワークフローとジョブ名が重ならないようにするため、変更しないこと
+    name: pr-body-check
     if: github.event.pull_request.draft == false
     runs-on: ubuntu-latest
     steps:
