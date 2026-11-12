@@ -2,7 +2,7 @@ import { Fragment } from "react";
 import { listCommentersByTask } from "@/lib/comments";
 import { requireUser } from "@/lib/session";
 import { listTagsByTask } from "@/lib/tags";
-import { PRIORITY_LABELS, STATUS_LABELS, SORT_LABELS, TASK_LIST_HELP, TASK_SORTS, TASK_STATUSES, formatEstimate, formatDaysLeft, formatEstimateTotal, formatMemoPreview, formatTaskCount, isOverdue, isTaskStatus, listAssignees, listTasks, parseAssignee, parseSort, parseTagFilter, sumEstimateMinutes, taskRowDoneAttr, todayInJapan } from "@/lib/tasks";
+import { PRIORITY_LABELS, STATUS_LABELS, SORT_LABELS, TASK_LIST_HELP, TASK_SORTS, TASK_STATUSES, formatEstimate, formatDaysLeft, formatEstimateTotal, formatMemoPreview, formatTaskCount, memoTooltip, isOverdue, isTaskStatus, listAssignees, listTasks, parseAssignee, parseSort, parseTagFilter, sumEstimateMinutes, taskRowDoneAttr, todayInJapan } from "@/lib/tasks";
 
 type Props = {
   searchParams: Promise<{ status?: string; assignee?: string; tag?: string; sort?: string }>;
@@ -90,7 +90,7 @@ export default async function TasksPage({ searchParams }: Props) {
               style={task.status === "done" ? { color: "#8a8a8a" } : undefined}
             >
               <td>
-                <a href={`/tasks/${task.id}`} style={task.status === "done" ? { color: "inherit" } : undefined}>
+                <a href={`/tasks/${task.id}`} title={memoTooltip(task.memo)} style={task.status === "done" ? { color: "inherit" } : undefined}>
                   {task.title}
                 </a>
                 {formatMemoPreview(task.memo) !== null && (
