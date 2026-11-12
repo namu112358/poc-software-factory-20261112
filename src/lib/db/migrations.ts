@@ -176,4 +176,18 @@ export const MIGRATIONS: readonly Migration[] = [
       CREATE INDEX task_assignee_changes_task ON task_assignee_changes(task_id);
     `,
   },
+  {
+    version: 16,
+    name: "session_devices",
+    sql: `
+      -- ログインした日時。ISO 8601（UTC）。このマイグレーションより前に作られたセッションは NULL（不明）。
+      ALTER TABLE sessions ADD COLUMN created_at TEXT;
+      -- ログインしたときの User-Agent。分からなければ NULL。
+      ALTER TABLE sessions ADD COLUMN user_agent TEXT;
+      -- 画面・API でセッションを指定するための ID（ランダムな 32 桁の 16 進）。トークンを外に出さないために使う。
+      ALTER TABLE sessions ADD COLUMN device_id TEXT;
+      UPDATE sessions SET device_id = lower(hex(randomblob(16)));
+      CREATE UNIQUE INDEX sessions_device_id ON sessions(device_id);
+    `,
+  },
 ];

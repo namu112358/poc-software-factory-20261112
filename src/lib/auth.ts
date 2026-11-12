@@ -33,8 +33,15 @@ export type LoginResult =
  * ログインする（POST /api/login の判定）。ロック中なら照合しない。ID・パスワードが誤りなら失敗を数える。
  * 成功したら失敗の回数を消し、セッションを作り、最終ログイン日時を now にする。
  * 成功のときだけ最終ログイン日時を変える。それまでの最終ログイン日時は、作ったセッションに「前回のログイン」として残す。
+ * 作ったセッションには、ログインした日時（now）と User-Agent を記録する（ログイン中の端末の一覧で使う）。
  */
-export function login(userId: unknown, password: unknown, db: Db = getDb(), now: Date = new Date()): LoginResult {
+export function login(
+  userId: unknown,
+  password: unknown,
+  db: Db = getDb(),
+  now: Date = new Date(),
+  userAgent: string | null = null,
+): LoginResult {
   const lock = typeof userId === "string" ? getLockState(userId, db, now) : { locked: false as const };
   if (lock.locked) return { ok: false, reason: "locked", retryAfterMinutes: lock.retryAfterMinutes };
   const user =
@@ -49,7 +56,7 @@ export function login(userId: unknown, password: unknown, db: Db = getDb(), now:
       | { last_login_at: string | null }
       | undefined;
     db.prepare("UPDATE users SET last_login_at = ? WHERE id = ?").run(now.toISOString(), user.id);
-    return createSession(user.id, db, now, row?.last_login_at ?? null);
+    return createSession(user.id, db, now, row?.last_login_at ?? null, userAgent);
   });
   return { ok: true, user, token };
 }
@@ -59,16 +66,28 @@ export function createSession(
   db: Db = getDb(),
   now: Date = new Date(),
   previousLoginAt: string | null = null,
+  userAgent: string | null = null,
 ): string {
   const token = randomBytes(32).toString("hex");
   const expiresAt = new Date(now.getTime() + SESSION_TTL_MS).toISOString();
-  db.prepare("INSERT INTO sessions (token, user_id, expires_at, previous_login_at) VALUES (?, ?, ?, ?)").run(
-    token,
-    userId,
-    expiresAt,
-    previousLoginAt,
-  );
+  db.prepare(
+    "INSERT INTO sessions (token, user_id, expires_at, previous_login_at, created_at, user_agent, device_id) VALUES (?, ?, ?, ?, ?, ?, ?)",
+  ).run(token, userId, expiresAt, previousLoginAt, now.toISOString(), normalizeUserAgent(userAgent), newDeviceId());
   return token;
+}
+
+/** User-Agent の保存できる長さの上限（文字数）。これより長いものは切って保存する。 */
+export const USER_AGENT_MAX_LENGTH = 512;
+
+/** 保存する User-Agent。無い・空白だけなら null、長すぎれば上限で切る。 */
+export function normalizeUserAgent(userAgent: string | null | undefined): string | null {
+  const value = userAgent?.trim();
+  if (!value) return null;
+  return value.slice(0, USER_AGENT_MAX_LENGTH);
+}
+
+function newDeviceId(): string {
+  return randomBytes(16).toString("hex");
 }
 
 /**
@@ -86,6 +105,11 @@ export function getPreviousLogin(token: string | undefined, db: Db = getDb(), no
 /** 前回のログインのヘッダーの表示。日時は日本時間の「YYYY/MM/DD HH:mm」、前回が無ければ「なし」。 */
 export function formatPreviousLogin(previousLoginAt: string | null): string {
   if (!previousLoginAt) return "前回のログイン: なし";
+  return `前回のログイン: ${formatJstDateTime(previousLoginAt)}`;
+}
+
+/** ISO 8601 の日時を、日本時間の「YYYY/MM/DD HH:mm」にする。 */
+export function formatJstDateTime(iso: string): string {
   const parts = Object.fromEntries(
     new Intl.DateTimeFormat("en-US", {
       timeZone: "Asia/Tokyo",
@@ -96,10 +120,10 @@ export function formatPreviousLogin(previousLoginAt: string | null): string {
       minute: "2-digit",
       hourCycle: "h23",
     })
-      .formatToParts(new Date(previousLoginAt))
+      .formatToParts(new Date(iso))
       .map((p) => [p.type, p.value]),
   );
-  return `前回のログイン: ${parts.year}/${parts.month}/${parts.day} ${parts.hour}:${parts.minute}`;
+  return `${parts.year}/${parts.month}/${parts.day} ${parts.hour}:${parts.minute}`;
 }
 
 /** 有効なセッションのユーザーを返す。期限切れ・不明なトークンは undefined。 */
