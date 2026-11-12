@@ -67,7 +67,7 @@ export function exportHref(filter: TaskFilter): string {
 
 /** タスクの一覧の CSV（BOM 付き・行末は CRLF）。列は ID・タイトル・ステータス・優先度・担当者・期限・タグ。 */
 export function exportTasksCsv(filter: TaskFilter = {}, db: Db = getDb()): string {
-  const tasks = listTasks(filter, db);
+  const tasks = listTasks({ ...filter, qInComments: true }, db);
   const tagsByTask = listTagsByTask(tasks.map((t) => t.id), db);
   const userNames = new Map(listUsers(db).map((u) => [u.id, u.name]));
   const rows = tasks.map((t) =>

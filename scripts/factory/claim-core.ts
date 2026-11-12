@@ -528,6 +528,26 @@ export function relabelTargets(args: {
  */
 export const TRUSTED_ASSOCIATIONS = ["OWNER", "MEMBER", "COLLABORATOR"];
 
+/** Mergify のキューに入る条件のチェック（.mergify.yml の queue_conditions の check-success と合わせる） */
+export const REQUIRED_CHECKS = ["app-check", "pr-body-check"];
+
+/**
+ * 最新のコミットで、キューに入る条件のチェックが成功しているか（#364）。
+ * 同じ名前のチェックが何度も動いたときは、最後に始まったものを見る。
+ */
+export function ciCheck(runs: { name: string; status: string; conclusion: string | null; startedAt: string }[]): { ok: boolean; reason: string } {
+  for (const name of REQUIRED_CHECKS) {
+    const latest = runs
+      .filter((r) => r.name === name)
+      .sort((a, b) => (a.startedAt < b.startedAt ? -1 : a.startedAt > b.startedAt ? 1 : 0))
+      .at(-1);
+    if (!latest) return { ok: false, reason: `最新のコミットに ${name} が無い。CI が動くのを待つ（動かないときは、PR 本文を編集すると動き直す）。` };
+    if (latest.status !== "completed") return { ok: false, reason: `${name} がまだ終わっていない。終わってから確かめ直す。` };
+    if (latest.conclusion !== "success") return { ok: false, reason: `${name} が ${latest.conclusion}。直して、CI が通ってから付ける。` };
+  }
+  return { ok: true, reason: "" };
+}
+
 export function mergeCheck(args: {
   reviews: { body: string; association: string }[];
   headSha: string;

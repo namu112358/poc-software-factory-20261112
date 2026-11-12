@@ -1,6 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { openDb } from "../src/lib/db/index.ts";
+import { createTask, listTasks } from "../src/lib/tasks.ts";
 import {
   commentEditedLabel,
   createComment,
@@ -226,5 +227,37 @@ describe("編集の本文の検証（投稿と同じ validateCommentInput を使
       assert.equal(validateCommentInput(input).ok, false, JSON.stringify(input));
     }
     assert.deepEqual(validateCommentInput({ body: ` ${"a".repeat(1000)} ` }), { ok: true, value: { body: "a".repeat(1000) } });
+  });
+});
+
+describe("キーワード検索でのコメント本文（qInComments）", () => {
+  const ids = (db: ReturnType<typeof openDb>, f: Parameters<typeof listTasks>[0]) => listTasks(f, db).map((t) => t.id);
+
+  it("コメントの本文にだけ含むタスクが出る。指定しなければ出ない", () => {
+    const db = openDb();
+    const t = createTask({ title: "検索用A", status: "todo", assignee: "sato", dueDate: "", priority: "low", memo: "" }, db);
+    createComment({ taskId: t.id, author: "sato", body: "先方の返事待ち" }, db);
+    assert.deepEqual(ids(db, { q: "返事待ち", qInComments: true }), [t.id]);
+    assert.deepEqual(ids(db, { q: "返事待ち" }), []);
+  });
+
+  it("複数のコメントに当たっても 1 回だけ出る", () => {
+    const db = openDb();
+    const t = createTask({ title: "検索用B", status: "todo", assignee: "sato", dueDate: "", priority: "low", memo: "" }, db);
+    createComment({ taskId: t.id, author: "sato", body: "見積もりを出した" }, db);
+    createComment({ taskId: t.id, author: "sato", body: "見積もりを再提出" }, db);
+    assert.deepEqual(ids(db, { q: "見積もり", qInComments: true }), [t.id]);
+  });
+
+  it("タイトル・メモでも当たり、%・_・\\ は文字そのものとして扱う", () => {
+    const db = openDb();
+    const a = createTask({ title: "固有語タイトル", status: "todo", assignee: "sato", dueDate: "", priority: "low", memo: "" }, db);
+    const b = createTask({ title: "検索用C", status: "todo", assignee: "sato", dueDate: "", priority: "low", memo: "固有語メモ" }, db);
+    const c = createTask({ title: "検索用D", status: "todo", assignee: "sato", dueDate: "", priority: "low", memo: "" }, db);
+    createComment({ taskId: c.id, author: "sato", body: "達成率 100%_x\\y" }, db);
+    assert.deepEqual(ids(db, { q: "固有語", qInComments: true }), [a.id, b.id]);
+    assert.deepEqual(ids(db, { q: "100%_x\\y", qInComments: true }), [c.id]);
+    assert.deepEqual(ids(db, { q: "100_", qInComments: true }), []);
+    assert.deepEqual(ids(db, { q: "%", qInComments: true }).includes(c.id), true);
   });
 });

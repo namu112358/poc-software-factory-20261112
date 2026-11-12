@@ -25,7 +25,7 @@ export default async function TasksPage({ searchParams }: Props) {
   const sort = parseSort(params.sort);
   const includeArchived = parseIncludeArchived(params.archived);
   const assignees = listAssignees();
-  const tasks = listTasks({ status, assignee, tag, q, due, sort, includeArchived });
+  const tasks = listTasks({ status, assignee, tag, q, qInComments: true, due, sort, includeArchived });
   const today = todayInJapan();
   const clearHref = clearFilterHref(tasks.length);
   const unestimatedText = formatUnestimatedCount(countUnestimated(tasks));
@@ -83,7 +83,7 @@ export default async function TasksPage({ searchParams }: Props) {
       <form method="get" aria-label="絞り込み">
         <label>
           キーワード{" "}
-          <input type="search" name="q" defaultValue={q ?? ""} maxLength={100} placeholder="タイトル・メモ" />
+          <input type="search" name="q" defaultValue={q ?? ""} maxLength={100} placeholder="タイトル・メモ・コメント" />
         </label>{" "}
         <label>
           ステータス{" "}
