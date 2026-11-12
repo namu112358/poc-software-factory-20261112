@@ -138,3 +138,31 @@ export function decideExtension(
   }
   return { result: "decided", extension: getExtension(extensionId, db)!, task: getTask(taskId, db)! };
 }
+
+export type WithdrawResult =
+  | { result: "withdrawn"; extension: Extension }
+  | { result: "not_found" } // 申請が無い、または別のタスクの申請
+  | { result: "forbidden" } // 申請した本人ではない
+  | { result: "conflict" }; // すでに判断済み
+
+/**
+ * 保留中の申請を、申請した本人が取り下げる（申請は消える）。
+ * 消すかどうかの判定と削除を 1 回の DELETE で行い、判定の後に承認・却下された申請を消さない。
+ */
+export function withdrawExtension(
+  taskId: number,
+  extensionId: number,
+  userId: string,
+  db: Db = getDb(),
+): WithdrawResult {
+  const deleted = db
+    .prepare(
+      "DELETE FROM due_date_extensions WHERE id = ? AND task_id = ? AND requester = ? AND status = 'pending' RETURNING id, task_id, requester, new_due_date, reason, status, created_at, decided_by, decided_at",
+    )
+    .get(extensionId, taskId, userId) as ExtensionRow | undefined;
+  if (deleted) return { result: "withdrawn", extension: toExtension(deleted) };
+  const current = getExtension(extensionId, db);
+  if (!current || current.taskId !== taskId) return { result: "not_found" };
+  if (current.requester !== userId) return { result: "forbidden" };
+  return { result: "conflict" };
+}
