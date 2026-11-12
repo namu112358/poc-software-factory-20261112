@@ -14,6 +14,7 @@ export type Task = {
   estimateMinutes: number | null; // 見積もり時間（分）。未設定は null
   createdAt: string; // ISO 8601（UTC）
   updatedAt: string; // ISO 8601（UTC）
+  completedAt: string | null; // 完了にした日時。ISO 8601（UTC）。完了していなければ null
   memo: string; // メモ（詳しい説明）。0〜2000 文字。既定は空文字
 };
 
@@ -99,6 +100,7 @@ type TaskRow = {
   estimate_minutes: number | null;
   created_at: string;
   updated_at: string;
+  completed_at: string | null;
   memo: string;
 };
 
@@ -113,6 +115,7 @@ function toTask(row: TaskRow): Task {
     estimateMinutes: row.estimate_minutes,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
+    completedAt: row.completed_at,
     memo: row.memo,
   };
 }
@@ -124,7 +127,7 @@ export function listTasks(filter: TaskFilter = {}, db: Db = getDb()): Task[] {
       : "ORDER BY id";
   const rows = db
     .prepare(
-      "SELECT id, title, status, assignee, due_date, priority, estimate_minutes, created_at, updated_at, memo FROM tasks WHERE (:status IS NULL OR status = :status) AND (:assignee IS NULL OR (:assignee = 'none' AND assignee IS NULL) OR (:assignee <> 'none' AND assignee = :assignee)) AND (:tag IS NULL OR EXISTS (SELECT 1 FROM task_tags g WHERE g.task_id = tasks.id AND g.name = :tag)) " + orderBy,
+      "SELECT id, title, status, assignee, due_date, priority, estimate_minutes, created_at, updated_at, completed_at, memo FROM tasks WHERE (:status IS NULL OR status = :status) AND (:assignee IS NULL OR (:assignee = 'none' AND assignee IS NULL) OR (:assignee <> 'none' AND assignee = :assignee)) AND (:tag IS NULL OR EXISTS (SELECT 1 FROM task_tags g WHERE g.task_id = tasks.id AND g.name = :tag)) " + orderBy,
     )
     .all({ status: filter.status ?? null, assignee: filter.assignee ?? null, tag: filter.tag ?? null }) as TaskRow[];
   return rows.map(toTask);
@@ -149,7 +152,7 @@ export function formatCurrentUser(name: string): string {
 }
 
 export function getTask(id: number, db: Db = getDb()): Task | undefined {
-  const row = db.prepare("SELECT id, title, status, assignee, due_date, priority, estimate_minutes, created_at, updated_at, memo FROM tasks WHERE id = ?").get(id) as
+  const row = db.prepare("SELECT id, title, status, assignee, due_date, priority, estimate_minutes, created_at, updated_at, completed_at, memo FROM tasks WHERE id = ?").get(id) as
     | TaskRow
     | undefined;
   return row && toTask(row);
@@ -161,7 +164,7 @@ export function parseTaskId(value: unknown): number | undefined {
   return Number(value);
 }
 
-export type TaskInput = Omit<Task, "id" | "priority" | "estimateMinutes" | "memo" | "createdAt" | "updatedAt"> & {
+export type TaskInput = Omit<Task, "id" | "priority" | "estimateMinutes" | "memo" | "createdAt" | "updatedAt" | "completedAt"> & {
   priority?: TaskPriority;
   estimateMinutes?: number | null;
   memo?: string;
@@ -232,27 +235,37 @@ export function validateTaskInput(
 export function createTask(input: TaskInput, db: Db = getDb()): Task {
   const now = new Date().toISOString();
   const { lastInsertRowid } = db
-    .prepare("INSERT INTO tasks (title, status, assignee, due_date, priority, estimate_minutes, memo, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)")
-    .run(input.title, input.status, input.assignee, input.dueDate, input.priority ?? "medium", input.estimateMinutes ?? null, input.memo ?? "", now, now);
+    .prepare("INSERT INTO tasks (title, status, assignee, due_date, priority, estimate_minutes, memo, created_at, updated_at, completed_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+    .run(input.title, input.status, input.assignee, input.dueDate, input.priority ?? "medium", input.estimateMinutes ?? null, input.memo ?? "", now, now, input.status === "done" ? now : null);
   return getTask(Number(lastInsertRowid), db)!;
 }
 
-/** 指定した項目だけを更新する。タスクが無ければ undefined。 */
+/**
+ * UPDATE 文の SET に使う、完了日時の式。`:status` は更新後のステータス、`:now` は更新の時刻。
+ * 完了以外にするなら NULL、すでに完了なら今の値のまま、完了にするなら `:now`。
+ * 更新前の行のステータスを UPDATE 文の中で見るので、読んでから書くまでに別の更新が入ってもずれない。
+ */
+export const COMPLETED_AT_SQL =
+  "completed_at = CASE WHEN :status <> 'done' THEN NULL WHEN status = 'done' THEN completed_at ELSE :now END";
+
+/** 指定した項目だけを更新する。タスクが無ければ undefined。完了日時はステータスの変化に合わせて決まる。 */
 export function updateTask(id: number, changes: Partial<TaskInput>, db: Db = getDb()): Task | undefined {
   const current = getTask(id, db);
   if (!current) return undefined;
   const next = { ...current, ...changes };
-  db.prepare("UPDATE tasks SET title = ?, status = ?, assignee = ?, due_date = ?, priority = ?, estimate_minutes = ?, memo = ?, updated_at = ? WHERE id = ?").run(
-    next.title,
-    next.status,
-    next.assignee,
-    next.dueDate,
-    next.priority,
-    next.estimateMinutes,
-    next.memo,
-    new Date().toISOString(),
+  db.prepare(
+    `UPDATE tasks SET title = :title, status = :status, assignee = :assignee, due_date = :dueDate, priority = :priority, estimate_minutes = :estimateMinutes, memo = :memo, updated_at = :now, ${COMPLETED_AT_SQL} WHERE id = :id`,
+  ).run({
+    title: next.title,
+    status: next.status,
+    assignee: next.assignee,
+    dueDate: next.dueDate,
+    priority: next.priority,
+    estimateMinutes: next.estimateMinutes,
+    memo: next.memo,
+    now: new Date().toISOString(),
     id,
-  );
+  });
   return getTask(id, db);
 }
 
@@ -403,7 +416,7 @@ export type BulkCompleteResult = { ok: true; tasks: Task[] } | { ok: false; miss
 
 /**
  * 指定したタスクをまとめて完了（done）にする。全部か無しか: 存在しない ID が 1 つでもあれば、何も変えない。
- * すでに完了のタスクは変えない（最終更新日時もそのまま）。結果は ids の順に並べる。
+ * すでに完了のタスクは変えない（最終更新日時・完了日時もそのまま）。完了にしたタスクには完了日時を記録する。結果は ids の順に並べる。
  */
 export function completeTasks(ids: readonly number[], db: Db = getDb()): BulkCompleteResult {
   return transaction(db, () => {
@@ -411,8 +424,8 @@ export function completeTasks(ids: readonly number[], db: Db = getDb()): BulkCom
     const missingIds = ids.filter((_, i) => found[i] === undefined);
     if (missingIds.length > 0) return { ok: false, missingIds };
     const now = new Date().toISOString();
-    const update = db.prepare("UPDATE tasks SET status = 'done', updated_at = ? WHERE id = ? AND status <> 'done'");
-    for (const id of ids) update.run(now, id);
+    const update = db.prepare("UPDATE tasks SET status = 'done', updated_at = ?, completed_at = ? WHERE id = ? AND status <> 'done'");
+    for (const id of ids) update.run(now, now, id);
     return { ok: true, tasks: ids.map((id) => getTask(id, db)!) };
   });
 }
