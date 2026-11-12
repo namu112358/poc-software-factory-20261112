@@ -8,7 +8,7 @@
 
 | 状態 | 見なすこと | すること |
 |---|---|---|
-| Issue に `ready` か `ready:hard` が付いたまま | 実装が起動しなかった | 付け直す直前に `node scripts/factory/claim.ts budget` を実行し、`remaining` 件まで（古い順）、付いていたラベルを外して、同じラベルを付け直す（実装がもう一度起動する）。残りを超えた分と、残りが 0 のときは付け直さず、次の巡回に回す（#250。「2.」の `pick` は、ここで付けた `ready` も数えて取り出す数を減らす） |
+| Issue に `ready` か `ready:hard` が付いたまま | 実装が起動しなかった | 付け直す直前に `node scripts/factory/claim.ts budget` を実行し、`remaining` 件まで（古い順。2 件以上なら 30 秒あけて 1 件ずつ）、付いていたラベルを外して、同じラベルを付け直す（実装がもう一度起動する）。残りを超えた分と、残りが 0 のときは付け直さず、次の巡回に回す（#250。「2.」の `pick` は、ここで付けた `ready` も数えて取り出す数を減らす） |
 | `claude/issue-<番号>` の draft の PR で、最新のコミットの CI（`app-check`）が成功し、最新のレビューの後に「取り込みだけのコミット」（`README.md`）でないコミットがあり（レビューが一度も無ければ、それでよい）、`main` と衝突しておらず（`mergeable` が true）、最後の動き（下の行と同じ）から 15 分以上 | 実装か修正が CI を待ちきれずに終えたか、途中で止まった（PR を Ready にする直前） | PR を Ready にし、Issue に `in-progress` が残っていれば外す（レビューが起動する。#184・#219） |
 | Issue に `in-progress` が付き、`claude/issue-<番号>` の PR が無いか draft のまま（上の行に当たらないもの）。最後の動き（Issue・PR のコメント、PR へのコミット、ラベルの変化のうち最も新しいもの）から 60 分以上 | 実装が途中で止まった | `in-progress` を外し、経過をコメントして `needs-human` を付ける |
 | `claude/issue-<番号>` の draft の PR で、最新のコミットの CI（`app-check`）が失敗しているか終わっておらず、Issue に `in-progress` が無く、最後の動き（上の行と同じ）から 60 分以上（下の `verdict=changes` の行・衝突の行に当たらないもの） | 実装が CI を待ちきれずに終え、その後に CI が落ちたか終わらなかった | 経過をコメントして `needs-human` を付ける |
@@ -22,7 +22,7 @@
 
 ## 2. キューから取り出す
 
-`README.md` の「キュー」のとおり、`node scripts/factory/claim.ts pick` の結果に従って `queued` の Issue を取り出す（`pick` が `error` なら取り出さず、出力を集計のコメントに書く。割り当ての役が動かなかったときの備え）。
+`README.md` の「キュー」のとおり、`node scripts/factory/claim.ts pick` の結果に従って `queued` の Issue を取り出す（2 件以上なら、30 秒あけて 1 件ずつ `ready` を付ける。`pick` が `error` なら取り出さず、出力を集計のコメントに書く。割り当ての役が動かなかったときの備え）。
 
 ## 3. 集計する
 
