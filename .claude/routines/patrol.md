@@ -22,7 +22,7 @@
 
 ## 2. キューから取り出す
 
-`README.md` の「キュー」のとおり、空きの数だけ `queued` の Issue を取り出す（割り当ての役が動かなかったときの備え）。
+`README.md` の「キュー」のとおり、`node scripts/factory/claim.ts pick` の結果に従って `queued` の Issue を取り出す（`pick` が `error` なら取り出さず、出力を集計のコメントに書く。割り当ての役が動かなかったときの備え）。
 
 ## 3. 集計する
 
