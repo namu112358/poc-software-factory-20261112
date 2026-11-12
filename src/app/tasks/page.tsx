@@ -6,7 +6,9 @@ import { listUserOptions } from "@/lib/users";
 import { BulkBar, BulkCheckbox, BulkSelection } from "./BulkActions";
 import { exportHref } from "@/lib/export";
 import { parseIncludeArchived } from "@/lib/task-query";
-import { requireUser } from "@/lib/session";
+import { getCurrentLoginWindow, requireUser } from "@/lib/session";
+import { NEWLY_ASSIGNED_HEADING, listNewlyAssignedTasks, newlyAssignedNames } from "@/lib/assignee-history";
+import { formatJstDateTime } from "@/lib/task-format";
 import { listTagsByTask } from "@/lib/tags";
 import { DUE_FILTER_LABELS, TASK_DUE_FILTERS, parseDueFilter, assigneeName, PRIORITY_LABELS, STATUS_LABELS, SORT_LABELS, TASK_LIST_HELP, TASK_SORTS, TASK_STATUSES, formatCurrentUser, clearFilterHref, formatEstimate, formatJstDate, formatDaysLeft, formatEstimateTotal, countUnestimated, formatUnestimatedCount, formatMemoPreview, formatTaskCount, formatDoneCount, priorityFontWeight, formatOverdueCount, countOverdue, memoTooltip, isOverdue, isTaskStatus, listAssignees, listTasks, parseAssignee, parseKeyword, parseSort, parseTagFilter, sumEstimateMinutes, taskRowDoneAttr, todayInJapan } from "@/lib/tasks";
 
@@ -35,6 +37,8 @@ export default async function TasksPage({ searchParams }: Props) {
   const users = listUserOptions();
   const myTasks = listMyDueTasks(user.id, undefined, today);
   const myExtensions = listExtensionsAwaitingMe(user.id);
+  const loginWindow = await getCurrentLoginWindow();
+  const newlyAssigned = listNewlyAssignedTasks(user.id, loginWindow?.previousLoginAt, loginWindow?.loginAt);
   const selectionKey = bulkSelectionKey({ status, assignee, tag, q, due, sort, includeArchived });
 
   return (
@@ -42,6 +46,21 @@ export default async function TasksPage({ searchParams }: Props) {
       <h1>タスク一覧</h1>
       <p data-testid="current-user">{formatCurrentUser(user.name)}</p>
       <p data-testid="list-help">{TASK_LIST_HELP}</p>
+      {newlyAssigned.length > 0 && (
+        <section aria-labelledby="newly-assigned-heading" data-testid="newly-assigned">
+          <h2 id="newly-assigned-heading">{NEWLY_ASSIGNED_HEADING(newlyAssigned.length)}</h2>
+          <ul>
+            {newlyAssigned.map((n) => {
+              const names = newlyAssignedNames(n);
+              return (
+                <li key={n.taskId} data-testid="newly-assigned-task">
+                  <a href={`/tasks/${n.taskId}`}>{n.title}</a>（前の担当者: {names.from}、替えた人: {names.by}、{formatJstDateTime(n.changedAt)}）
+                </li>
+              );
+            })}
+          </ul>
+        </section>
+      )}
       <section aria-labelledby="my-attention-heading" data-testid="my-attention">
         <h2 id="my-attention-heading">あなたの対応が必要なもの</h2>
         {myTasks.length === 0 && myExtensions.length === 0 && <p data-testid="my-attention-empty">{NOTHING_TO_DO_TEXT}</p>}
