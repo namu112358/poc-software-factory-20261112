@@ -1,5 +1,5 @@
 import { requireUser } from "@/lib/session";
-import { STATUS_LABELS, TASK_STATUSES, isTaskStatus, listTasks } from "@/lib/tasks";
+import { STATUS_LABELS, TASK_STATUSES, formatDaysLeft, isTaskStatus, listTasks, todayInJapan } from "@/lib/tasks";
 
 type Props = {
   searchParams: Promise<{ status?: string }>;
@@ -10,6 +10,7 @@ export default async function TasksPage({ searchParams }: Props) {
   const params = await searchParams;
   const status = isTaskStatus(params.status) ? params.status : undefined;
   const tasks = listTasks({ status });
+  const today = todayInJapan();
 
   return (
     <main>
@@ -45,7 +46,15 @@ export default async function TasksPage({ searchParams }: Props) {
               </td>
               <td>{STATUS_LABELS[task.status]}</td>
               <td>{task.assignee}</td>
-              <td>{task.dueDate}</td>
+              <td>
+                {task.dueDate}
+                {formatDaysLeft(task, today) && (
+                  <>
+                    {" "}
+                    <span data-testid="days-left">{formatDaysLeft(task, today)}</span>
+                  </>
+                )}
+              </td>
             </tr>
           ))}
         </tbody>
