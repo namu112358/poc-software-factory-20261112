@@ -294,6 +294,10 @@ describe("待つ理由が無くなった同じファイル待ちを解く（#262
     assert.deepEqual(pick({ queued: [q98], inProgressCount: 1, isOpen: open(213), inProgress: [w213], openPrs }).pick, [98]);
     assert.deepEqual(pick({ queued: [q98], inProgressCount: 1, isOpen: open(213), inProgress: [w213] }).pick, []); // PR が無ければ記録で判定
   });
+  it("待ち先が作業中でも、着手の記録がまだ無ければ「分からない」として待つ", () => {
+    const justStarted = issue(213, []);
+    assert.deepEqual(pick({ queued: [q98], inProgressCount: 1, isOpen: open(213), inProgress: [justStarted] }).pick, []);
+  });
   it("人が決めた依存（blocked by・「#N の後」）は、重ならなくても判定し直さずに待つ", () => {
     const human = issue(98, [queued("wait=slot files=a.ts", "2026-11-12T11:25:34Z")], "#213 の後", [214]);
     const r = pick({ queued: [human], inProgressCount: 1, isOpen: open(213, 214), inProgress: [working213] });

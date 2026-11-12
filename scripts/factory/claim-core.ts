@@ -192,8 +192,9 @@ export function makeCurrentFilesOf(ctx: { openPrs: PrInfo[]; inProgress: IssueIn
     if (!working && !waiting && !ownPr) return null;
     // PR があれば、実際の変更ファイルを使う（factory:touch・files= は着手の前の見積もりで、分けたファイルの古い名前が残ることがある）
     if (ownPr) return ownPr.files;
-    if (working) return latestTouch(working)?.value ?? [];
-    return waiting ? plannedFiles(waiting) : null;
+    // 記録が無い・空なら、重ならないのではなく「分からない」として待ち続ける（着手してから記録するまでの数秒など）
+    const recorded = working ? (latestTouch(working)?.value ?? []) : waiting ? plannedFiles(waiting) : [];
+    return recorded.length > 0 ? recorded : null;
   };
 }
 
