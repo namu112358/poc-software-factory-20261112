@@ -14,6 +14,20 @@ export function parseAssignee(value: unknown, db: Db = getDb()): string | undefi
   return listAssignees(db).some((a) => a.id === value) ? value : undefined;
 }
 
+/**
+ * URL のクエリの担当者 ID（`?assignee=sato&assignee=suzuki` のように複数）を検証する。文字列 1 つも配列も受け取る。
+ * 不正な値・今は無い担当者・重複は、その分だけ無視する。`none`（担当者なし）は他と組み合わせられる。
+ */
+export function parseAssignees(value: unknown, db: Db = getDb()): string[] {
+  const values = Array.isArray(value) ? value : [value];
+  const ids: string[] = [];
+  for (const v of values) {
+    const id = parseAssignee(v, db);
+    if (id !== undefined && !ids.includes(id)) ids.push(id);
+  }
+  return ids;
+}
+
 /** URL のクエリのタグ名を検証する。前後の空白を取り除き、空なら undefined（指定なし）。 */
 export function parseTagFilter(value: unknown): string | undefined {
   if (typeof value !== "string") return undefined;

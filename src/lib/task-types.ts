@@ -67,6 +67,7 @@ export type TaskFilter = {
   today?: string; // 「今日」（日本時間の YYYY-MM-DD）。省略すると今日。テストで日付を固定するための項目
   status?: TaskStatus;
   assignee?: string;
+  assignees?: string[]; // 複数の担当者。どれかが担当のタスクが出る（`assignee` と合わせる。`none` は担当者なし）
   tag?: string;
   tags?: string[]; // 複数のタグ。すべてが付いたタスクだけ（`tag` と合わせて最大 5 つ）
   q?: string; // キーワード。タイトルかメモに含まれるタスクだけ（英字の大文字・小文字は区別しない）

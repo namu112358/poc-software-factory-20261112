@@ -2,7 +2,7 @@ import type { Db } from "./db/index.ts";
 import { getDb } from "./db/index.ts";
 import { parseDueFilter } from "./task-dates.ts";
 import { parseIncludeArchived } from "./task-query.ts";
-import { isTaskStatus, parseAssignee, parseKeyword, parseSort, parseTagFilters } from "./tasks.ts";
+import { isTaskStatus, parseAssignees, parseKeyword, parseSort, parseTagFilters } from "./tasks.ts";
 
 /** タスク一覧の条件を表すクエリのキー。URL にこのうち 1 つでもあれば「URL に条件が付いている」とみなす。 */
 export const TASK_VIEW_KEYS = ["status", "assignee", "tag", "q", "due", "sort", "archived"] as const;
@@ -10,7 +10,7 @@ export const TASK_VIEW_KEYS = ["status", "assignee", "tag", "q", "due", "sort", 
 /** 覚えた条件も消してタスク一覧を開くためのリンク先。 */
 export const RESET_TASK_VIEW_HREF = "/tasks?reset=1";
 
-export type TaskViewQuery = Partial<Record<Exclude<(typeof TASK_VIEW_KEYS)[number], "tag">, string>> & { tag?: string[] };
+export type TaskViewQuery = Partial<Record<Exclude<(typeof TASK_VIEW_KEYS)[number], "tag" | "assignee">, string>> & { tag?: string[]; assignee?: string[] };
 
 /** URL のクエリに、タスク一覧の条件のキーが 1 つでもあるか（空の値でもあるとみなす。「すべて」を選んで絞り込んだ場合を含める）。 */
 export function hasTaskViewParams(params: Record<string, unknown>): boolean {
@@ -22,8 +22,8 @@ export function sanitizeTaskViewQuery(raw: Record<string, unknown>, db: Db = get
   const out: TaskViewQuery = {};
   const status = raw.status;
   if (isTaskStatus(status)) out.status = status;
-  const assignee = parseAssignee(raw.assignee, db);
-  if (assignee !== undefined) out.assignee = assignee;
+  const assignees = parseAssignees(raw.assignee, db);
+  if (assignees.length > 0) out.assignee = assignees;
   const tags = parseTagFilters(raw.tag, db);
   if (tags.length > 0) out.tag = tags;
   const q = parseKeyword(raw.q);
