@@ -44,7 +44,7 @@ Issue に `ready` か `ready:hard` が付いたときに起動します。1 回�
 
 ## 4. PR を出す
 
-1. コミットして push し、draft の PR を出す。本文は `.github/pull_request_template.md` の見出しに沿い、「関連 Issue」に `Closes #<番号>` を書く。「検証結果」には実際に実行したコマンドと結果を書く。
+1. コミットして push し、draft の PR を出す。本文は `.github/pull_request_template.md` の見出しに沿い、「関連 Issue」に `Closes #<番号>` を書く。「検証結果」には実際に実行したコマンドと結果を書く。「注意事項・残課題」には、`AGENTS.md` の「このプロジェクトの罠」のうち、この PR で当てはめたものを 1 行ずつ書く（無ければ「当てはめた罠: なし」）。振り返りの役が、決まりの効き目を数えるのに使う。
 2. GitHub Actions の CI（`app-check`）の結果を待つ（数分おきに確かめる）。待つ前と待つ間に、PR が `main` と衝突していないか（`mergeable`）を見る。衝突していれば、GitHub は CI を動かさないので、`main` を取り込んで衝突を解消し、push してから待ち直す（ほかの PR が先にマージされると起きる）。15 分たっても終わらなければ、その旨を Issue に書き、`in-progress` を付けたまま終える（巡回が、止まった実装として拾う）。
 3. CI が落ちたら、原因を直して push する。同じ失敗の修正は 3 回まで。超えたら、Issue の `in-progress` を外して `needs-human` を付け、調べたことをコメントし、終える（PR は draft のまま）。
 4. CI が通ったら、PR を Ready にする（これがレビューの起動の合図）。Issue の `in-progress` を外す。
