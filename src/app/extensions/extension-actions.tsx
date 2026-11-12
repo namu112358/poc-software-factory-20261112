@@ -15,6 +15,7 @@ export type PendingExtensionView = DecidableExtension & {
   currentDueDate: string;
   reason: string;
   requestedAt: string; // 表示用に整えた申請日時
+  waitDays: number | null; // 48 時間以上待っているときの日数。満たなければ null
 };
 
 export function PendingExtensionsTable({ rows, userId }: { rows: PendingExtensionView[]; userId: string }) {
@@ -63,7 +64,11 @@ export function PendingExtensionsTable({ rows, userId }: { rows: PendingExtensio
           </thead>
           <tbody>
             {rows.map((r) => (
-              <tr key={r.id} data-testid="extension-row">
+              <tr
+                key={r.id}
+                data-testid="extension-row"
+                style={r.waitDays !== null ? { background: "#ffe5e5", fontWeight: "bold" } : undefined}
+              >
                 <td>
                   <a href={`/tasks/${r.taskId}`}>{r.taskTitle}</a>
                 </td>
@@ -71,7 +76,14 @@ export function PendingExtensionsTable({ rows, userId }: { rows: PendingExtensio
                 <td>{r.currentDueDate}</td>
                 <td>{r.newDueDate}</td>
                 <td>{r.reason}</td>
-                <td>{r.requestedAt}</td>
+                <td>
+                  {r.requestedAt}
+                  {r.waitDays !== null && (
+                    <div data-testid="long-wait" style={{ color: "#a00" }}>
+                      2 日以上待っています（{r.waitDays} 日待ち）
+                    </div>
+                  )}
+                </td>
                 <td>
                   {canDecideExtension(r.requester, userId) ? (
                     <>

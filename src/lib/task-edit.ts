@@ -1,6 +1,14 @@
 // タスク詳細画面の編集フォームの処理。通信を引数で受け取り、画面に依らずに確かめられるようにする。
 // 保存は PATCH /api/tasks/:id に、フォームを開いたときの更新日時（expectedUpdatedAt）を付けて送る。
-import { isTaskPriority, isTaskStatus, type Task, type TaskPriority, type TaskStatus } from "./task-types.ts";
+import {
+  PRIORITY_LABELS,
+  STATUS_LABELS,
+  isTaskPriority,
+  isTaskStatus,
+  type Task,
+  type TaskPriority,
+  type TaskStatus,
+} from "./task-types.ts";
 
 export type TaskEditValues = {
   title: string;
@@ -11,7 +19,7 @@ export type TaskEditValues = {
   memo: string;
 };
 
-export const TASK_EDIT_CONFLICT_MESSAGE = "ほかの人が先に更新しました。最新の内容を読み込みます";
+export const TASK_EDIT_CONFLICT_MESSAGE = "ほかの人が先に更新しました。相手が変えた項目を下に並べます。";
 export const TASK_EDIT_FAILED_MESSAGE = "タスクを保存できませんでした。";
 export const TASK_EDIT_NOT_FOUND_MESSAGE = "タスクが見つかりません。削除された可能性があります。";
 
@@ -112,4 +120,97 @@ export async function saveTaskEdit(
 export function newerTask(shown: Task, received: Task | undefined): Task {
   if (!received || received.id !== shown.id) return shown;
   return Date.parse(received.updatedAt) > Date.parse(shown.updatedAt) ? received : shown;
+}
+
+export const TASK_EDIT_FIELD_LABELS: Record<keyof TaskEditValues, string> = {
+  title: "タイトル",
+  status: "ステータス",
+  assignee: "担当者",
+  dueDate: "期限",
+  priority: "優先度",
+  memo: "メモ",
+};
+
+const TASK_EDIT_FIELDS = Object.keys(TASK_EDIT_FIELD_LABELS) as (keyof TaskEditValues)[];
+
+export const TASK_EDIT_NO_CHANGED_FIELDS_MESSAGE = "フォームの項目は変わっていません（タグなど、ほかの内容が変わりました）。";
+
+/** 衝突の表の 1 行。値は画面に出す形（ラベル・名前）にしてある。 */
+export type ConflictRow = { field: keyof TaskEditValues; label: string; base: string; current: string; mine: string };
+
+/** 値を画面に出す形にする。期限の空欄は「なし」、担当者は名前（一覧に無ければ ID）。 */
+export function formatEditValue<K extends keyof TaskEditValues>(
+  field: K,
+  value: TaskEditValues[K],
+  userNames: ReadonlyMap<string, string>,
+): string {
+  switch (field) {
+    case "status":
+      return STATUS_LABELS[value as TaskStatus];
+    case "priority":
+      return PRIORITY_LABELS[value as TaskPriority];
+    case "assignee":
+      return userNames.get(value) ?? value;
+    case "dueDate":
+      return value === "" ? "なし" : value;
+    default:
+      return value;
+  }
+}
+
+/**
+ * 相手が変えた項目。編集を始めたときの値（base）と今の値（current）が違う項目だけを、項目の並び順で返す。
+ * 自分の入力（mine）は判定に使わない（相手と同じ値に変えていても、相手が変えた項目として出す）。
+ */
+export function changedFields(base: TaskEditValues, current: TaskEditValues): (keyof TaskEditValues)[] {
+  return TASK_EDIT_FIELDS.filter((f) => base[f] !== current[f]);
+}
+
+/** 衝突の表の行。相手が変えた項目ごとに「編集を始めたときの値」「今の値」「あなたの入力」を並べる。 */
+export function conflictRows(
+  base: TaskEditValues,
+  current: TaskEditValues,
+  mine: TaskEditValues,
+  userNames: ReadonlyMap<string, string>,
+): ConflictRow[] {
+  return changedFields(base, current).map((field) => ({
+    field,
+    label: TASK_EDIT_FIELD_LABELS[field],
+    base: formatEditValue(field, base[field], userNames),
+    current: formatEditValue(field, current[field], userNames),
+    mine: formatEditValue(field, mine[field], userNames),
+  }));
+}
+
+/** 編集の状態。衝突の後は、今のタスク（conflict）を持ち、「今の値で編集し直す」まで保存できない。 */
+export type TaskEditState = {
+  taskId: number;
+  values: TaskEditValues;
+  base: TaskEditValues;
+  expectedUpdatedAt: string;
+  conflict?: Task;
+};
+
+/** 編集を始める。フォームの値と、編集を始めたときの値を、このタスクにする。 */
+export function startTaskEdit(task: Task): TaskEditState {
+  const values = taskToEditValues(task);
+  return { taskId: task.id, values, base: values, expectedUpdatedAt: task.updatedAt };
+}
+
+/**
+ * 保存が衝突した。フォームの入力・編集を始めたときの値・送る更新日時はそのままにし、今のタスクを覚える。
+ * 別のタスクの応答なら比べずに、状態を変えない。
+ */
+export function recordConflict(state: TaskEditState, current: Task): TaskEditState {
+  return current.id === state.taskId ? { ...state, conflict: current } : state;
+}
+
+/** 「今の値で編集し直す」。フォームの値・編集を始めたときの値・送る更新日時を、今のタスクのものにする。 */
+export function rebaseOnCurrent(state: TaskEditState): TaskEditState {
+  return state.conflict ? startTaskEdit(state.conflict) : state;
+}
+
+/** 保存できるか。衝突の表が出ている間は、自分の入力のまま送り直させない。 */
+export function canSaveTaskEdit(state: TaskEditState): boolean {
+  return state.conflict === undefined;
 }
