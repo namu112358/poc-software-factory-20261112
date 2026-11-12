@@ -3,7 +3,7 @@ import { listCommentersByTask } from "@/lib/comments";
 import { exportHref } from "@/lib/export";
 import { requireUser } from "@/lib/session";
 import { listTagsByTask } from "@/lib/tags";
-import { assigneeName, PRIORITY_LABELS, STATUS_LABELS, SORT_LABELS, TASK_LIST_HELP, TASK_SORTS, TASK_STATUSES, formatCurrentUser, formatEstimate, formatJstDate, formatDaysLeft, formatEstimateTotal, formatMemoPreview, formatTaskCount, priorityFontWeight, formatOverdueCount, countOverdue, memoTooltip, isOverdue, isTaskStatus, listAssignees, listTasks, parseAssignee, parseKeyword, parseSort, parseTagFilter, sumEstimateMinutes, taskRowDoneAttr, todayInJapan } from "@/lib/tasks";
+import { assigneeName, PRIORITY_LABELS, STATUS_LABELS, SORT_LABELS, TASK_LIST_HELP, TASK_SORTS, TASK_STATUSES, formatCurrentUser, clearFilterHref, formatEstimate, formatJstDate, formatDaysLeft, formatEstimateTotal, countUnestimated, formatUnestimatedCount, formatMemoPreview, formatTaskCount, priorityFontWeight, formatOverdueCount, countOverdue, memoTooltip, isOverdue, isTaskStatus, listAssignees, listTasks, parseAssignee, parseKeyword, parseSort, parseTagFilter, sumEstimateMinutes, taskRowDoneAttr, todayInJapan } from "@/lib/tasks";
 
 type Props = {
   searchParams: Promise<{ status?: string; assignee?: string; tag?: string; q?: string; sort?: string }>;
@@ -20,6 +20,8 @@ export default async function TasksPage({ searchParams }: Props) {
   const assignees = listAssignees();
   const tasks = listTasks({ status, assignee, tag, q, sort });
   const today = todayInJapan();
+  const clearHref = clearFilterHref(tasks.length);
+  const unestimatedText = formatUnestimatedCount(countUnestimated(tasks));
   const overdueText = formatOverdueCount(countOverdue(tasks, today));
   const tagsByTask = listTagsByTask(tasks.map((t) => t.id));
   const commentersByTask = listCommentersByTask(tasks.map((t) => t.id));
@@ -153,8 +155,27 @@ export default async function TasksPage({ searchParams }: Props) {
           ))}
         </tbody>
       </table>
-      <p data-testid="estimate-total">見積もりの合計: {formatEstimateTotal(sumEstimateMinutes(tasks))}</p>
-      {tasks.length === 0 && <p>該当するタスクはありません。</p>}
+      <p data-testid="estimate-total">見積もりの合計: {formatEstimateTotal(sumEstimateMinutes(tasks))}
+        {unestimatedText !== null && (
+          <>
+            {" "}
+            <span data-testid="unestimated-count">{unestimatedText}</span>
+          </>
+        )}
+      </p>
+      {tasks.length === 0 && (
+        <p>
+          該当するタスクはありません。
+          {clearHref !== null && (
+            <>
+              {" "}
+              <a href={clearHref} data-testid="clear-filter">
+                絞り込みを解除する
+              </a>
+            </>
+          )}
+        </p>
+      )}
     </main>
   );
 }
