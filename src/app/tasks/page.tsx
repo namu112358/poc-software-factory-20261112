@@ -1,5 +1,5 @@
 import { requireUser } from "@/lib/session";
-import { STATUS_LABELS, TASK_STATUSES, isTaskStatus, listTasks } from "@/lib/tasks";
+import { STATUS_LABELS, formatTaskCount, TASK_STATUSES, isTaskStatus, listTasks } from "@/lib/tasks";
 
 type Props = {
   searchParams: Promise<{ status?: string }>;
@@ -28,6 +28,7 @@ export default async function TasksPage({ searchParams }: Props) {
         </label>{" "}
         <button type="submit">絞り込む</button>
       </form>
+      <p data-testid="task-count">{formatTaskCount(tasks.length)}</p>
       <table>
         <thead>
           <tr>

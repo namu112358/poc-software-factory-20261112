@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { openDb } from "../src/lib/db/index.ts";
 import {
   createTask,
+  formatTaskCount,
   getTask,
   isTaskStatus,
   listTasks,
@@ -88,5 +89,22 @@ describe("isTaskStatus", () => {
     assert.equal(isTaskStatus("done"), true);
     assert.equal(isTaskStatus("unknown"), false);
     assert.equal(isTaskStatus(undefined), false);
+  });
+});
+
+describe("formatTaskCount", () => {
+  it("shows the number of all tasks as 「N 件」", () => {
+    const db = openDb();
+    assert.equal(formatTaskCount(listTasks({}, db).length), "7 件");
+  });
+
+  it("shows the count after filtering by status", () => {
+    const db = openDb();
+    const todo = listTasks({ status: "todo" }, db);
+    assert.equal(formatTaskCount(todo.length), `${todo.length} 件`);
+  });
+
+  it("shows 「0 件」 when nothing matches", () => {
+    assert.equal(formatTaskCount(0), "0 件");
   });
 });

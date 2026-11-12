@@ -39,6 +39,10 @@ export function listTasks(filter: TaskFilter = {}, db: Db = getDb()): Task[] {
   return rows.map(toTask);
 }
 
+export function formatTaskCount(count: number): string {
+  return `${count} 件`;
+}
+
 export function getTask(id: number, db: Db = getDb()): Task | undefined {
   const row = db.prepare("SELECT id, title, status, assignee, due_date FROM tasks WHERE id = ?").get(id) as
     | TaskRow
