@@ -81,3 +81,21 @@ export function deleteComment(taskId: number, commentId: number, userId: string,
   db.prepare("DELETE FROM comments WHERE id = ?").run(commentId);
   return "deleted";
 }
+
+/** 複数のタスクについて、コメントした人の名前を、最初にコメントした古い順・重複なしでまとめて返す。コメントの無いタスクは含まない。 */
+export function listCommentersByTask(taskIds: number[], db: Db = getDb()): Map<number, string[]> {
+  const result = new Map<number, string[]>();
+  if (taskIds.length === 0) return result;
+  const placeholders = taskIds.map(() => "?").join(", ");
+  const rows = db
+    .prepare(
+      `SELECT c.task_id, u.name FROM comments c JOIN users u ON u.id = c.author WHERE c.task_id IN (${placeholders}) GROUP BY c.task_id, c.author ORDER BY MIN(c.id)`,
+    )
+    .all(...taskIds) as { task_id: number; name: string }[];
+  for (const r of rows) {
+    const names = result.get(r.task_id) ?? [];
+    names.push(r.name);
+    result.set(r.task_id, names);
+  }
+  return result;
+}

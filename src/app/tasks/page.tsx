@@ -1,4 +1,5 @@
 import { Fragment } from "react";
+import { listCommentersByTask } from "@/lib/comments";
 import { requireUser } from "@/lib/session";
 import { listTagsByTask } from "@/lib/tags";
 import { PRIORITY_LABELS, STATUS_LABELS, SORT_LABELS, TASK_SORTS, TASK_STATUSES, formatEstimate, formatMemoPreview, formatTaskCount, isOverdue, isTaskStatus, listAssignees, listTasks, parseAssignee, parseSort, parseTagFilter, todayInJapan } from "@/lib/tasks";
@@ -18,6 +19,7 @@ export default async function TasksPage({ searchParams }: Props) {
   const tasks = listTasks({ status, assignee, tag, sort });
   const today = todayInJapan();
   const tagsByTask = listTagsByTask(tasks.map((t) => t.id));
+  const commentersByTask = listCommentersByTask(tasks.map((t) => t.id));
 
   return (
     <main>
@@ -75,6 +77,7 @@ export default async function TasksPage({ searchParams }: Props) {
             <th>期限</th>
             <th>見積もり</th>
             <th>タグ</th>
+            <th>コメントした人</th>
           </tr>
         </thead>
         <tbody>
@@ -111,6 +114,7 @@ export default async function TasksPage({ searchParams }: Props) {
                   </Fragment>
                 ))}
               </td>
+              <td data-testid="commenters">{(commentersByTask.get(task.id) ?? []).join("、")}</td>
             </tr>
           ))}
         </tbody>
