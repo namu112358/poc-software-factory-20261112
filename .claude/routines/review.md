@@ -30,7 +30,7 @@ PR が `Closes #<番号>` で参照する Issue を読み、次の 2 段を順�
 
 あわせて、PR が `main` と衝突していないか（`mergeable`）を見る。衝突していれば、それを「必須」の指摘にする。
 
-PR が高リスクの変更（`README.md` の「高リスク」）に当たれば、PR に `risk:high` を付け、レビューのコメントにどれに当たるかを書く。verdict には影響させない。
+PR が高リスクの変更（DB のスキーマ `src/lib/db/migrations.ts`／ログイン・セッション・権限の判定 `src/lib/auth.ts`・`src/lib/session.ts`・`src/lib/api.ts` の `requireApiUser` など／他人のデータを見せる・変える範囲が変わる変更）に当たれば、PR に `risk:high` を付け、レビューのコメントにどれに当たるかを書く。verdict には影響させない。
 
 ## 3. 結果を書く
 
