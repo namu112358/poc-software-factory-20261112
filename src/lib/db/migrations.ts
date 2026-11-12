@@ -159,4 +159,21 @@ export const MIGRATIONS: readonly Migration[] = [
       ALTER TABLE sessions ADD COLUMN previous_login_at TEXT;
     `,
   },
+  {
+    version: 15,
+    name: "task_assignee_changes",
+    sql: `
+      -- 担当者の変更の履歴。タスクを消すと一緒に消える。
+      -- 変更前・変更後は、担当者の空（''）も残せるよう users への外部キーを付けない。
+      CREATE TABLE task_assignee_changes (
+        id            INTEGER PRIMARY KEY AUTOINCREMENT,
+        task_id       INTEGER NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+        from_assignee TEXT NOT NULL,
+        to_assignee   TEXT NOT NULL,
+        changed_by    TEXT REFERENCES users(id), -- 変更した人。分からなければ NULL
+        changed_at    TEXT NOT NULL -- ISO 8601（UTC）
+      );
+      CREATE INDEX task_assignee_changes_task ON task_assignee_changes(task_id);
+    `,
+  },
 ];

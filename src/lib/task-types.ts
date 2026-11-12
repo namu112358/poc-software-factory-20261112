@@ -41,13 +41,14 @@ export function isTaskStatus(value: unknown): value is TaskStatus {
   return typeof value === "string" && (TASK_STATUSES as readonly string[]).includes(value);
 }
 
-export type TaskSort = "created" | "priority";
+export type TaskSort = "created" | "priority" | "due";
 
-export const TASK_SORTS: readonly TaskSort[] = ["created", "priority"];
+export const TASK_SORTS: readonly TaskSort[] = ["created", "priority", "due"];
 
 export const SORT_LABELS: Record<TaskSort, string> = {
   created: "作成順",
   priority: "優先度の高い順",
+  due: "期限の近い順",
 };
 
 export type TaskFilter = {

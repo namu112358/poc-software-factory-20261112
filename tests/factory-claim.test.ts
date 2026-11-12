@@ -50,6 +50,25 @@ describe("コメントの読み取り", () => {
 
 describe("着手の前の確かめ（precheck）", () => {
   const base = { queued: [], openPrs: [], isOpen: open() };
+  it("付ける直前に読み直したラベルに ready が無い・作業中や人待ちの印・epic があれば skip（#322）", () => {
+    const withLabels = (labels: string[]) => ({ ...issue(310), labels });
+    // #310 の再現: 16:23:45 に ready を外したのに、16:24:05 に in-progress が付いた
+    assert.equal(precheck({ ...base, self: withLabels(["enhancement"]), files: ["a.ts"], inProgress: [] }).decision, "skip");
+    for (const l of ["status:in-progress", "status:in-progress-hard", "status:needs-human", "status:blocked-question", "kind:epic", "kind:kaizen"]) {
+      assert.equal(precheck({ ...base, self: withLabels(["status:ready", l]), files: ["a.ts"], inProgress: [] }).decision, "skip", l);
+    }
+    assert.equal(precheck({ ...base, self: withLabels(["status:ready", "type:feat"]), files: ["a.ts"], inProgress: [] }).decision, "go");
+  });
+  it("go の結果に、先に待ち始めて同じファイルを予定している Issue（先頭でないもの）を ahead に入れる（#183）", () => {
+    // #12 は #11 の後ろで待っている（先頭でない）ので #10 を止めないが、追い越したことは記録に残す
+    const head11 = issue(11, [queued("wait=#99 files=x.ts", "2026-01-01T00:00:00Z")]);
+    const behind12 = issue(12, [queued("wait=#11 files=a.ts,x.ts", "2026-01-01T00:01:00Z")]);
+    const later13 = issue(13, [queued("wait=slot files=a.ts", "2026-01-01T00:09:00Z")]);
+    const self = issue(10, [queued("wait=slot files=a.ts", "2026-01-01T00:05:00Z")]);
+    const r = precheck({ ...base, queued: [head11, behind12, later13, self], self, files: ["a.ts"], inProgress: [], isOpen: open(99) });
+    assert.equal(r.decision, "go");
+    assert.deepEqual(r.decision === "go" ? r.ahead : null, [12]);
+  });
   it("依存先が開いていればキューに載せる", () => {
     const r = precheck({ ...base, self: issue(10, [], "#5 の後"), files: ["a.ts"], inProgress: [], isOpen: open(5) });
     assert.equal(r.decision, "queue");
@@ -347,7 +366,17 @@ describe("役がそのまま行う操作（precheckActions・relabelTargets）",
     const a = precheckActions(issue(5), ["a.ts"], { decision: "go" });
     assert.deepEqual(a.removeLabels, ["status:ready"]);
     assert.deepEqual(a.addLabels, ["status:in-progress"]);
-    assert.match(a.comment ?? "", /^<!-- factory:touch files=a\.ts -->/);
+    assert.match(a.comment ?? "", /^<!-- factory:touch files=a\.ts ahead= -->/);
+    assert.match(a.comment ?? "", /この Issue が先頭/);
+  });
+  it("go の着手の記録に、先に待っている同じファイルの Issue を ahead= で残し、parseTouch はこれまでどおり files を読む（#183）", () => {
+    const a = precheckActions(issue(5), ["a.ts", "b.ts"], { decision: "go", ahead: [3, 4] });
+    assert.match(a.comment ?? "", /^<!-- factory:touch files=a\.ts,b\.ts ahead=#3,#4 -->/);
+    assert.deepEqual(parseTouch(a.comment ?? ""), ["a.ts", "b.ts"]);
+  });
+  it("skip ならラベルもコメントも変えない（#322）", () => {
+    const a = precheckActions(issue(5), ["a.ts"], { decision: "skip", reason: "r" });
+    assert.deepEqual(a, { removeLabels: [], addLabels: [], comment: null });
   });
   it("queue ならラベルを変えず、待ち先が前と同じならコメントもしない", () => {
     const d = { decision: "queue" as const, wait: 3 as const, files: ["a.ts"], reason: "r", comment: "c" };
