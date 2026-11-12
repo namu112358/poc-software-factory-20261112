@@ -39,6 +39,16 @@ export default async function TaskDetailPage({ params }: Props) {
         <dd data-testid="task-estimate">{formatEstimate(task.estimateMinutes)}</dd>
       </dl>
       <section>
+        <h2>メモ</h2>
+        {task.memo === "" ? (
+          <p>メモはありません。</p>
+        ) : (
+          <p data-testid="memo" style={{ whiteSpace: "pre-wrap" }}>
+            {task.memo}
+          </p>
+        )}
+      </section>
+      <section>
         <h2>タグ</h2>
         {tags.length === 0 ? (
           <p>タグはまだありません。</p>
