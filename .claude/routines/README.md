@@ -96,4 +96,4 @@ flowchart LR
 - push するのは `claude/` で始まるブランチだけ。force push はしない。
 - PR の draft と Ready の切り替えは、GitHub MCP の `update_pull_request`（`draft: true` / `false`）で行う。
 - 権限で拒まれた操作は、言い換えて通そうとせず、拒まれたコマンドをコメントに書いて `needs-human` を付けて止まる。
-- 役の最後に、Issue か PR に「何をしたか・次に誰が何をするか」を 1〜3 行でコメントする。コメントの先頭には `<!-- factory:<役> -->` を付ける（巡回と集計が数える）。
+- 役の最後に、Issue か PR に「何をしたか・次に誰が何をするか」を 1〜3 行でコメントする。コメントの先頭には `<!-- factory:<役> -->` を付ける（巡回と集計が数える）。コメントの最後に、そのセッションの URL を 1 行書く（`セッション: https://claude.ai/code/session_<ID>`。コミットの `Claude-Session:` の行と同じもの。無ければ、環境変数 `CLAUDE_CODE_REMOTE_SDK_URL` の末尾の `cse_<ID>` の `<ID>` を使う）。Routine のセッションは名前を変えられないので、Issue・PR からセッションをたどれるようにするため（#144）。

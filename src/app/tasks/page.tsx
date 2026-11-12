@@ -2,7 +2,7 @@ import { Fragment } from "react";
 import { listCommentersByTask } from "@/lib/comments";
 import { requireUser } from "@/lib/session";
 import { listTagsByTask } from "@/lib/tags";
-import { PRIORITY_LABELS, STATUS_LABELS, SORT_LABELS, TASK_LIST_HELP, TASK_SORTS, TASK_STATUSES, formatEstimate, formatDaysLeft, formatEstimateTotal, formatMemoPreview, formatTaskCount, memoTooltip, isOverdue, isTaskStatus, listAssignees, listTasks, parseAssignee, parseSort, parseTagFilter, sumEstimateMinutes, taskRowDoneAttr, todayInJapan } from "@/lib/tasks";
+import { PRIORITY_LABELS, STATUS_LABELS, SORT_LABELS, TASK_LIST_HELP, TASK_SORTS, TASK_STATUSES, formatEstimate, formatDaysLeft, formatEstimateTotal, formatMemoPreview, formatTaskCount, formatOverdueCount, countOverdue, memoTooltip, isOverdue, isTaskStatus, listAssignees, listTasks, parseAssignee, parseSort, parseTagFilter, sumEstimateMinutes, taskRowDoneAttr, todayInJapan } from "@/lib/tasks";
 
 type Props = {
   searchParams: Promise<{ status?: string; assignee?: string; tag?: string; sort?: string }>;
@@ -18,6 +18,7 @@ export default async function TasksPage({ searchParams }: Props) {
   const assignees = listAssignees();
   const tasks = listTasks({ status, assignee, tag, sort });
   const today = todayInJapan();
+  const overdueText = formatOverdueCount(countOverdue(tasks, today));
   const tagsByTask = listTagsByTask(tasks.map((t) => t.id));
   const commentersByTask = listCommentersByTask(tasks.map((t) => t.id));
 
@@ -68,6 +69,11 @@ export default async function TasksPage({ searchParams }: Props) {
         <button type="submit">絞り込む</button>
       </form>
       <p data-testid="task-count">{formatTaskCount(tasks.length)}</p>
+      {overdueText !== null && (
+        <p>
+          <strong data-testid="overdue-count">{overdueText}</strong>
+        </p>
+      )}
       <table>
         <thead>
           <tr>
