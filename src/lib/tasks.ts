@@ -271,3 +271,37 @@ export function duplicateTask(id: number, db: Db = getDb()): Task | undefined {
   db.prepare("INSERT INTO task_tags (task_id, name) SELECT ?, name FROM task_tags WHERE task_id = ? ORDER BY id").run(copy.id, id);
   return copy;
 }
+
+export const BULK_COMPLETE_MAX = 100;
+
+/** まとめて完了にするタスク ID の一覧を検証する。正の整数の配列（1〜100 件）で、重複は取り除く。 */
+export function validateBulkCompleteInput(body: unknown): ValidationResult<number[]> {
+  const ids = typeof body === "object" && body !== null && !Array.isArray(body) ? (body as Record<string, unknown>).ids : undefined;
+  if (!Array.isArray(ids)) return { ok: false, errors: ["ids は配列で指定してください"] };
+  if (ids.length < 1 || ids.length > BULK_COMPLETE_MAX) {
+    return { ok: false, errors: [`ids は 1〜${BULK_COMPLETE_MAX} 件で指定してください`] };
+  }
+  if (!ids.every((id) => typeof id === "number" && Number.isInteger(id) && id >= 1)) {
+    return { ok: false, errors: ["ids は正の整数の配列で指定してください"] };
+  }
+  return { ok: true, value: [...new Set(ids as number[])] };
+}
+
+/**
+ * 指定したタスクをまとめて完了にし、完了にした後のタスクを ids の順で返す。
+ * 存在しない ID が 1 つでもあれば、どれも変更せず、存在しない ID の一覧を返す。
+ */
+export function completeTasks(ids: number[], db: Db = getDb()): { ok: true; tasks: Task[] } | { ok: false; missing: number[] } {
+  const missing = ids.filter((id) => getTask(id, db) === undefined);
+  if (missing.length > 0) return { ok: false, missing };
+  db.exec("BEGIN");
+  try {
+    const update = db.prepare("UPDATE tasks SET status = 'done' WHERE id = ?");
+    for (const id of ids) update.run(id);
+    db.exec("COMMIT");
+  } catch (e) {
+    db.exec("ROLLBACK");
+    throw e;
+  }
+  return { ok: true, tasks: ids.map((id) => getTask(id, db)!) };
+}

@@ -15,6 +15,8 @@ import {
   parseAssignee,
   parseTaskId,
   updateTask,
+  completeTasks,
+  validateBulkCompleteInput,
   validateTaskInput,
 } from "../src/lib/tasks.ts";
 
@@ -376,5 +378,39 @@ describe("memo", () => {
   it("is optional on create", () => {
     const db = openDb();
     assert.equal(validateTaskInput({ ...base }, {}, db).ok, true);
+  });
+});
+
+describe("validateBulkCompleteInput", () => {
+  it("accepts an array of positive integers and removes duplicates", () => {
+    assert.deepEqual(validateBulkCompleteInput({ ids: [1, 2, 2, 3] }), { ok: true, value: [1, 2, 3] });
+  });
+
+  it("rejects a missing or non-array ids", () => {
+    for (const body of [{}, null, [], { ids: "1" }, { ids: 1 }, { ids: [] }, { ids: [1, "2"] }, { ids: [0] }, { ids: [1.5] }]) {
+      const result = validateBulkCompleteInput(body);
+      assert.equal(result.ok, false);
+      if (!result.ok) assert.ok(result.errors.length > 0);
+    }
+  });
+});
+
+describe("completeTasks", () => {
+  it("marks the given tasks as done and returns them", () => {
+    const db = openDb();
+    const result = completeTasks([1, 2], db);
+    assert.ok(result.ok);
+    if (result.ok) {
+      assert.deepEqual(result.tasks.map((t) => [t.id, t.status]), [[1, "done"], [2, "done"]]);
+    }
+    assert.equal(getTask(1, db)?.status, "done");
+  });
+
+  it("changes nothing when an id does not exist", () => {
+    const db = openDb();
+    const before = getTask(1, db)!.status;
+    const result = completeTasks([1, 9999], db);
+    assert.deepEqual(result, { ok: false, missing: [9999] });
+    assert.equal(getTask(1, db)?.status, before);
   });
 });
