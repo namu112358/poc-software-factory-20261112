@@ -306,6 +306,11 @@ export function formatMemoPreview(memo: string): string | null {
   return chars.slice(0, MEMO_PREVIEW_LENGTH).join("") + "…";
 }
 
+/** 一覧のタイトルのリンクに `title` 属性として付けるメモの全文。空のメモは undefined（属性を付けない）。 */
+export function memoTooltip(memo: string): string | undefined {
+  return memo === "" ? undefined : memo;
+}
+
 /** ISO 8601（UTC）の日時を、日本時間の「YYYY/MM/DD HH:mm」にする。解釈できなければ「—」。 */
 export function formatJstDateTime(iso: string): string {
   const t = Date.parse(iso);
