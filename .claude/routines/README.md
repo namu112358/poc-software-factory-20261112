@@ -57,6 +57,6 @@ flowchart LR
 - `.github/`・`.claude/`・`scripts/factory/`・`AGENTS.md`・`CLAUDE.md`・`docs/rulesets/` は変えない（例外は、振り返りの役が draft の PR で出す案だけ）。
 - push するのは `claude/` で始まるブランチだけ。force push はしない。
 - PR の draft と Ready の切り替えは、GitHub MCP の `update_pull_request`（`draft: true` / `false`）で行う。
-- 「取り込みだけのコミット」（`main` を取り込んだマージのコミットで、`git show <コミット>` の差分が空のもの）は、レビュー済みかを判定するときに数えない。
+- 「取り込みだけのコミット」（`main` を取り込んだマージのコミットで、`git show --remerge-diff <コミット>` の差分が空のもの。ただの `git show` は、手の入っていない取り込みでも差分を出すことがある）は、レビュー済みかを判定するときに数えない。
 - 権限で拒まれた操作は、言い換えて通そうとせず、拒まれたコマンドをコメントに書いて `needs-human` を付けて止まる。
 - 役の最後に、Issue か PR に「何をしたか・次に誰が何をするか」を 1〜3 行でコメントする。先頭に `<!-- factory:<役> -->`、最後に `セッション: https://claude.ai/code/session_<ID>` を書く（`<ID>` は `echo "$CLAUDE_CODE_REMOTE_SDK_URL" | sed 's/.*cse_/session_/'` で取る。コミットの行からは取らない）。
