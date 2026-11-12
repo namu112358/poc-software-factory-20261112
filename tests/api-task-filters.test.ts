@@ -1,9 +1,11 @@
 // タスク一覧の API（GET /api/tasks）でも、画面と同じ絞り込み（複数の担当者・複数のタグ・期限）を使える（#425）。
+// キーワード（q）は、画面・CSV と同じくコメントの本文からも探す（#429）。
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { openDb } from "../src/lib/db/index.ts";
 import { listTasksByQuery, parseIncludeArchived, parseTaskListQuery } from "../src/lib/task-query.ts";
-import { parseTaskFilter } from "../src/lib/export.ts";
+import { createComment, deleteComment, updateComment } from "../src/lib/comments.ts";
+import { exportTasksCsv, parseTaskFilter } from "../src/lib/export.ts";
 import { addTag } from "../src/lib/tags.ts";
 import {
   createTask,
@@ -60,6 +62,7 @@ function pageTitles(db: Db, s: string, now: Date = NOON_JST): string[] {
       assignees: parseAssignees(raw.assignee, db),
       tags: parseTagFilters(raw.tag, db),
       q: parseKeyword(raw.q),
+      qInComments: true,
       due: parseDueFilter(raw.due),
       sort: parseSort(raw.sort),
       includeArchived: parseIncludeArchived(raw.archived),
@@ -177,11 +180,15 @@ describe("GET /api/tasks: 画面の一覧・CSV と同じ", () => {
     "due=bogus&status=todo",
     `assignee=sato&assignee=tanaka&tag=${enc("顧客A")}&due=overdue&sort=due`,
     "q=sato",
+    `q=${enc("返事待ち")}`,
+    `q=${enc("返事待ち")}&assignee=sato&assignee=suzuki&tag=${enc("急ぎ")}&due=week&status=todo`,
     "",
   ];
 
-  it("同じクエリなら、一覧画面と同じタスクが返る", () => {
-    const { db } = setup();
+  it("同じクエリなら、一覧画面と同じタスクが返る（コメントにだけキーワードがあるタスクを含む）", () => {
+    const { db, ids } = setup();
+    addReplyComments(db, ids);
+    assert.deepEqual(titles(db, `q=${enc("返事待ち")}`), ["satoPast", "satoToday 返事待ち", "suzukiLater", "suzukiWeek", "tanakaLater"]);
     for (const s of cases) assert.deepEqual(titles(db, s), pageTitles(db, s), s);
   });
 
@@ -192,5 +199,108 @@ describe("GET /api/tasks: 画面の一覧・CSV と同じ", () => {
       assert.equal(includeArchived, false, s);
       assert.deepEqual(rest, parseTaskFilter(qs(s), db), s);
     }
+  });
+});
+
+/** satoPast・suzukiWeek・tanakaLater はコメントにだけ「返事待ち」、satoToday はタイトルに、suzukiLater はメモにだけ持つ。 */
+function addReplyComments(db: Db, ids: ReturnType<typeof setup>["ids"]) {
+  createComment({ taskId: ids.satoPast, author: "suzuki", body: "先方の返事待ちです" }, db);
+  createComment({ taskId: ids.suzukiWeek, author: "sato", body: "まだ返事待ち" }, db);
+  createComment({ taskId: ids.tanakaLater, author: "tanaka", body: "返事待ち（再送済み）" }, db);
+  updateTask(ids.satoToday, { title: "satoToday 返事待ち" } as never, db);
+  updateTask(ids.suzukiLater, { memo: "返事待ちのメモ" } as never, db);
+}
+
+/** CSV の書き出しに出るタスクの ID（列の 1 つ目）。期限の「今日」は API・画面のテストと同じ日にそろえる。 */
+function csvIds(db: Db, s: string): number[] {
+  const lines = exportTasksCsv({ ...parseTaskFilter(qs(s), db), today: todayInJapan(NOON_JST) }, db).replace(/^\uFEFF/, "").split("\r\n").slice(1).filter((l) => l !== "");
+  return lines.map((l) => Number(l.split(",")[0])).sort((a, b) => a - b);
+}
+
+describe("GET /api/tasks: キーワードはコメントの本文からも探す", () => {
+  const apiIds = (db: Db, s: string) => listTasksByQuery(qs(s), db, NOON_JST).map((t) => t.id).sort((a, b) => a - b);
+
+  it("コメントの本文にだけキーワードがあるタスクが出る", () => {
+    const { db, ids } = setup();
+    createComment({ taskId: ids.suzukiLater, author: "sato", body: "先方の返事待ち" }, db);
+    assert.deepEqual(apiIds(db, `q=${enc("返事待ち")}`), [ids.suzukiLater]);
+    // 部分一致で当たる
+    assert.deepEqual(apiIds(db, `q=${enc("先方")}`), [ids.suzukiLater]);
+  });
+
+  it("同じタスクの複数のコメントに当たっても、1 回だけ出る", () => {
+    const { db, ids } = setup();
+    for (let i = 0; i < 3; i++) createComment({ taskId: ids.tanakaLater, author: "sato", body: `返事待ち ${i}` }, db);
+    updateTask(ids.tanakaLater, { memo: "返事待ち" } as never, db);
+    assert.deepEqual(apiIds(db, `q=${enc("返事待ち")}`), [ids.tanakaLater]);
+  });
+
+  it("タイトル・メモでの検索は、これまでどおり当たる", () => {
+    const { db, ids } = setup();
+    updateTask(ids.suzukiLater, { memo: "見積もりを送る" } as never, db);
+    assert.deepEqual(apiIds(db, "q=satoP"), [ids.satoPast]);
+    assert.deepEqual(apiIds(db, `q=${enc("見積もり")}`), [ids.suzukiLater]);
+  });
+
+  it("ステータス・担当者・タグ・期限と組み合わせられる", () => {
+    const { db, ids } = setup();
+    for (const id of Object.values(ids)) createComment({ taskId: id, author: "sato", body: "返事待ち" }, db);
+    const q = `q=${enc("返事待ち")}`;
+    assert.equal(apiIds(db, q).length, 6);
+    assert.deepEqual(apiIds(db, `${q}&status=done`), [ids.tanakaPastDone]);
+    assert.deepEqual(apiIds(db, `${q}&assignee=suzuki`), [ids.suzukiWeek, ids.suzukiLater].sort((a, b) => a - b));
+    assert.deepEqual(apiIds(db, `${q}&tag=${enc("急ぎ")}&tag=${enc("顧客A")}`), [ids.satoPast, ids.suzukiWeek, ids.tanakaPastDone]);
+    assert.deepEqual(apiIds(db, `${q}&due=overdue`), [ids.satoPast, ids.tanakaPastDone]);
+    assert.deepEqual(apiIds(db, `${q}&assignee=sato&assignee=tanaka&tag=${enc("顧客A")}&due=overdue&status=todo`), [ids.satoPast]);
+  });
+
+  it("空・空白だけのキーワードは指定なし。%・_・\\ は文字どおりに探す", () => {
+    const { db, ids } = setup();
+    createComment({ taskId: ids.satoPast, author: "sato", body: "進捗 100%_a\\b" }, db);
+    assert.equal(apiIds(db, "q=").length, 6);
+    assert.equal(apiIds(db, `q=${enc("   ")}`).length, 6);
+    assert.deepEqual(apiIds(db, `q=${enc("100%_a\\b")}`), [ids.satoPast]);
+    assert.deepEqual(apiIds(db, `q=${enc("100__")}`), []);
+    assert.deepEqual(apiIds(db, `q=${enc("a%b")}`), []);
+  });
+
+  it("削除・編集したコメントは、今の本文で探す", () => {
+    const { db, ids } = setup();
+    const deleted = createComment({ taskId: ids.satoPast, author: "sato", body: "返事待ち" }, db);
+    const edited = createComment({ taskId: ids.suzukiWeek, author: "suzuki", body: "返事待ち" }, db);
+    assert.equal(deleteComment(ids.satoPast, deleted.id, "sato", db), "deleted");
+    assert.equal(updateComment(ids.suzukiWeek, edited.id, "suzuki", "返信あり", db).status, "updated");
+    assert.deepEqual(apiIds(db, `q=${enc("返事待ち")}`), []);
+    assert.deepEqual(apiIds(db, `q=${enc("返信あり")}`), [ids.suzukiWeek]);
+  });
+
+  it("コメントで当たっても、削除したタスクは出ず、アーカイブ済みは archived=include のときだけ出る", () => {
+    const { db, ids } = setup();
+    createComment({ taskId: ids.satoPast, author: "sato", body: "返事待ち" }, db);
+    createComment({ taskId: ids.satoToday, author: "sato", body: "返事待ち" }, db);
+    updateTask(ids.satoPast, { archived: true }, db);
+    db.prepare("UPDATE tasks SET deleted_at = ? WHERE id = ?").run(new Date().toISOString(), ids.satoToday);
+    assert.deepEqual(apiIds(db, `q=${enc("返事待ち")}`), []);
+    assert.deepEqual(apiIds(db, `q=${enc("返事待ち")}&archived=include`), [ids.satoPast]);
+  });
+
+  it("同じクエリなら、一覧画面・CSV・API で同じタスクが返る（コメントにだけキーワードがあるタスクを含む）", () => {
+    const { db, ids } = setup();
+    addReplyComments(db, ids);
+    const cases = [
+      `q=${enc("返事待ち")}`,
+      `q=${enc("返事待ち")}&status=todo`,
+      `q=${enc("返事待ち")}&assignee=sato&assignee=tanaka`,
+      `q=${enc("返事待ち")}&tag=${enc("急ぎ")}`,
+      `q=${enc("返事待ち")}&due=week&sort=due`,
+      `q=${enc("先方")}`,
+    ];
+    const byTitle = new Map(listTasks({}, db).map((t) => [t.title, t.id]));
+    for (const s of cases) {
+      const api = apiIds(db, s);
+      assert.deepEqual(api, pageTitles(db, s).map((t) => byTitle.get(t)!).sort((a, b) => a - b), s);
+      assert.deepEqual(api, csvIds(db, s), s);
+    }
+    assert.deepEqual(apiIds(db, `q=${enc("返事待ち")}`), [ids.satoPast, ids.satoToday, ids.suzukiWeek, ids.suzukiLater, ids.tanakaLater]);
   });
 });
