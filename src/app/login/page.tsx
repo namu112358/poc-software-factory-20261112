@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
 import { getCurrentUser } from "@/lib/session";
+import { PasswordField } from "./password-field";
 
 type Props = {
   searchParams: Promise<{ error?: string }>;
@@ -24,9 +25,7 @@ export default async function LoginPage({ searchParams }: Props) {
           </label>
         </p>
         <p>
-          <label>
-            パスワード <input name="password" type="password" autoComplete="current-password" required />
-          </label>
+          <PasswordField />
         </p>
         <button type="submit">ログイン</button>
       </form>
