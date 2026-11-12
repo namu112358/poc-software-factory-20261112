@@ -4,7 +4,8 @@ import { commentEditedLabel, listComments, splitCommentBody } from "@/lib/commen
 import { requireUser } from "@/lib/session";
 import { listTags, listTagSuggestions } from "@/lib/tags";
 import { PRIORITY_LABELS, STATUS_LABELS, formatCompletedAt, formatEstimate, formatJstDateTime, formatTaskNumber, getTask, isDueSoon, isOverdue, parseTaskId, todayInJapan } from "@/lib/tasks";
-import { getUser, listUserOptions } from "@/lib/users";
+import { listAssigneeOptions } from "@/lib/members";
+import { getUser } from "@/lib/users";
 import { ArchiveButton } from "./archive";
 import { DeleteTaskButton } from "./delete";
 import { DuplicateButton } from "./duplicate";
@@ -82,7 +83,7 @@ export default async function TaskDetailPage({ params }: Props) {
         <dt>完了</dt>
         <dd data-testid="completed-at">{formatCompletedAt(task)}</dd>
       </dl>
-      <EditTaskForm task={task} users={listUserOptions()} />
+      <EditTaskForm task={task} users={listAssigneeOptions()} />
       <p>
         <DuplicateButton taskId={task.id} /> <ArchiveButton taskId={task.id} archived={task.archived} updatedAt={task.updatedAt} />{" "}
         <DeleteTaskButton taskId={task.id} title={task.title} />

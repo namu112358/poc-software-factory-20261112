@@ -6,7 +6,7 @@ import { useState, type FormEvent } from "react";
 import { newerTask, saveTaskEdit, taskToEditValues, type TaskEditValues } from "@/lib/task-edit";
 import { MEMO_MAX_LENGTH, PRIORITY_LABELS, STATUS_LABELS, TASK_PRIORITIES, TASK_STATUSES, isTaskPriority, isTaskStatus, type Task } from "@/lib/task-types";
 
-type Props = { task: Task; users: { id: string; name: string }[] };
+type Props = { task: Task; users: { id: string; name: string; label?: string }[] };
 
 export function EditTaskForm({ task, users }: Props) {
   const router = useRouter();
@@ -119,7 +119,7 @@ export function EditTaskForm({ task, users }: Props) {
           <select name="assignee" value={values.assignee} onChange={(e) => set("assignee", e.target.value)}>
             {users.map((u) => (
               <option key={u.id} value={u.id}>
-                {u.name}
+                {u.label ?? u.name}
               </option>
             ))}
           </select>
