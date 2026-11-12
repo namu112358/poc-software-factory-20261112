@@ -137,6 +137,11 @@ export function formatTaskCount(count: number): string {
   return `${count} 件`;
 }
 
+/** 一覧の見出しの下に出す、ログイン中のユーザーの表示。ログイン ID ではなく表示名を使う。 */
+export function formatCurrentUser(name: string): string {
+  return `ログイン中: ${name}`;
+}
+
 export function getTask(id: number, db: Db = getDb()): Task | undefined {
   const row = db.prepare("SELECT id, title, status, assignee, due_date, priority, estimate_minutes, created_at, updated_at, memo FROM tasks WHERE id = ?").get(id) as
     | TaskRow
