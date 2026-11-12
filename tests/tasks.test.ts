@@ -74,7 +74,7 @@ describe("担当者なしの絞り込み", () => {
     db.exec("CREATE TABLE tasks_bak AS SELECT * FROM tasks");
     db.exec("DROP TABLE tasks");
     db.exec(
-      "CREATE TABLE tasks (id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT NOT NULL, status TEXT NOT NULL, assignee TEXT, due_date TEXT NOT NULL, priority TEXT NOT NULL DEFAULT 'medium', estimate_minutes INTEGER)",
+      "CREATE TABLE tasks (id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT NOT NULL, status TEXT NOT NULL, assignee TEXT, due_date TEXT NOT NULL, priority TEXT NOT NULL DEFAULT 'medium', estimate_minutes INTEGER, memo TEXT NOT NULL DEFAULT '')",
     );
     db.exec("INSERT INTO tasks SELECT * FROM tasks_bak");
     db.exec("INSERT INTO tasks (title, status, assignee, due_date) VALUES ('未割当', 'todo', NULL, '2026-12-01')");
@@ -104,6 +104,7 @@ describe("getTask", () => {
       status: "done",
       assignee: "sato",
       estimateMinutes: null,
+      memo: "",
       dueDate: "2026-11-02",
       priority: "medium",
     });
@@ -290,5 +291,39 @@ describe("estimateMinutes", () => {
   it("formats for display", () => {
     assert.equal(formatEstimate(90), "90 分");
     assert.equal(formatEstimate(null), "—");
+  });
+});
+
+describe("memo", () => {
+  const base = { title: "t", status: "todo", assignee: "sato", dueDate: "2026-12-01" } as const;
+
+  it("is empty for seeded tasks and tasks created without it", () => {
+    const db = openDb();
+    assert.ok(listTasks({}, db).every((t) => t.memo === ""));
+    assert.equal(createTask({ ...base }, db).memo, "");
+  });
+
+  it("can be set on create and updated without touching other fields", () => {
+    const db = openDb();
+    const task = createTask({ ...base, memo: "1 行目\n2 行目" }, db);
+    assert.equal(getTask(task.id, db)?.memo, "1 行目\n2 行目");
+    assert.equal(updateTask(task.id, { memo: "変更後" }, db)?.memo, "変更後");
+    assert.equal(updateTask(task.id, { title: "x" }, db)?.memo, "変更後");
+    assert.equal(updateTask(task.id, { memo: "" }, db)?.memo, "");
+  });
+
+  it("validates type and length (0〜2000 characters)", () => {
+    const db = openDb();
+    const check = (v: unknown) => validateTaskInput({ memo: v }, { partial: true }, db).ok;
+    assert.equal(check(""), true);
+    assert.equal(check("あ".repeat(2000)), true);
+    for (const bad of ["あ".repeat(2001), 1, null, true, ["a"]]) assert.equal(check(bad), false, String(bad));
+    const r = validateTaskInput({ memo: "a".repeat(2001) }, { partial: true }, db);
+    assert.ok(!r.ok && r.errors.length > 0);
+  });
+
+  it("is optional on create", () => {
+    const db = openDb();
+    assert.equal(validateTaskInput({ ...base }, {}, db).ok, true);
   });
 });
