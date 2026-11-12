@@ -7,7 +7,11 @@ export default async function LoginPage({ searchParams }: Props) {
   return (
     <main>
       <h1>ログイン</h1>
-      {error !== undefined && <p role="alert">ID またはパスワードが正しくありません。</p>}
+      {error === "locked" ? (
+        <p role="alert">ログインに続けて失敗したため、しばらくしてからもう一度お試しください。</p>
+      ) : (
+        error !== undefined && <p role="alert">ID またはパスワードが正しくありません。</p>
+      )}
       <form method="post" action="/api/login" aria-label="ログイン">
         <p>
           <label>
