@@ -10,7 +10,7 @@ export function parseIncludeArchived(value: unknown): boolean {
 
 /**
  * タスク一覧の API のクエリ（status・assignee（複数）・tag（複数）・due・q・sort・archived）を、一覧画面・CSV と同じ検証で絞り込み条件にする。
- * 不正な値・今は無い担当者・使われていないタグは、その分だけ指定なし。
+ * 不正な値・利用者でない担当者・使われていないタグは、その分だけ指定なし。
  */
 export function parseTaskListQuery(query: URLSearchParams, db: Db = getDb()): TaskFilter {
   return { ...parseTaskFilter(query, db), includeArchived: parseIncludeArchived(query.get("archived")) };

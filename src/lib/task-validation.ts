@@ -1,5 +1,5 @@
 import { getDb, type Db } from "./db/index.ts";
-import { listAssignees } from "./task-store.ts";
+import { getUser } from "./users.ts";
 import { isTaskPriority, isTaskStatus, TASK_SORTS, UNASSIGNED, type TaskInput, type TaskSort, type ValidationResult, MEMO_MAX_LENGTH } from "./task-types.ts";
 
 /** URL のクエリの並び順を検証する。不正な値は「作成順」として扱う。 */
@@ -7,16 +7,19 @@ export function parseSort(value: unknown): TaskSort {
   return typeof value === "string" && (TASK_SORTS as readonly string[]).includes(value) ? (value as TaskSort) : "created";
 }
 
-/** クエリの担当者 ID を検証する。`none`（担当者なし）かタスクに登場する担当者でなければ undefined（指定なし）。 */
+/**
+ * クエリの担当者 ID を検証する。`none`（担当者なし）かアプリの利用者でなければ undefined（指定なし）。
+ * 今は担当のタスクが無い利用者も有効な条件として返す（絞り込むと 0 件になる。全件に戻さない）。
+ */
 export function parseAssignee(value: unknown, db: Db = getDb()): string | undefined {
   if (typeof value !== "string") return undefined;
   if (value === UNASSIGNED) return UNASSIGNED;
-  return listAssignees(db).some((a) => a.id === value) ? value : undefined;
+  return getUser(value, db) ? value : undefined;
 }
 
 /**
  * URL のクエリの担当者 ID（`?assignee=sato&assignee=suzuki` のように複数）を検証する。文字列 1 つも配列も受け取る。
- * 不正な値・今は無い担当者・重複は、その分だけ無視する。`none`（担当者なし）は他と組み合わせられる。
+ * 不正な値・利用者でない値・重複は、その分だけ無視する。`none`（担当者なし）は他と組み合わせられる。
  */
 export function parseAssignees(value: unknown, db: Db = getDb()): string[] {
   const values = Array.isArray(value) ? value : [value];
