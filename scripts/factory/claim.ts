@@ -4,6 +4,7 @@
 //   node scripts/factory/claim.ts confirm <Issue> [--wait 30]           着手して 30 秒後の読み直し
 //   node scripts/factory/claim.ts pick                                  キューから取り出してよい Issue
 //   node scripts/factory/claim.ts handled --since <ISO 8601>            ほかの割り当てがもう処理した Issue・PR
+//   node scripts/factory/claim.ts budget                                直近 60 分に ready を付けた回数と、あと何回付けてよいか
 // Node 22.18 以上（型を外して .ts をそのまま動かす）。クラウドのプロキシを通すため、NODE_USE_ENV_PROXY=1 で自分を起動し直す。
 import { spawnSync } from "node:child_process";
 import {
@@ -12,6 +13,7 @@ import {
   handledByOthers,
   pick,
   precheck,
+  readyBudget,
   splitFiles,
   type Comment,
   type IssueInfo,
@@ -95,6 +97,20 @@ async function ownPr(n: number): Promise<number | null> {
   return prs[0]?.number ?? null;
 }
 
+/** 直近 60 分に ready / ready:hard が付いた回数（実装の Routine の起動のきっかけ。#250） */
+async function loadBudget() {
+  const since = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+  let count = 0;
+  for (let page = 1; page <= 10; page++) {
+    const { data } = await get<{ event: string; created_at: string; label?: { name: string } }[]>(`/repos/${REPO}/issues/events?per_page=100&page=${page}`);
+    for (const e of data) {
+      if (e.created_at > since && e.event === "labeled" && (e.label?.name === "ready" || e.label?.name === "ready:hard")) count++;
+    }
+    if (data.length < 100 || data.some((e) => e.created_at <= since)) break;
+  }
+  return readyBudget(count);
+}
+
 function arg(name: string): string | undefined {
   const i = process.argv.indexOf(`--${name}`);
   return i >= 0 ? process.argv[i + 1] : undefined;
@@ -124,11 +140,13 @@ async function main(): Promise<unknown> {
       return { issue: n, ...confirm({ self, inProgress, ownPr: own }) };
     }
     case "pick": {
-      const [queued, inProgress, openPrs] = await Promise.all([loadLabeled("queued"), loadLabeled("in-progress"), loadOpenPrs()]);
+      const [queued, inProgress, openPrs, b] = await Promise.all([loadLabeled("queued"), loadLabeled("in-progress"), loadOpenPrs(), loadBudget()]);
       await loadOpen(queued.flatMap(dependencies));
       const inProgressCount = inProgress.length;
-      return { inProgress: inProgressCount, ...pick({ queued, inProgressCount, isOpen, openPrs, inProgress }) };
+      return { inProgress: inProgressCount, ...b, ...pick({ queued, inProgressCount, isOpen, openPrs, inProgress, readyRemaining: b.remaining }) };
     }
+    case "budget":
+      return loadBudget();
     case "handled": {
       const since = arg("since");
       if (!since) throw new Error("--since <ISO 8601> を指定する");
@@ -137,7 +155,7 @@ async function main(): Promise<unknown> {
       return { since, mySession: mySession(), handled: handledByOthers({ comments, since, mySession: mySession() }) };
     }
     default:
-      throw new Error("precheck / confirm / pick / handled のどれかを指定する");
+      throw new Error("precheck / confirm / pick / handled / budget のどれかを指定する");
   }
 }
 

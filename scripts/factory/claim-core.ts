@@ -4,6 +4,19 @@
 
 export const WIP_LIMIT = 4;
 
+/**
+ * 実装の Routine の起動のきっかけ（`ready` / `ready:hard` が付いたこと）を、直近 60 分に何回まで使うか（#250）。
+ * GitHub のイベントには Routine ごとの 1 時間あたりの上限があり、超えたイベントは捨てられる（数値は非公開）。
+ * 2026-11-12 は、直近 60 分のきっかけが 53〜55 回になったところで実装の Routine が起動しなくなった。
+ * 余裕をみて 45 回にする。上限が分かったら、この値だけを直す。
+ */
+export const READY_EVENTS_PER_HOUR_BUDGET = 45;
+
+/** 直近 60 分のきっかけの数から、あと何回 ready を付けてよいか */
+export function readyBudget(readyLastHour: number): { readyLastHour: number; budget: number; remaining: number } {
+  return { readyLastHour, budget: READY_EVENTS_PER_HOUR_BUDGET, remaining: Math.max(0, READY_EVENTS_PER_HOUR_BUDGET - readyLastHour) };
+}
+
 export type Comment = { body: string; createdAt: string; author?: string };
 
 export type IssueInfo = {
@@ -258,12 +271,13 @@ export function pick(args: {
   isOpen: (n: number) => boolean;
   openPrs?: PrInfo[];
   inProgress?: IssueInfo[];
+  readyRemaining?: number; // あと何回 ready を付けてよいか（readyBudget の remaining）。省けば数えない
 }): {
   slots: number;
   pick: number[];
   rewait: { issue: number; wait: number; files: string[]; comment: string }[];
 } {
-  const slots = Math.max(0, WIP_LIMIT - args.inProgressCount);
+  const slots = Math.max(0, Math.min(WIP_LIMIT - args.inProgressCount, args.readyRemaining ?? Infinity));
   const picked: IssueInfo[] = [];
   const rewait: { issue: number; wait: number; files: string[]; comment: string }[] = [];
   const addRewait = (i: IssueInfo, wait: number, files: string[], reason: string) => {
