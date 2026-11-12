@@ -28,7 +28,7 @@ Routine（`.claude/routines/`）が使う判定のスクリプトです。GitHub
 
 ## 人の手順: merge:requested を付ける前
 
-PR に `merge:requested` を付ける前に、必ず `node scripts/factory/claim.ts merge-check <PR>` を実行し、`ok` が `true` のときだけ付ける。`false` なら `reason` のとおりにする（レビューを起こし直す、など）。レビューの ok が無いまま `merge:requested` が付いた PR が 4 本あったため（#293）。
+PR に `merge:requested` を付ける前に、必ず `node scripts/factory/claim.ts merge-check <PR>` を実行し、`ok` が `true` のときだけ付ける。`false` なら `reason` のとおりにする（レビューを起こし直す、など）。レビューの ok が無いまま `merge:requested` が付いた PR が 4 本あったため（#293）。キューを通さずにマージするとき（`.mergify.yml` を変える PR など）も、マージの前に同じように実行する（#323 は、レビューの後に足した衝突の解消が未レビューのままマージされた）。
 
 ## 人の手順: 最初に動かすとき
 
