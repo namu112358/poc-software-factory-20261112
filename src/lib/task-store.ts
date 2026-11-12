@@ -1,4 +1,4 @@
-import { getDb, transaction, type Db } from "./db/index.ts";
+import { getDb, savepoint, transaction, type Db } from "./db/index.ts";
 import type { Assignee, Task, TaskFilter, TaskInput, TaskPriority, TaskStatus } from "./task-types.ts";
 
 /** タスクに登場する担当者（重複なし）。 */
@@ -46,7 +46,9 @@ export function listTasks(filter: TaskFilter = {}, db: Db = getDb()): Task[] {
   const orderBy =
     filter.sort === "priority"
       ? "ORDER BY CASE priority WHEN 'high' THEN 0 WHEN 'medium' THEN 1 ELSE 2 END, id"
-      : "ORDER BY id";
+      : filter.sort === "due"
+        ? "ORDER BY CASE WHEN status = 'done' THEN 1 ELSE 0 END, due_date IS NULL, due_date, CASE priority WHEN 'high' THEN 0 WHEN 'medium' THEN 1 ELSE 2 END, id"
+        : "ORDER BY id";
   const rows = db
     .prepare(
       "SELECT id, title, status, assignee, due_date, priority, estimate_minutes, created_at, updated_at, completed_at, memo, archived FROM tasks WHERE (:includeArchived = 1 OR archived = 0) AND (:status IS NULL OR status = :status) AND (:assignee IS NULL OR (:assignee = 'none' AND assignee IS NULL) OR (:assignee <> 'none' AND assignee = :assignee)) AND (:tag IS NULL OR EXISTS (SELECT 1 FROM task_tags g WHERE g.task_id = tasks.id AND g.name = :tag)) AND (:q IS NULL OR title LIKE :q ESCAPE '\\' OR memo LIKE :q ESCAPE '\\') " + orderBy,
@@ -95,8 +97,12 @@ export function nextUpdatedAt(previous: string, now: Date = new Date()): string 
 
 const UPDATE_TASK_SQL = `UPDATE tasks SET title = :title, status = :status, assignee = :assignee, due_date = :dueDate, priority = :priority, estimate_minutes = :estimateMinutes, memo = :memo, archived = :archived, updated_at = :now, ${COMPLETED_AT_SQL} WHERE id = :id`;
 
-/** 今のタスクに変更を重ねて書き込む。`onlyIfUpdatedAt` を渡すと、更新日時がその値のときだけ書き込む。書き込んだら true。 */
-function writeTask(current: Task, changes: Partial<TaskInput>, db: Db, onlyIfUpdatedAt?: string): boolean {
+/**
+ * 今のタスクに変更を重ねて書き込む。`onlyIfUpdatedAt` を渡すと、更新日時がその値のときだけ書き込む。書き込んだら true。
+ * 担当者が変わったときは、担当者の変更の履歴を同じセーブポイントの中で 1 件足す（どちらかだけが残ることはない）。
+ * 変更前の担当者は、書き込む直前に DB から読み直した値を使う（編集を始めたときの値ではない）。
+ */
+function writeTask(current: Task, changes: Partial<TaskInput>, db: Db, changedBy: string | null, onlyIfUpdatedAt?: string): boolean {
   const next = { ...current, ...changes };
   const params = {
     title: next.title,
@@ -110,18 +116,32 @@ function writeTask(current: Task, changes: Partial<TaskInput>, db: Db, onlyIfUpd
     now: nextUpdatedAt(current.updatedAt),
     id: current.id,
   };
-  const { changes: rows } =
-    onlyIfUpdatedAt === undefined
-      ? db.prepare(UPDATE_TASK_SQL).run(params)
-      : db.prepare(`${UPDATE_TASK_SQL} AND updated_at = :expectedUpdatedAt`).run({ ...params, expectedUpdatedAt: onlyIfUpdatedAt });
-  return Number(rows) > 0;
+  return savepoint(db, () => {
+    const update =
+      onlyIfUpdatedAt === undefined
+        ? db.prepare(UPDATE_TASK_SQL)
+        : db.prepare(`${UPDATE_TASK_SQL} AND updated_at = :expectedUpdatedAt`);
+    const before = db.prepare("SELECT assignee FROM tasks WHERE id = ?").get(current.id) as { assignee: string } | undefined;
+    const { changes: rows } =
+      onlyIfUpdatedAt === undefined ? update.run(params) : update.run({ ...params, expectedUpdatedAt: onlyIfUpdatedAt });
+    if (Number(rows) === 0) return false;
+    if (before && before.assignee !== params.assignee) {
+      db.prepare(
+        "INSERT INTO task_assignee_changes (task_id, from_assignee, to_assignee, changed_by, changed_at) VALUES (?, ?, ?, ?, ?)",
+      ).run(current.id, before.assignee, params.assignee, changedBy, params.now);
+    }
+    return true;
+  });
 }
 
-/** 指定した項目だけを更新する。タスクが無ければ undefined。完了日時はステータスの変化に合わせて決まる。 */
-export function updateTask(id: number, changes: Partial<TaskInput>, db: Db = getDb()): Task | undefined {
+/**
+ * 指定した項目だけを更新する。タスクが無ければ undefined。完了日時はステータスの変化に合わせて決まる。
+ * `changedBy` は更新した利用者の ID。担当者が変わったときに、担当者の変更の履歴に残す。
+ */
+export function updateTask(id: number, changes: Partial<TaskInput>, db: Db = getDb(), changedBy: string | null = null): Task | undefined {
   const current = getTask(id, db);
   if (!current) return undefined;
-  writeTask(current, changes, db);
+  writeTask(current, changes, db, changedBy);
   return getTask(id, db);
 }
 
@@ -132,7 +152,7 @@ export type CheckedUpdateResult =
 
 /**
  * 編集を始めたときの更新日時 `expectedUpdatedAt`（`toISOString()` の形）が今の更新日時と同じときだけ更新する（楽観的ロック）。
- * 違えば変更せずに conflict と最新のタスクを返す。確認と書き込みは 1 つの UPDATE 文の条件で行うので、
+ * 違えば変更せずに conflict と最新のタスクを返す。`changedBy` は `updateTask` と同じ。確認と書き込みは 1 つの UPDATE 文の条件で行うので、
  * 読んでから書くまでにほかの更新が入っても、それを上書きせずに conflict になる。
  */
 export function updateTaskIfUnchanged(
@@ -140,10 +160,11 @@ export function updateTaskIfUnchanged(
   changes: Partial<TaskInput>,
   expectedUpdatedAt: string,
   db: Db = getDb(),
+  changedBy: string | null = null,
 ): CheckedUpdateResult {
   const current = getTask(id, db);
   if (!current) return { ok: false, reason: "not_found" };
-  if (current.updatedAt === expectedUpdatedAt && writeTask(current, changes, db, expectedUpdatedAt)) {
+  if (current.updatedAt === expectedUpdatedAt && writeTask(current, changes, db, changedBy, expectedUpdatedAt)) {
     return { ok: true, task: getTask(id, db)! };
   }
   const latest = getTask(id, db);
