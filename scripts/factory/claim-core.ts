@@ -201,6 +201,13 @@ export function makeIsStalled(labels: Map<number, string[]>, prIssue: Map<number
  * factory:queued の wait=#N（同じファイルを変える作業を待つもの）は、開いていても、
  * 待ち先が status:needs-human・status:blocked-question で人を待っているなら待たない（無期限に止まらないため。#255）。
  */
+/** 人が決めた依存（blocked by・本文の「#N の後」）のうち、まだ開いているもの。同じファイル待ち（wait=#N）は含めない */
+export function hardDeps(issue: IssueInfo, isOpen: (n: number) => boolean): number[] {
+  const out = new Set<number>([...(issue.blockedBy ?? []), ...bodyDeps(issue.body)].filter((n) => isOpen(n)));
+  out.delete(issue.number);
+  return [...out].sort((a, b) => a - b);
+}
+
 export function blockingDeps(
   issue: IssueInfo,
   isOpen: (n: number) => boolean,
@@ -329,7 +336,9 @@ export function precheck(args: {
     }
   }
   if (args.ownPr) return ownPrGo(args.ownPr);
-  const openDeps = blockingDeps(self, args.isOpen, args.isStalled, makeCurrentFilesOf(args), files, makeIsActive(args));
+  // main の CI を壊している不具合の直しは、人が決めた依存だけを待つ（同じファイル待ちの wait=#N は待たない。#363）
+  const urgent = isUrgentFix(self, args.mainBroken);
+  const openDeps = urgent ? hardDeps(self, args.isOpen) : blockingDeps(self, args.isOpen, args.isStalled, makeCurrentFilesOf(args), files, makeIsActive(args));
   if (openDeps.length > 0) {
     return queue("queue", openDeps[0], files, `依存先 #${openDeps.join("・#")} がまだ開いているので待つ。`);
   }
@@ -337,9 +346,10 @@ export function precheck(args: {
   if (others.length >= WIP_LIMIT) {
     return queue("queue", "slot", files, `空き待ち。作業中が ${others.length} 件（#${others.map((i) => i.number).join("・#")}）で、上限の ${WIP_LIMIT} 件に達している。`);
   }
-  if (isUrgentFix(self, args.mainBroken)) {
+  if (urgent) {
     return {
       decision: "go",
+      ahead: aheadOf(args.queued, self, files),
       note: `\`main\` の CI が壊れていて、この Issue は不具合の直し（\`${LABEL.fix}\`）なので、同じファイルの待ちより先に着手する（#363）。同じファイルを変える PR とは、後からマージされるほうで衝突を解消する。このことを着手のコメントに書く。`,
     };
   }
@@ -367,10 +377,7 @@ export function precheck(args: {
     if (o.length > 0) return queue("queue", i.number, files, `先に待っている #${i.number} が同じファイル（${o.join("、")}）を変える予定なので、追い越さずに待つ。`);
   }
   // 追い越しを記録から数えられるように、先に待ち始めていて同じファイルを予定している Issue を残す（#183）
-  const ahead = args.queued
-    .filter((i) => i.number !== self.number && waitOrder(i, self) < 0 && overlap(files, plannedFiles(i)).length > 0)
-    .map((i) => i.number)
-    .sort((a, b) => a - b);
+  const ahead = aheadOf(args.queued, self, files);
   if (stalledOverlaps.length > 0) {
     return {
       decision: "go",
@@ -379,6 +386,14 @@ export function precheck(args: {
     };
   }
   return { decision: "go", ahead };
+}
+
+/** 先に待ち始めていて、同じファイルを予定している Issue（追い越しを記録から数えるため。#183） */
+function aheadOf(queued: IssueInfo[], self: IssueInfo, files: string[]): number[] {
+  return queued
+    .filter((i) => i.number !== self.number && waitOrder(i, self) < 0 && overlap(files, plannedFiles(i)).length > 0)
+    .map((i) => i.number)
+    .sort((a, b) => a - b);
 }
 
 /** 自分の PR がすでにあれば、引き下がらせずに進めさせる（残った PR が Issue の再開を止めるため。#248） */
@@ -439,7 +454,7 @@ export function pick(args: {
     if (picked.length >= slots) break;
     const files = plannedFiles(i);
     if (urgent(i)) {
-      if (blockingDeps(i, args.isOpen, args.isStalled, currentFilesOf, files, isActive).length > 0) continue;
+      if (hardDeps(i, args.isOpen).length > 0) continue;
       picked.push(i);
       continue;
     }

@@ -509,6 +509,21 @@ describe("main の CI を壊している不具合の直しを先に着手させ�
     assert.deepEqual(r.pick, [362]);
   });
 
+  it("#362 の形: 同じファイル待ち（wait=#355）の記録があり、#355 が開いていても、precheck は go・pick は取り出す", () => {
+    const isOpen = (n: number) => n === 355;
+    const d = precheck({ self: fix, files: ["src/lib/tasks.ts"], inProgress: [], queued: [feat, fix], openPrs: [pr355], isOpen, mainBroken: true });
+    assert.equal(d.decision, "go");
+    assert.deepEqual(d.decision === "go" ? d.ahead : null, [361]); // 先に待っていた #361 を越えたことを記録に残す（#183）
+    assert.deepEqual(pick({ queued: [feat, fix], inProgressCount: 3, isOpen, openPrs: [pr355], mainBroken: true }).pick, [362]);
+  });
+
+  it("急ぎの直しでも、人が決めた依存（blocked by）が開いていれば待つ", () => {
+    const blocked = { ...fix, blockedBy: [300] };
+    const isOpen = (n: number) => n === 300 || n === 355;
+    assert.equal(waitOf(precheck({ self: blocked, files: ["src/lib/tasks.ts"], inProgress: [], queued: [], openPrs: [pr355], isOpen, mainBroken: true })), 300);
+    assert.deepEqual(pick({ queued: [blocked], inProgressCount: 0, isOpen, openPrs: [pr355], mainBroken: true }).pick, []);
+  });
+
   it("pick: main の CI が壊れていなければ、ふだんどおり（同じファイルの PR を待つ）", () => {
     assert.deepEqual(pick({ queued: [feat, fix], inProgressCount: 3, isOpen: () => false, openPrs: [pr355], mainBroken: false }).pick, []);
   });
