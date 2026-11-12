@@ -13,6 +13,7 @@ import {
   sumEstimateMinutes,
   formatJstDateTime,
   formatMemoPreview,
+  memoTooltip,
   formatTaskNumber,
   formatTaskCount,
   TASK_LIST_HELP,
@@ -456,6 +457,16 @@ describe("formatMemoPreview", () => {
   });
   it("改行は空白 1 つに置き換える", () => {
     assert.equal(formatMemoPreview("a\nb\r\nc"), "a b c");
+  });
+});
+
+describe("memoTooltip", () => {
+  it("メモの全文をそのまま返す（長くても省略しない・改行も残す）", () => {
+    const long = "あ".repeat(100) + "\n続き";
+    assert.equal(memoTooltip(long), long);
+  });
+  it("空のメモには付けない", () => {
+    assert.equal(memoTooltip(""), undefined);
   });
 });
 
