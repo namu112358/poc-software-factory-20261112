@@ -7,6 +7,7 @@ import {
   isTaskStatus,
   listTasks,
   parseAssignee,
+  parseDueFilter,
   parseKeyword,
   parseSort,
   parseTagFilter,
@@ -45,6 +46,7 @@ export function parseTaskFilter(query: URLSearchParams, db: Db = getDb()): TaskF
     status: isTaskStatus(status) ? status : undefined,
     assignee: parseAssignee(query.get("assignee") ?? undefined, db),
     tag: parseTagFilter(query.get("tag") ?? undefined),
+    due: parseDueFilter(query.get("due")),
     q: parseKeyword(query.get("q") ?? undefined),
     sort: parseSort(query.get("sort") ?? undefined),
   };
@@ -56,6 +58,7 @@ export function exportHref(filter: TaskFilter): string {
   if (filter.status !== undefined) params.set("status", filter.status);
   if (filter.assignee !== undefined) params.set("assignee", filter.assignee);
   if (filter.tag !== undefined) params.set("tag", filter.tag);
+  if (filter.due !== undefined) params.set("due", filter.due);
   if (filter.q !== undefined) params.set("q", filter.q);
   if (filter.sort !== undefined && filter.sort !== "created") params.set("sort", filter.sort);
   const qs = params.toString();
