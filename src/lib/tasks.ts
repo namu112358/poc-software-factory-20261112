@@ -1,4 +1,4 @@
-import { getDb, type Db } from "./db/index.ts";
+import { getDb, transaction, type Db } from "./db/index.ts";
 
 export type TaskStatus = "todo" | "in_progress" | "done";
 
@@ -310,14 +310,10 @@ export function validateBulkCompleteInput(body: unknown): ValidationResult<numbe
 export function completeTasks(ids: number[], db: Db = getDb()): { ok: true; tasks: Task[] } | { ok: false; missing: number[] } {
   const missing = ids.filter((id) => getTask(id, db) === undefined);
   if (missing.length > 0) return { ok: false, missing };
-  db.exec("BEGIN");
-  try {
-    const update = db.prepare("UPDATE tasks SET status = 'done' WHERE id = ?");
-    for (const id of ids) update.run(id);
-    db.exec("COMMIT");
-  } catch (e) {
-    db.exec("ROLLBACK");
-    throw e;
-  }
+  const now = new Date().toISOString();
+  transaction(db, () => {
+    const update = db.prepare("UPDATE tasks SET status = 'done', updated_at = ? WHERE id = ?");
+    for (const id of ids) update.run(now, id);
+  });
   return { ok: true, tasks: ids.map((id) => getTask(id, db)!) };
 }

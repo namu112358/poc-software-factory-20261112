@@ -458,6 +458,17 @@ describe("completeTasks", () => {
     assert.equal(getTask(1, db)?.status, "done");
   });
 
+  it("updates the last-updated time of the completed tasks", () => {
+    const db = openDb();
+    db.prepare("UPDATE tasks SET created_at = ?, updated_at = ? WHERE id = ?").run("2026-01-01T00:00:00.000Z", "2026-01-01T00:00:00.000Z", 3);
+    const result = completeTasks([3], db);
+    assert.ok(result.ok);
+    const task = getTask(3, db)!;
+    assert.equal(task.createdAt, "2026-01-01T00:00:00.000Z");
+    assert.notEqual(task.updatedAt, "2026-01-01T00:00:00.000Z");
+    assert.match(task.updatedAt, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
+  });
+
   it("changes nothing when an id does not exist", () => {
     const db = openDb();
     const before = getTask(1, db)!.status;
