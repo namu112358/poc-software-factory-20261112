@@ -16,7 +16,7 @@ export function truncateTitle(title: string): string {
 export function listMemberWorkload(db: Db = getDb(), today: string = todayInJapan()): MemberRow[] {
   const users = db.prepare("SELECT id, name FROM users ORDER BY id").all() as { id: string; name: string }[];
   const tasks = db
-    .prepare("SELECT id, title, assignee, due_date AS dueDate FROM tasks WHERE status <> 'done' AND archived = 0 AND assignee IS NOT NULL ORDER BY due_date IS NULL, due_date, id")
+    .prepare("SELECT id, title, assignee, due_date AS dueDate FROM tasks WHERE status <> 'done' AND archived = 0 AND deleted_at IS NULL AND assignee IS NOT NULL ORDER BY due_date IS NULL, due_date, id")
     .all() as { id: number; title: string; assignee: string; dueDate: string | null }[];
   return users.map((u) => {
     const own = tasks.filter((t) => t.assignee === u.id);

@@ -20,6 +20,7 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
             <a href="/members">メンバー</a>
             <a href="/board">ステータス別</a>
             <a href="/extensions">承認待ちの延長</a>
+            <a href="/tasks/deleted">削除したタスク</a>
             <a href="/settings/password">パスワード変更</a>
             <a href="/settings/sessions">ログイン中の端末</a>
             <span data-testid="header-user">{user.name}（{user.id}）</span>

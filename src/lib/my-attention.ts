@@ -20,7 +20,7 @@ export function listMyDueTasks(userId: string, db: Db = getDb(), today: string =
   const rows = db
     .prepare(
       `SELECT id, title, due_date AS dueDate FROM tasks
-       WHERE assignee = ? AND status <> 'done' AND archived = 0 AND due_date <= ?
+       WHERE assignee = ? AND status <> 'done' AND archived = 0 AND deleted_at IS NULL AND due_date <= ?
        ORDER BY due_date, id`,
     )
     .all(userId, limit) as { id: number; title: string; dueDate: string }[];

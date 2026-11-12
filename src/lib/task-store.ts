@@ -1,12 +1,12 @@
 import { getDb, savepoint, transaction, type Db } from "./db/index.ts";
-import { addDays, todayInJapan } from "./task-dates.ts";
+import { addDays, RESTORE_DAYS, todayInJapan } from "./task-dates.ts";
 import type { Assignee, Task, TaskFilter, TaskInput, TaskPriority, TaskStatus } from "./task-types.ts";
 
 /** タスクに登場する担当者（重複なし）。 */
 export function listAssignees(db: Db = getDb()): Assignee[] {
   return db
     .prepare(
-      "SELECT DISTINCT u.id AS id, u.name AS name FROM tasks t JOIN users u ON u.id = t.assignee ORDER BY u.id",
+      "SELECT DISTINCT u.id AS id, u.name AS name FROM tasks t JOIN users u ON u.id = t.assignee WHERE t.deleted_at IS NULL ORDER BY u.id",
     )
     .all() as Assignee[];
 }
@@ -53,7 +53,7 @@ export function listTasks(filter: TaskFilter = {}, db: Db = getDb()): Task[] {
   const today = filter.today ?? todayInJapan();
   const rows = db
     .prepare(
-      "SELECT id, title, status, assignee, due_date, priority, estimate_minutes, created_at, updated_at, completed_at, memo, archived FROM tasks WHERE (:includeArchived = 1 OR archived = 0) AND (:status IS NULL OR status = :status) AND (:assignee IS NULL OR (:assignee = 'none' AND assignee IS NULL) OR (:assignee <> 'none' AND assignee = :assignee)) AND (:tag IS NULL OR EXISTS (SELECT 1 FROM task_tags g WHERE g.task_id = tasks.id AND g.name = :tag)) AND (:due IS NULL OR (:due = 'none' AND (due_date IS NULL OR due_date = '')) OR (:due = 'overdue' AND due_date IS NOT NULL AND due_date <> '' AND due_date < :today) OR (:due = 'today' AND due_date IS NOT NULL AND due_date <> '' AND due_date <= :today) OR (:due = 'week' AND due_date IS NOT NULL AND due_date <> '' AND due_date <= :weekEnd)) AND (:q IS NULL OR title LIKE :q ESCAPE '\\' OR memo LIKE :q ESCAPE '\\' OR (:qInComments = 1 AND EXISTS (SELECT 1 FROM comments c WHERE c.task_id = tasks.id AND c.body LIKE :q ESCAPE '\\'))) " + orderBy,
+      "SELECT id, title, status, assignee, due_date, priority, estimate_minutes, created_at, updated_at, completed_at, memo, archived FROM tasks WHERE deleted_at IS NULL AND (:includeArchived = 1 OR archived = 0) AND (:status IS NULL OR status = :status) AND (:assignee IS NULL OR (:assignee = 'none' AND assignee IS NULL) OR (:assignee <> 'none' AND assignee = :assignee)) AND (:tag IS NULL OR EXISTS (SELECT 1 FROM task_tags g WHERE g.task_id = tasks.id AND g.name = :tag)) AND (:due IS NULL OR (:due = 'none' AND (due_date IS NULL OR due_date = '')) OR (:due = 'overdue' AND due_date IS NOT NULL AND due_date <> '' AND due_date < :today) OR (:due = 'today' AND due_date IS NOT NULL AND due_date <> '' AND due_date <= :today) OR (:due = 'week' AND due_date IS NOT NULL AND due_date <> '' AND due_date <= :weekEnd)) AND (:q IS NULL OR title LIKE :q ESCAPE '\\' OR memo LIKE :q ESCAPE '\\' OR (:qInComments = 1 AND EXISTS (SELECT 1 FROM comments c WHERE c.task_id = tasks.id AND c.body LIKE :q ESCAPE '\\'))) " + orderBy,
     )
     .all({ status: filter.status ?? null, assignee: filter.assignee ?? null, tag: filter.tag ?? null, q: filter.q === undefined ? null : likePattern(filter.q), qInComments: filter.qInComments ? 1 : 0, includeArchived: filter.includeArchived ? 1 : 0, due: filter.due ?? null, today, weekEnd: addDays(today, 7) }) as TaskRow[];
   return rows.map(toTask);
@@ -65,7 +65,7 @@ function likePattern(keyword: string): string {
 }
 
 export function getTask(id: number, db: Db = getDb()): Task | undefined {
-  const row = db.prepare("SELECT id, title, status, assignee, due_date, priority, estimate_minutes, created_at, updated_at, completed_at, memo, archived FROM tasks WHERE id = ?").get(id) as
+  const row = db.prepare("SELECT id, title, status, assignee, due_date, priority, estimate_minutes, created_at, updated_at, completed_at, memo, archived FROM tasks WHERE id = ? AND deleted_at IS NULL").get(id) as
     | TaskRow
     | undefined;
   return row && toTask(row);
@@ -97,7 +97,7 @@ export function nextUpdatedAt(previous: string, now: Date = new Date()): string 
   return new Date(prev + 1).toISOString();
 }
 
-const UPDATE_TASK_SQL = `UPDATE tasks SET title = :title, status = :status, assignee = :assignee, due_date = :dueDate, priority = :priority, estimate_minutes = :estimateMinutes, memo = :memo, archived = :archived, updated_at = :now, ${COMPLETED_AT_SQL} WHERE id = :id`;
+const UPDATE_TASK_SQL = `UPDATE tasks SET title = :title, status = :status, assignee = :assignee, due_date = :dueDate, priority = :priority, estimate_minutes = :estimateMinutes, memo = :memo, archived = :archived, updated_at = :now, ${COMPLETED_AT_SQL} WHERE id = :id AND deleted_at IS NULL`;
 
 /**
  * 今のタスクに変更を重ねて書き込む。`onlyIfUpdatedAt` を渡すと、更新日時がその値のときだけ書き込む。書き込んだら true。
@@ -211,7 +211,7 @@ export function completeTasks(ids: readonly number[], db: Db = getDb(), now: Dat
     const found = ids.map((id) => getTask(id, db));
     const missingIds = ids.filter((_, i) => found[i] === undefined);
     if (missingIds.length > 0) return { ok: false, missingIds };
-    const update = db.prepare("UPDATE tasks SET status = 'done', updated_at = ?, completed_at = ? WHERE id = ? AND status <> 'done'");
+    const update = db.prepare("UPDATE tasks SET status = 'done', updated_at = ?, completed_at = ? WHERE id = ? AND status <> 'done' AND deleted_at IS NULL");
     for (const task of found as Task[]) {
       if (task.status === "done") continue;
       const updatedAt = nextUpdatedAt(task.updatedAt, now);
@@ -223,15 +223,87 @@ export function completeTasks(ids: readonly number[], db: Db = getDb(), now: Dat
 
 export type DeleteTaskResult = "deleted" | "not_found" | "forbidden";
 
+const MS_PER_DAY = 24 * 60 * 60 * 1000;
+
+/** `now` の時点で元に戻せる削除済みのタスクの、削除した日時の下限（これより後に削除したものだけ戻せる）。ISO 8601（UTC）。 */
+export function restoreCutoff(now: Date): string {
+  return new Date(now.getTime() - RESTORE_DAYS * MS_PER_DAY).toISOString();
+}
+
+/** 削除したタスクを元に戻せる最後の時刻（削除した日時から RESTORE_DAYS 日後。この時刻になると戻せない）。ISO 8601（UTC）。 */
+export function restoreDeadline(deletedAt: string): string {
+  return new Date(Date.parse(deletedAt) + RESTORE_DAYS * MS_PER_DAY).toISOString();
+}
+
 /**
- * タスクを消す（物理削除）。消せるのはタスクの担当者だけ。担当者のいないタスク（担当者が空）は、だれも消せない。
- * 完了済み・アーカイブ済みでも、担当者なら消せる。コメント・タグ・延長の申請は、外部キー（ON DELETE CASCADE）で一緒に消える。
- * 担当者の確認と削除は 1 つの DELETE 文の条件で行うので、確認の後に担当者が変わっても、担当者でない人は消せない。
+ * タスクを消す。行は残し、削除した日時と削除した人を記録して、一覧・API・集計から見えなくする（RESTORE_DAYS 日のあいだは `restoreTask` で戻せる）。
+ * 消せるのはタスクの担当者だけ。担当者のいないタスク（担当者が空）は、だれも消せない。完了済み・アーカイブ済みでも、担当者なら消せる。
+ * コメント・タグ・延長の申請・担当者の履歴は消さずに残す。削除済みのタスクをもう一度消そうとすると not_found。
+ * 担当者の確認と記録は 1 つの UPDATE 文の条件で行うので、確認の後に担当者が変わっても、担当者でない人は消せない。
  */
-export function deleteTask(id: number, userId: string, db: Db = getDb()): DeleteTaskResult {
+export function deleteTask(id: number, userId: string, db: Db = getDb(), now: Date = new Date()): DeleteTaskResult {
   return transaction(db, () => {
-    const { changes } = db.prepare("DELETE FROM tasks WHERE id = ? AND assignee = ? AND assignee <> ''").run(id, userId);
+    const { changes } = db
+      .prepare("UPDATE tasks SET deleted_at = ?, deleted_by = ? WHERE id = ? AND deleted_at IS NULL AND assignee = ? AND assignee <> ''")
+      .run(now.toISOString(), userId, id, userId);
     if (Number(changes) > 0) return "deleted";
     return getTask(id, db) ? "forbidden" : "not_found";
+  });
+}
+
+export type DeletedTask = {
+  id: number;
+  title: string;
+  assignee: string; // 担当者の ID（元に戻せるのはこの人だけ）
+  assigneeName: string; // 担当者の表示名（見つからなければ ID、空なら「—」）
+  deletedBy: string; // 削除した人の ID
+  deletedByName: string; // 削除した人の表示名（見つからなければ ID）
+  deletedAt: string; // ISO 8601（UTC）
+  restoreDeadline: string; // 元に戻せる最後の時刻。ISO 8601（UTC）
+};
+
+/** `now` の時点で元に戻せる（削除してから RESTORE_DAYS 日たっていない）削除済みのタスク。削除した日時の新しい順（同じなら ID の大きい順）。 */
+export function listDeletedTasks(db: Db = getDb(), now: Date = new Date()): DeletedTask[] {
+  const rows = db
+    .prepare(
+      `SELECT t.id AS id, t.title AS title, t.assignee AS assignee, a.name AS assigneeName,
+              t.deleted_by AS deletedBy, d.name AS deletedByName, t.deleted_at AS deletedAt
+         FROM tasks t
+         LEFT JOIN users a ON a.id = t.assignee
+         LEFT JOIN users d ON d.id = t.deleted_by
+        WHERE t.deleted_at IS NOT NULL AND t.deleted_at > ?
+        ORDER BY t.deleted_at DESC, t.id DESC`,
+    )
+    .all(restoreCutoff(now)) as { id: number; title: string; assignee: string; assigneeName: string | null; deletedBy: string | null; deletedByName: string | null; deletedAt: string }[];
+  return rows.map((r) => ({
+    id: r.id,
+    title: r.title,
+    assignee: r.assignee,
+    assigneeName: r.assigneeName ?? (r.assignee === "" ? "—" : r.assignee),
+    deletedBy: r.deletedBy ?? "",
+    deletedByName: r.deletedByName ?? r.deletedBy ?? "—",
+    deletedAt: r.deletedAt,
+    restoreDeadline: restoreDeadline(r.deletedAt),
+  }));
+}
+
+export type RestoreTaskResult = "restored" | "not_found" | "forbidden";
+
+/**
+ * 削除したタスクを元に戻す。戻せるのは、削除してから RESTORE_DAYS 日たっていないタスクの担当者だけ（担当者が空ならだれも戻せない）。
+ * 削除していないタスク・期間を過ぎたタスク・存在しないタスクは not_found。戻したタスクは、更新日時などを含めて削除する前のまま。
+ * 期間と担当者の確認と書き込みは 1 つの UPDATE 文の条件で行う。
+ */
+export function restoreTask(id: number, userId: string, db: Db = getDb(), now: Date = new Date()): RestoreTaskResult {
+  return transaction(db, () => {
+    const cutoff = restoreCutoff(now);
+    const { changes } = db
+      .prepare(
+        "UPDATE tasks SET deleted_at = NULL, deleted_by = NULL WHERE id = ? AND deleted_at IS NOT NULL AND deleted_at > ? AND assignee = ? AND assignee <> ''",
+      )
+      .run(id, cutoff, userId);
+    if (Number(changes) > 0) return "restored";
+    const restorable = db.prepare("SELECT 1 FROM tasks WHERE id = ? AND deleted_at IS NOT NULL AND deleted_at > ?").get(id, cutoff);
+    return restorable ? "forbidden" : "not_found";
   });
 }

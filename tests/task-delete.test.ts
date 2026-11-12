@@ -36,16 +36,24 @@ describe("deleteTask", () => {
     assert.deepEqual(attachedCounts(3, db), { comments: 1, tags: 1, extensions: 1 });
   });
 
-  it("コメント・タグ・延長の申請も一緒に消え、ほかのタスクのものは残る", () => {
+  it("コメント・タグ・延長の申請は消さずに残し（元に戻すため）、ほかのタスクのものも変わらない", () => {
     const db = openDb();
     attachAll(3, db);
     attachAll(4, db);
     assert.equal(deleteTask(3, "sato", db), "deleted");
     for (const table of ["comments", "task_tags", "due_date_extensions"]) {
       const row = db.prepare(`SELECT COUNT(*) AS n FROM ${table} WHERE task_id = ?`).get(3) as { n: number };
-      assert.equal(row.n, 0, table);
+      assert.equal(row.n, 1, table);
     }
     assert.deepEqual(attachedCounts(4, db), { comments: 1, tags: 1, extensions: 1 });
+  });
+
+  it("消すと、削除した日時と削除した人を記録する", () => {
+    const db = openDb();
+    const now = new Date("2026-11-12T03:00:00.000Z");
+    assert.equal(deleteTask(3, "sato", db, now), "deleted");
+    const row = db.prepare("SELECT deleted_at, deleted_by FROM tasks WHERE id = 3").get() as { deleted_at: string; deleted_by: string };
+    assert.deepEqual({ ...row }, { deleted_at: "2026-11-12T03:00:00.000Z", deleted_by: "sato" });
   });
 
   it("存在しないタスク・消したばかりのタスクは not_found", () => {
@@ -100,6 +108,7 @@ describe("confirmAndDeleteTask（詳細画面の削除ボタン）", () => {
     assert.equal(calls.length, 0);
     assert.equal(messages.length, 1);
     assert.match(messages[0], /API 設計/);
+    assert.match(messages[0], /30 日/);
   });
 
   it("OK すると DELETE /api/tasks/:id を 1 回送り、成功なら deleted", async () => {

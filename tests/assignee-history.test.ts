@@ -2,7 +2,7 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { openDb, type Db } from "../src/lib/db/index.ts";
 import { formatAssigneeChange, listAssigneeChanges, type AssigneeChange } from "../src/lib/assignee-history.ts";
-import { deleteTask, getTask, updateTask, updateTaskIfUnchanged, validateTaskInput } from "../src/lib/tasks.ts";
+import { deleteTask, getTask, restoreTask, updateTask, updateTaskIfUnchanged, validateTaskInput } from "../src/lib/tasks.ts";
 
 // 担当者の変更の履歴（#99）。初期データのタスク 1 の担当者は sato（佐藤）。
 
@@ -182,12 +182,15 @@ describe("履歴の並び・表示・削除", () => {
     assert.equal(formatAssigneeChange(c), "2026/11/12 18:05 （不明） が （なし） → retired に変更");
   });
 
-  it("タスクを消すと履歴も消える", () => {
+  it("タスクを消しても履歴は残り、元に戻すと同じ履歴が見える（ほかのタスクの履歴は変わらない）", () => {
     const db = openDb();
     updateTask(1, { assignee: "tanaka" }, db, "sato");
     updateTask(3, { assignee: "suzuki" }, db, "sato");
+    const before = listAssigneeChanges(1, db);
+    assert.equal(before.length, 1);
     assert.equal(deleteTask(1, "tanaka", db), "deleted");
-    assert.deepEqual(listAssigneeChanges(1, db), []);
+    assert.equal(restoreTask(1, "tanaka", db), "restored");
+    assert.deepEqual(listAssigneeChanges(1, db), before);
     assert.equal(listAssigneeChanges(3, db).length, 1);
   });
 });

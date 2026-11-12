@@ -50,3 +50,6 @@ export function isDueSoon(task: Pick<Task, "status" | "dueDate">, today: string 
 export function countOverdue(tasks: Pick<Task, "status" | "dueDate">[], today: string = todayInJapan()): number {
   return tasks.filter((t) => isOverdue(t, today)).length;
 }
+
+/** 削除したタスクを元に戻せる日数。削除した時刻から、この日数ちょうどが過ぎると戻せなくなる。 */
+export const RESTORE_DAYS = 30;

@@ -201,4 +201,16 @@ export const MIGRATIONS: readonly Migration[] = [
       ALTER TABLE sessions ADD COLUMN failed_logins_before INTEGER NOT NULL DEFAULT 0;
     `,
   },
+  {
+    version: 18,
+    name: "task_soft_delete",
+    sql: `
+      -- タスクを削除した日時。ISO 8601（UTC）。削除していなければ NULL（既存のタスクは NULL から始まる）。
+      -- 削除したタスクは行を残したまま見えなくし、一定の期間のうちは元に戻せる。
+      ALTER TABLE tasks ADD COLUMN deleted_at TEXT;
+      -- タスクを削除した人。削除していなければ NULL。
+      ALTER TABLE tasks ADD COLUMN deleted_by TEXT REFERENCES users(id);
+      CREATE INDEX tasks_deleted_at ON tasks(deleted_at);
+    `,
+  },
 ];
