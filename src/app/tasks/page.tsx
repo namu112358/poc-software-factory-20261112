@@ -1,5 +1,8 @@
 import { Fragment } from "react";
+import { bulkSelectionKey } from "@/lib/bulk-select";
 import { listCommentersByTask } from "@/lib/comments";
+import { listUserOptions } from "@/lib/users";
+import { BulkBar, BulkCheckbox, BulkSelection } from "./BulkActions";
 import { exportHref } from "@/lib/export";
 import { parseIncludeArchived } from "@/lib/task-query";
 import { requireUser } from "@/lib/session";
@@ -27,6 +30,8 @@ export default async function TasksPage({ searchParams }: Props) {
   const overdueText = formatOverdueCount(countOverdue(tasks, today));
   const tagsByTask = listTagsByTask(tasks.map((t) => t.id));
   const commentersByTask = listCommentersByTask(tasks.map((t) => t.id));
+  const users = listUserOptions();
+  const selectionKey = bulkSelectionKey({ status, assignee, tag, q, sort, includeArchived });
 
   return (
     <main>
@@ -98,9 +103,12 @@ export default async function TasksPage({ searchParams }: Props) {
           <strong data-testid="overdue-count">{overdueText}</strong>
         </p>
       )}
+      <BulkSelection key={selectionKey} visibleIds={tasks.map((t) => t.id)}>
+      <BulkBar users={users} />
       <table>
         <thead>
           <tr>
+            <th>選択</th>
             <th>タイトル</th>
             <th>ステータス</th>
             <th>担当者</th>
@@ -120,6 +128,9 @@ export default async function TasksPage({ searchParams }: Props) {
               {...taskRowDoneAttr(task.status)}
               style={task.status === "done" ? { color: "#8a8a8a" } : undefined}
             >
+              <td>
+                <BulkCheckbox id={task.id} title={task.title} />
+              </td>
               <td>
                 <a href={`/tasks/${task.id}`} title={memoTooltip(task.memo)} style={task.status === "done" ? { color: "inherit" } : undefined}>
                   {task.title}
@@ -171,6 +182,7 @@ export default async function TasksPage({ searchParams }: Props) {
           ))}
         </tbody>
       </table>
+      </BulkSelection>
       <p data-testid="estimate-total">見積もりの合計: {formatEstimateTotal(sumEstimateMinutes(tasks))}
         {unestimatedText !== null && (
           <>
