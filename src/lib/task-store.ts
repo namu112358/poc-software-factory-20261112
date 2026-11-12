@@ -203,15 +203,20 @@ export type BulkCompleteResult = { ok: true; tasks: Task[] } | { ok: false; miss
 /**
  * 指定したタスクをまとめて完了（done）にする。全部か無しか: 存在しない ID が 1 つでもあれば、何も変えない。
  * すでに完了のタスクは変えない（最終更新日時・完了日時もそのまま）。完了にしたタスクには完了日時を記録する。結果は ids の順に並べる。
+ * 完了にしたタスクの更新日時は、1 件ずつの更新と同じく、そのタスクの前回の更新日時より必ず後にする（`nextUpdatedAt`。`now` は今の時刻）。
+ * 完了日時も同じ値にする。
  */
-export function completeTasks(ids: readonly number[], db: Db = getDb()): BulkCompleteResult {
+export function completeTasks(ids: readonly number[], db: Db = getDb(), now: Date = new Date()): BulkCompleteResult {
   return transaction(db, () => {
     const found = ids.map((id) => getTask(id, db));
     const missingIds = ids.filter((_, i) => found[i] === undefined);
     if (missingIds.length > 0) return { ok: false, missingIds };
-    const now = new Date().toISOString();
     const update = db.prepare("UPDATE tasks SET status = 'done', updated_at = ?, completed_at = ? WHERE id = ? AND status <> 'done'");
-    for (const id of ids) update.run(now, now, id);
+    for (const task of found as Task[]) {
+      if (task.status === "done") continue;
+      const updatedAt = nextUpdatedAt(task.updatedAt, now);
+      update.run(updatedAt, updatedAt, task.id);
+    }
     return { ok: true, tasks: ids.map((id) => getTask(id, db)!) };
   });
 }
