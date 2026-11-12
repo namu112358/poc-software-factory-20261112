@@ -68,19 +68,29 @@ export type BulkUpdateResult = { ok: true; tasks: Task[] } | { ok: false; missin
  * 指定したタスクに同じ変更をまとめて入れる。全部か無しか: 存在しない ID が 1 つでもあれば何も変えず、
  * 途中で失敗したらすべて戻す。値が変わらないタスクは、最終更新日時も変えない。完了日時はステータスの変化に合わせて決まる
  * （完了にしたら記録し、すでに完了なら変えず、完了以外にしたら null）。結果は ids の順に並べる。
+ * 担当者が変わったタスクには、担当者の変更の履歴を同じトランザクションの中で 1 件ずつ足す（`changedBy` は変更した利用者の ID）。
  */
-export function updateTasks(ids: readonly number[], changes: BulkUpdateChanges, db: Db = getDb()): BulkUpdateResult {
+export function updateTasks(
+  ids: readonly number[],
+  changes: BulkUpdateChanges,
+  db: Db = getDb(),
+  changedBy: string | null = null,
+): BulkUpdateResult {
   return transaction(db, () => {
     const found = ids.map((id) => getTask(id, db));
     const missingIds = ids.filter((_, i) => found[i] === undefined);
     if (missingIds.length > 0) return { ok: false, missingIds };
     const now = new Date().toISOString();
     const update = db.prepare(`UPDATE tasks SET status = :status, assignee = :assignee, updated_at = :now, ${COMPLETED_AT_SQL} WHERE id = :id`);
+    const recordAssigneeChange = db.prepare(
+      "INSERT INTO task_assignee_changes (task_id, from_assignee, to_assignee, changed_by, changed_at) VALUES (?, ?, ?, ?, ?)",
+    );
     for (const task of found as Task[]) {
       const status = changes.status ?? task.status;
       const assignee = changes.assignee ?? task.assignee;
       if (status === task.status && assignee === task.assignee) continue;
       update.run({ status, assignee, now, id: task.id });
+      if (assignee !== task.assignee) recordAssigneeChange.run(task.id, task.assignee, assignee, changedBy, now);
     }
     return { ok: true, tasks: ids.map((id) => getTask(id, db)!) };
   });
