@@ -1,7 +1,7 @@
 import { Fragment } from "react";
 import { requireUser } from "@/lib/session";
 import { listTagsByTask } from "@/lib/tags";
-import { PRIORITY_LABELS, STATUS_LABELS, TASK_STATUSES, formatTaskCount, isTaskStatus, listAssignees, listTasks, parseAssignee, parseTagFilter } from "@/lib/tasks";
+import { PRIORITY_LABELS, STATUS_LABELS, TASK_STATUSES, formatEstimate, formatTaskCount, isTaskStatus, listAssignees, listTasks, parseAssignee, parseTagFilter } from "@/lib/tasks";
 
 type Props = {
   searchParams: Promise<{ status?: string; assignee?: string; tag?: string }>;
@@ -60,6 +60,7 @@ export default async function TasksPage({ searchParams }: Props) {
             <th>担当者</th>
             <th>優先度</th>
             <th>期限</th>
+            <th>見積もり</th>
             <th>タグ</th>
           </tr>
         </thead>
@@ -73,6 +74,7 @@ export default async function TasksPage({ searchParams }: Props) {
               <td>{task.assignee}</td>
               <td data-testid="task-priority">{PRIORITY_LABELS[task.priority]}</td>
               <td>{task.dueDate}</td>
+              <td data-testid="task-estimate">{formatEstimate(task.estimateMinutes)}</td>
               <td>
                 {(tagsByTask.get(task.id) ?? []).map((name, i) => (
                   <Fragment key={name}>
