@@ -12,6 +12,7 @@ import {
   formatMemoPreview,
   formatTaskNumber,
   formatTaskCount,
+  TASK_LIST_HELP,
   getTask,
   isTaskStatus,
   listAssignees,
@@ -451,5 +452,11 @@ describe("formatMemoPreview", () => {
   });
   it("改行は空白 1 つに置き換える", () => {
     assert.equal(formatMemoPreview("a\nb\r\nc"), "a b c");
+  });
+});
+
+describe("TASK_LIST_HELP", () => {
+  it("使い方の説明が指定の文言である", () => {
+    assert.equal(TASK_LIST_HELP, "ステータス・担当者・タグで絞り込み、優先度の高い順に並べ替えられます。");
   });
 });

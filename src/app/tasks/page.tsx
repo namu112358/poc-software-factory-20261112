@@ -2,7 +2,7 @@ import { Fragment } from "react";
 import { listCommentersByTask } from "@/lib/comments";
 import { requireUser } from "@/lib/session";
 import { listTagsByTask } from "@/lib/tags";
-import { PRIORITY_LABELS, STATUS_LABELS, SORT_LABELS, TASK_SORTS, TASK_STATUSES, formatEstimate, formatMemoPreview, formatTaskCount, isOverdue, isTaskStatus, listAssignees, listTasks, parseAssignee, parseSort, parseTagFilter, todayInJapan } from "@/lib/tasks";
+import { PRIORITY_LABELS, STATUS_LABELS, SORT_LABELS, TASK_LIST_HELP, TASK_SORTS, TASK_STATUSES, formatEstimate, formatMemoPreview, formatTaskCount, isOverdue, isTaskStatus, listAssignees, listTasks, parseAssignee, parseSort, parseTagFilter, todayInJapan } from "@/lib/tasks";
 
 type Props = {
   searchParams: Promise<{ status?: string; assignee?: string; tag?: string; sort?: string }>;
@@ -24,6 +24,7 @@ export default async function TasksPage({ searchParams }: Props) {
   return (
     <main>
       <h1>タスク一覧</h1>
+      <p data-testid="list-help">{TASK_LIST_HELP}</p>
       {tag !== undefined && (
         <p>
           <span data-testid="tag-filter">タグ「{tag}」のタスク</span> <a href="/tasks">すべてのタスク</a>
