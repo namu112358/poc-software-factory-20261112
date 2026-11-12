@@ -18,6 +18,7 @@
 | draft の PR が `main` と衝突している | PR を Ready にしてから draft に戻す |
 | Ready の PR が `main` と衝突している | 衝突していることをコメントし、draft に戻す |
 | 閉じた Issue に `status:in-progress` が残っている | `status:in-progress` を外す |
+| `merge:requested` の付いた PR が、Mergify の時間切れでキューから外れた（PR に Mergify の `dequeued` ラベルがあり、Mergify の状況のコメント（同じコメントが書き換わる）の `dequeue_reason` の `code` が `CHECKS_TIMEOUT`）。その後、最新のコミットの CI（`app-check`）が成功し、`node scripts/factory/claim.ts merge-check <PR>` が `ok`。外れてから 5 分以上（#328） | 時間切れで外れたこと、その後 CI が成功し `merge-check` が ok であることをコメントし、`status:needs-human` を付ける（人が `merge:requested` を外して付け直すと、キューに入り直す）。役は `merge:requested` を付けない。Mergify へのコマンド（`@mergifyio ...`）は、書き込むときに文字の間に区切りが入れられて届かないので使わない |
 
 ## 2. 待っている Issue に着手させる
 
