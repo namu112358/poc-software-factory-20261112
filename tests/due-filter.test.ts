@@ -65,9 +65,10 @@ describe("due query", () => {
     assert.equal(filter.due, undefined);
     assert.equal(listTasks({ ...filter, today: TODAY }, db).length, 4);
   });
-  it("the API list (GET /api/tasks) does not filter by due (out of scope for #348)", () => {
+  it("the API list (GET /api/tasks) filters by due like the list page (#425)", () => {
     const { db } = setup();
-    assert.equal(listTasksByQuery(new URLSearchParams("due=overdue"), db).length, 4);
+    const now = new Date("2026-11-12T03:00:00Z");
+    assert.deepEqual(listTasksByQuery(new URLSearchParams("due=overdue"), db, now).map((t) => t.title), ["past"]);
   });
   it("CSV export link and parser carry due", () => {
     assert.equal(exportHref({ due: "week" }), "/api/tasks/export?due=week");
