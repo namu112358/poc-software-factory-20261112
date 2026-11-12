@@ -97,6 +97,7 @@ async function loadIssue(n: number, raw?: RawIssue): Promise<IssueInfo> {
     body: issue.body ?? "",
     comments: comments.map((c): Comment => ({ body: c.body ?? "", createdAt: c.created_at, author: c.user?.login })),
     blockedBy: blocked.map((b) => b.number),
+    labels: (issue.labels ?? []).map((l) => normalizeLabel(l.name)),
   };
 }
 
