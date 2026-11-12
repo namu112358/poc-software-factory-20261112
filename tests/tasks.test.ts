@@ -6,6 +6,7 @@ import { MIGRATIONS } from "../src/lib/db/migrations.ts";
 import {
   createTask,
   isOverdue,
+  taskRowDoneAttr,
   todayInJapan,
   formatEstimate,
   formatEstimateTotal,
@@ -482,5 +483,13 @@ describe("見積もり時間の合計", () => {
     const todo = sumEstimateMinutes(listTasks({ status: "todo" }, db));
     assert.ok(todo <= all);
     assert.equal(todo, listTasks({ status: "todo" }, db).reduce((s, t) => s + (t.estimateMinutes ?? 0), 0));
+  });
+});
+
+describe("taskRowDoneAttr", () => {
+  it("完了したタスクだけ data-done を付ける", () => {
+    assert.deepEqual(taskRowDoneAttr("done"), { "data-done": "true" });
+    assert.deepEqual(taskRowDoneAttr("todo"), {});
+    assert.deepEqual(taskRowDoneAttr("in_progress"), {});
   });
 });
