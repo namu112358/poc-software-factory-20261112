@@ -11,6 +11,9 @@ import { DeleteTaskButton } from "./delete";
 import { DuplicateButton } from "./duplicate";
 import { EditTaskForm } from "./edit-form";
 import { CommentForm, DeleteCommentButton, EditCommentForm } from "./comments";
+import { listExtensions } from "@/lib/extensions";
+import { canRequestExtension, extensionResultLabel, findPendingExtension, pendingExtensionLabel, recentExtensionResults } from "@/lib/task-extension-panel";
+import { ExtensionRequestForm } from "./extension-form";
 import { RemoveTagButton, TagForm } from "./tags";
 
 type Props = {
@@ -27,6 +30,9 @@ export default async function TaskDetailPage({ params }: Props) {
   const tags = listTags(task.id);
   const tagSuggestions = listTagSuggestions(task.id);
   const assigneeChanges = listAssigneeChanges(task.id);
+  const extensions = listExtensions(task.id);
+  const pendingExtension = findPendingExtension(extensions);
+  const extensionResults = recentExtensionResults(extensions);
 
   return (
     <main>
@@ -96,6 +102,25 @@ export default async function TaskDetailPage({ params }: Props) {
           <p data-testid="memo" style={{ whiteSpace: "pre-wrap" }}>
             {task.memo}
           </p>
+        )}
+      </section>
+      <section>
+        <h2>期限の延長</h2>
+        {pendingExtension ? (
+          <p data-testid="extension-pending">{pendingExtensionLabel(pendingExtension.newDueDate)}</p>
+        ) : (
+          canRequestExtension(task.assignee, user.id, extensions) && (
+            <ExtensionRequestForm taskId={task.id} currentDueDate={task.dueDate} />
+          )
+        )}
+        {extensionResults.length > 0 && (
+          <ul>
+            {extensionResults.map((e) => (
+              <li key={e.id} data-testid="extension-result">
+                {extensionResultLabel(e)}
+              </li>
+            ))}
+          </ul>
         )}
       </section>
       <section>
