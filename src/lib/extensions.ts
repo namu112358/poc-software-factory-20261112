@@ -129,7 +129,11 @@ export function decideExtension(
       extensionId,
     );
     if (decision === "approved") {
-      db.prepare("UPDATE tasks SET due_date = ? WHERE id = ?").run(current.newDueDate, taskId);
+      db.prepare("UPDATE tasks SET due_date = ?, updated_at = ? WHERE id = ?").run(
+        current.newDueDate,
+        now.toISOString(),
+        taskId,
+      );
     }
     db.exec("COMMIT");
   } catch (e) {
