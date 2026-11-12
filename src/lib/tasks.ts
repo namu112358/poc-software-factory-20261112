@@ -137,6 +137,11 @@ export function formatTaskCount(count: number): string {
   return `${count} 件`;
 }
 
+/** 一覧の見出しの下に出す、ログイン中のユーザーの表示。ログイン ID ではなく表示名を使う。 */
+export function formatCurrentUser(name: string): string {
+  return `ログイン中: ${name}`;
+}
+
 export function getTask(id: number, db: Db = getDb()): Task | undefined {
   const row = db.prepare("SELECT id, title, status, assignee, due_date, priority, estimate_minutes, created_at, updated_at, memo FROM tasks WHERE id = ?").get(id) as
     | TaskRow
@@ -270,9 +275,24 @@ export function isOverdue(task: Pick<Task, "status" | "dueDate">, today: string 
   return task.status !== "done" && task.dueDate < today;
 }
 
+/** 表示中のタスクのうち、期限切れ（`isOverdue`）の数。 */
+export function countOverdue(tasks: Pick<Task, "status" | "dueDate">[], today: string = todayInJapan()): number {
+  return tasks.filter((t) => isOverdue(t, today)).length;
+}
+
+/** 期限切れの件数の表示。0 件のときは null（表示しない）。 */
+export function formatOverdueCount(count: number): string | null {
+  return count > 0 ? `期限切れ ${count} 件` : null;
+}
+
 /** 一覧の行に付ける属性。完了したタスクだけ `data-done="true"` を付ける。 */
 export function taskRowDoneAttr(status: TaskStatus): { "data-done"?: "true" } {
   return status === "done" ? { "data-done": "true" } : {};
+}
+
+/** 優先度の欄の文字の太さ。「高」だけ太字にする。 */
+export function priorityFontWeight(priority: TaskPriority): "bold" | undefined {
+  return priority === "high" ? "bold" : undefined;
 }
 
 /** 見積もり時間の表示用の文字列。未設定は「—」。 */
@@ -306,12 +326,24 @@ export function formatMemoPreview(memo: string): string | null {
   return chars.slice(0, MEMO_PREVIEW_LENGTH).join("") + "…";
 }
 
+/** 一覧のタイトルのリンクに `title` 属性として付けるメモの全文。空のメモは undefined（属性を付けない）。 */
+export function memoTooltip(memo: string): string | undefined {
+  return memo === "" ? undefined : memo;
+}
+
 /** ISO 8601（UTC）の日時を、日本時間の「YYYY/MM/DD HH:mm」にする。解釈できなければ「—」。 */
 export function formatJstDateTime(iso: string): string {
   const t = Date.parse(iso);
   if (Number.isNaN(t)) return "—";
   const jst = new Date(t + 9 * 60 * 60 * 1000).toISOString();
   return `${jst.slice(0, 10).replaceAll("-", "/")} ${jst.slice(11, 16)}`;
+}
+
+/** ISO 8601（UTC）の日時を、日本時間の日付「YYYY-MM-DD」にする。解釈できなければ「—」。 */
+export function formatJstDate(iso: string): string {
+  const t = Date.parse(iso);
+  if (Number.isNaN(t)) return "—";
+  return new Date(t + 9 * 60 * 60 * 1000).toISOString().slice(0, 10);
 }
 
 /**

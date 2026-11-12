@@ -7,12 +7,14 @@ import {
   createTask,
   isOverdue,
   taskRowDoneAttr,
+  priorityFontWeight,
   todayInJapan,
   formatEstimate,
   formatEstimateTotal,
   sumEstimateMinutes,
   formatJstDateTime,
   formatMemoPreview,
+  memoTooltip,
   formatTaskNumber,
   formatTaskCount,
   TASK_LIST_HELP,
@@ -374,6 +376,7 @@ describe("formatJstDateTime", () => {
   it("UTC の日時を日本時間の YYYY/MM/DD HH:mm にする", () => {
     assert.equal(formatJstDateTime("2026-11-12T06:04:00.000Z"), "2026/11/12 15:04");
     assert.equal(formatJstDateTime("2026-11-12T16:30:00.000Z"), "2026/11/13 01:30");
+    assert.equal(formatJstDateTime("2026-11-12T15:30:00.000Z"), "2026/11/13 00:30");
   });
   it("解釈できない値は「—」にする", () => {
     assert.equal(formatJstDateTime(""), "—");
@@ -458,6 +461,16 @@ describe("formatMemoPreview", () => {
   });
 });
 
+describe("memoTooltip", () => {
+  it("メモの全文をそのまま返す（長くても省略しない・改行も残す）", () => {
+    const long = "あ".repeat(100) + "\n続き";
+    assert.equal(memoTooltip(long), long);
+  });
+  it("空のメモには付けない", () => {
+    assert.equal(memoTooltip(""), undefined);
+  });
+});
+
 describe("TASK_LIST_HELP", () => {
   it("使い方の説明が指定の文言である", () => {
     assert.equal(TASK_LIST_HELP, "ステータス・担当者・タグで絞り込み、優先度の高い順に並べ替えられます。");
@@ -491,5 +504,13 @@ describe("taskRowDoneAttr", () => {
     assert.deepEqual(taskRowDoneAttr("done"), { "data-done": "true" });
     assert.deepEqual(taskRowDoneAttr("todo"), {});
     assert.deepEqual(taskRowDoneAttr("in_progress"), {});
+  });
+});
+
+describe("priorityFontWeight", () => {
+  it("優先度が「高」のときだけ太字にする", () => {
+    assert.equal(priorityFontWeight("high"), "bold");
+    assert.equal(priorityFontWeight("medium"), undefined);
+    assert.equal(priorityFontWeight("low"), undefined);
   });
 });
