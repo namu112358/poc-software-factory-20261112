@@ -27,6 +27,7 @@ export type IssueInfo = {
   body: string;
   comments: Comment[];
   blockedBy?: number[]; // GitHub の依存関係（blocked by）に登録された Issue の番号
+  labels?: string[]; // いまのラベル（precheck で、付ける直前に読み直した値。#322）
 };
 
 /** stalled: PR か、その Issue（claude/issue-<番号>）に needs-human・blocked:question が付いて、人を待っている（#255） */
@@ -35,10 +36,11 @@ export type PrInfo = { number: number; headRef: string; files: string[]; stalled
 export type Wait = number | "slot";
 
 export type Decision =
-  | { decision: "go"; note?: string }
+  | { decision: "go"; note?: string; ahead?: number[] }
+  | { decision: "skip"; reason: string }
   | { decision: "queue" | "retreat"; wait: Wait; files: string[]; reason: string; comment: string };
 
-const TOUCH_RE = /<!--\s*factory:touch\s+files=(\S*)\s*-->/;
+const TOUCH_RE = /<!--\s*factory:touch\s+files=(\S*)(?:\s+ahead=\S*)?\s*-->/;
 const QUEUED_RE = /<!--\s*factory:queued([^>]*?)-->/;
 
 export function splitFiles(value: string | undefined): string[] {
@@ -141,6 +143,8 @@ export function dependencies(issue: IssueInfo): number[] {
 }
 
 export const STALLED_LABELS = ["needs-human", "blocked:question"];
+/** 付いていれば着手させないラベル（作業中・人を待っている・実装しない）。#322 */
+export const NOT_STARTABLE_LABELS = ["in-progress", "in-progress:hard", ...STALLED_LABELS, "epic"];
 
 /**
  * 番号（Issue か PR）が人を待って止まっているか、を返す関数を作る（#255）。
@@ -271,6 +275,14 @@ export function precheck(args: {
   isStalled?: (n: number) => boolean;
 }): Decision {
   const { self, files } = args;
+  // 着手の合図を付ける直前に、ラベルを読み直した値で確かめる（#322: ready を外した 20 秒後に in-progress が付いた）
+  if (self.labels !== undefined) {
+    const blocking = self.labels.filter((l) => NOT_STARTABLE_LABELS.includes(l));
+    if (!self.labels.includes("ready") || blocking.length > 0) {
+      const why = !self.labels.includes("ready") ? "`ready`（人の承認）が無い" : `${blocking.map((l) => `\`${l}\``).join("・")} が付いている`;
+      return { decision: "skip", reason: `${why}ので、着手させずに次へ進む。` };
+    }
+  }
   if (args.ownPr) return ownPrGo(args.ownPr);
   const openDeps = blockingDeps(self, args.isOpen, args.isStalled, makeCurrentFilesOf(args), files, makeIsActive(args));
   if (openDeps.length > 0) {
@@ -303,13 +315,19 @@ export function precheck(args: {
     const o = overlap(files, plannedFiles(i));
     if (o.length > 0) return queue("queue", i.number, files, `先に待っている #${i.number} が同じファイル（${o.join("、")}）を変える予定なので、追い越さずに待つ。`);
   }
+  // 追い越しを記録から数えられるように、先に待ち始めていて同じファイルを予定している Issue を残す（#183）
+  const ahead = args.queued
+    .filter((i) => i.number !== self.number && waitOrder(i, self) < 0 && overlap(files, plannedFiles(i)).length > 0)
+    .map((i) => i.number)
+    .sort((a, b) => a - b);
   if (stalledOverlaps.length > 0) {
     return {
       decision: "go",
+      ahead,
       note: `${stalledOverlaps.join("・")} は同じファイルを変えるが、needs-human・blocked:question で人を待っているので待たずに着手する（#255）。後からマージされるほうで衝突したら、割り当て・修正の役が解消する。このことを着手のコメントに書く。`,
     };
   }
-  return { decision: "go" };
+  return { decision: "go", ahead };
 }
 
 /** 自分の PR がすでにあれば、引き下がらせずに進めさせる（残った PR が Issue の再開を止めるため。#248） */
@@ -414,13 +432,19 @@ export type Actions = { removeLabels: string[]; addLabels: string[]; addLabelsIf
  * queue: ラベルは変えず、待ちの記録を書く（直前の待ちと待ち先が同じなら書かない）。
  */
 export function precheckActions(self: IssueInfo, files: string[], d: Decision): Actions {
+  if (d.decision === "skip") return { removeLabels: [], addLabels: [], comment: null };
   if (d.decision === "go") {
     const note = d.note ? `\n${d.note}` : "";
+    const ahead = d.ahead ?? [];
+    const order =
+      ahead.length === 0
+        ? "同じファイルを予定して先に待っている Issue は無い（この Issue が先頭）。"
+        : `同じファイルを予定して先に待っている #${ahead.join("・#")} より先に着手する（それらは依存・人待ち・ほかの待ちの後ろにいて、まだ着手できない）。`;
     return {
       removeLabels: ["ready"],
       addLabels: ["in-progress"],
       addLabelsIfHard: ["in-progress:hard"],
-      comment: `<!-- factory:touch files=${files.join(",")} -->\n着手させた（変えるファイルは上のとおり）。難しいと判定したときは、当たった観点をこの下に書く。${note}`,
+      comment: `<!-- factory:touch files=${files.join(",")} ahead=${ahead.map((n) => `#${n}`).join(",")} -->\n着手させた（変えるファイルは上のとおり）。${order}難しいと判定したときは、当たった観点をこの下に書く。${note}`,
     };
   }
   const same = latestQueued(self)?.value.wait === d.wait;
