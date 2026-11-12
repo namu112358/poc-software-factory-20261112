@@ -373,14 +373,19 @@ describe("役がそのまま行う操作（precheckActions・relabelTargets）",
 });
 
 describe("merge を付けてよいか（mergeCheck。#293）", () => {
-  const ok = (c: string) => `<!-- factory:review verdict=ok round=1 commit=${c} -->\n本文`;
-  const ng = (c: string) => `<!-- factory:review verdict=changes round=1 commit=${c} -->\n本文`;
+  const ok = (c: string, association = "OWNER") => ({ body: `<!-- factory:review verdict=ok round=1 commit=${c} -->\n本文`, association });
+  const ng = (c: string) => ({ body: `<!-- factory:review verdict=changes round=1 commit=${c} -->\n本文`, association: "OWNER" });
   it("レビューが無い・最新が changes なら付けない", () => {
     assert.equal(mergeCheck({ reviews: [], headSha: "aaa", after: [] }).ok, false);
     assert.equal(mergeCheck({ reviews: [ok("aaa"), ng("bbb")], headSha: "bbb", after: [] }).ok, false);
   });
   it("最新のコミットが ok を受けていれば付けてよい", () => {
     assert.equal(mergeCheck({ reviews: [ng("aaa"), ok("bbbbbbb")], headSha: "bbbbbbb1234", after: [] }).ok, true);
+  });
+  it("書き込み権限の無い人のレビューの印は信じない", () => {
+    assert.equal(mergeCheck({ reviews: [ng("aaa"), ok("aaa", "NONE")], headSha: "aaa", after: [] }).ok, false);
+    assert.equal(mergeCheck({ reviews: [ok("aaa", "CONTRIBUTOR")], headSha: "aaa", after: [] }).ok, false);
+    assert.equal(mergeCheck({ reviews: [ok("aaa", "COLLABORATOR")], headSha: "aaa", after: [] }).ok, true);
   });
   it("ok の後が取り込みだけなら付けてよく、中身の変わるコミットがあれば付けない", () => {
     assert.equal(mergeCheck({ reviews: [ok("aaa")], headSha: "ccc", after: [{ sha: "ccc", mergeOnly: true }] }).ok, true);

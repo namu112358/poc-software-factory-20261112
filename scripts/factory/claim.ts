@@ -16,6 +16,7 @@ import {
   STALLED_LABELS,
   errorActions,
   mergeCheck,
+  TRUSTED_ASSOCIATIONS,
   precheck,
   precheckActions,
   readyBudget,
@@ -188,12 +189,16 @@ async function main(): Promise<unknown> {
     case "merge-check": {
       if (!Number.isInteger(n)) throw new Error("PR の番号を指定する");
       const pr = (await get<{ head: { sha: string } }>(`/repos/${REPO}/pulls/${n}`)).data;
-      const reviews = (await getAll<{ body: string | null; submitted_at: string }>(`/repos/${REPO}/pulls/${n}/reviews`))
+      const reviews = (await getAll<{ body: string | null; submitted_at: string; author_association: string }>(`/repos/${REPO}/pulls/${n}/reviews`))
         .sort((a, b) => (a.submitted_at < b.submitted_at ? -1 : 1))
-        .map((r) => r.body ?? "");
+        .map((r) => ({ body: r.body ?? "", association: r.author_association }));
       const git = (...a: string[]) => spawnSync("git", a, { encoding: "utf-8" });
       const commitOf = /<!--\s*factory:review\s+verdict=\w+[^>]*?commit=([0-9a-f]+)/;
-      const last = reviews.map((b) => commitOf.exec(b)?.[1]).filter(Boolean).at(-1);
+      const last = reviews
+        .filter((r) => TRUSTED_ASSOCIATIONS.includes(r.association))
+        .map((r) => commitOf.exec(r.body)?.[1])
+        .filter(Boolean)
+        .at(-1);
       let after: { sha: string; mergeOnly: boolean }[] | null = [];
       if (last && !pr.head.sha.startsWith(last)) {
         git("fetch", "-q", "origin", `pull/${n}/head:refs/factory/pr-${n}`);

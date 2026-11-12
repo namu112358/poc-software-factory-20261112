@@ -464,14 +464,19 @@ export function relabelTargets(args: {
 /**
  * merge を付けてよいか（#293）。最新の factory:review が verdict=ok で、そのレビューのコミットより後のコミットが
  * すべて「取り込みだけのコミット」（git show --remerge-diff の差分が空のマージ）なら ok。
- * reviews はレビューの本文（古い順）。after は、レビューのコミットより後のコミット（first-parent）。
+ * reviews はレビュー（古い順）。印を信じるのは、書き込み権限のある人（author_association が OWNER・MEMBER・COLLABORATOR）のレビューだけ
+ * （PR のレビューは誰でも書けるので、ほかの人が印を偽って ok にできないように）。after は、レビューのコミットより後のコミット（first-parent）。
  */
+export const TRUSTED_ASSOCIATIONS = ["OWNER", "MEMBER", "COLLABORATOR"];
+
 export function mergeCheck(args: {
-  reviews: string[];
+  reviews: { body: string; association: string }[];
   headSha: string;
   after: { sha: string; mergeOnly: boolean }[] | null; // null: レビューのコミットが PR の履歴に無い
 }): { ok: boolean; reason: string; review: { verdict: string; commit: string } | null } {
   const marks = args.reviews
+    .filter((r) => TRUSTED_ASSOCIATIONS.includes(r.association))
+    .map((r) => r.body)
     .map((b) => /<!--\s*factory:review\s+verdict=(\w+)[^>]*?commit=([0-9a-f]+)/.exec(b))
     .filter((m): m is RegExpExecArray => m !== null);
   const last = marks.at(-1);
