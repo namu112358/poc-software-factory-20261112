@@ -258,3 +258,20 @@ export function changePassword(
   });
   return { ok: true };
 }
+
+/**
+ * 有効なセッションの、ログインした時点の「前回のログイン」と「今回のログイン」の日時（ISO 8601・UTC）。
+ * 期限切れ・不明なトークン・ログインの日時が記録されていない古いセッションは undefined。
+ */
+export function getLoginWindow(
+  token: string | undefined,
+  db: Db = getDb(),
+  now: Date = new Date(),
+): { previousLoginAt: string | null; loginAt: string } | undefined {
+  if (!token) return undefined;
+  const row = db
+    .prepare("SELECT previous_login_at, created_at FROM sessions WHERE token = ? AND expires_at > ?")
+    .get(token, now.toISOString()) as { previous_login_at: string | null; created_at: string | null } | undefined;
+  if (!row || !row.created_at) return undefined;
+  return { previousLoginAt: row.previous_login_at, loginAt: row.created_at };
+}
