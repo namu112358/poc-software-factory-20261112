@@ -23,6 +23,7 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
             <a href="/tasks/deleted">削除したタスク</a>
             <a href="/settings/password">パスワード変更</a>
             <a href="/settings/sessions">ログイン中の端末</a>
+            <a href="/settings/absence">休みの登録</a>
             <span data-testid="header-user">{user.name}（{user.id}）</span>
             <span data-testid="previous-login">{formatPreviousLogin(previousLogin ?? null)}</span>
             <form method="post" action="/api/logout">

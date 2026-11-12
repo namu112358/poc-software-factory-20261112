@@ -225,4 +225,18 @@ export const MIGRATIONS: readonly Migration[] = [
       );
     `,
   },
+  {
+    version: 20,
+    name: "user_absences",
+    sql: `
+      -- メンバーの休みの期間。1 人につき 1 行だけ（登録し直すと置き換える）。日付は日本時間の YYYY-MM-DD で、両端を含む。
+      -- 行が無いメンバーは「休みの登録なし」。利用者を消すと一緒に消える。
+      CREATE TABLE user_absences (
+        user_id    TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+        start_date TEXT NOT NULL,
+        end_date   TEXT NOT NULL,
+        CHECK (start_date <= end_date)
+      );
+    `,
+  },
 ];
