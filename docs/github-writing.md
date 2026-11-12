@@ -61,7 +61,7 @@
 
 ```bash
 gh issue create --title "[Feature]: 差し戻された申請を再提出できるようにする" \
-  --label enhancement --body-file /tmp/issue.md
+  --label type:feat --body-file /tmp/issue.md
 gh pr create --title "差し戻された申請を再提出できるようにする" --body-file /tmp/pr.md
 # 作業途中の PR
 gh pr create --draft --title "差し戻された申請を再提出できるようにする" --body-file /tmp/pr.md
