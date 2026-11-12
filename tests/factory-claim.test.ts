@@ -17,6 +17,8 @@ import {
   blockingDeps,
   makeIsStalled,
   type IssueInfo,
+  normalizeLabel,
+  START_LABELS,
 } from "../scripts/factory/claim-core.ts";
 
 const touch = (files: string, at: string) => ({ body: `<!-- factory:touch files=${files} -->\n着手します。`, createdAt: at });
@@ -68,7 +70,7 @@ describe("着手の前の確かめ（precheck）", () => {
     assert.equal(waitOf(r), 51);
   });
   it("キューに載ったことの無い Issue は、同じファイルを変える queued の Issue を、番号にかかわらず追い越さない（#183）", () => {
-    // #84 の再現: 先に待っている #84 を、後から ready になった番号の大きい #108 が追い越していた
+    // #84 の再現: 先に待っている #84 を、後から status:ready になった番号の大きい #108 が追い越していた
     const waiting84 = issue(84, [queued("wait=#236 files=src/lib/tasks.ts", "2026-11-12T11:12:07Z")]);
     const r = precheck({ ...base, queued: [waiting84], self: issue(108), files: ["src/lib/tasks.ts"], inProgress: [] });
     assert.equal(waitOf(r), 84);
@@ -192,16 +194,16 @@ describe("お互いを待って止まらない（#253 のレビュー）", () =>
 
 describe("待ち先が人を待って止まっているとき（#255）", () => {
   const stalled = (...ns: number[]) => (n: number) => ns.includes(n);
-  it("同じファイル待ち（wait=#N）の待ち先が needs-human なら、その待ちは数えない", () => {
+  it("同じファイル待ち（wait=#N）の待ち先が status:needs-human なら、その待ちは数えない", () => {
     const i210 = issue(210, [queued("wait=#84 files=src/app/tasks/page.tsx", "2026-11-12T11:19:40Z")]);
     assert.deepEqual(blockingDeps(i210, open(84), stalled(84)), []);
     assert.deepEqual(blockingDeps(i210, open(84), stalled()), [84]);
   });
-  it("人が決めた依存（blocked by・「#N の後」）は、待ち先が needs-human でも待つ", () => {
+  it("人が決めた依存（blocked by・「#N の後」）は、待ち先が status:needs-human でも待つ", () => {
     const i = issue(10, [queued("wait=#5", "2026-01-01T00:00:00Z")], "#7 の後", [6]);
     assert.deepEqual(blockingDeps(i, open(5, 6, 7), stalled(5, 6, 7)), [6, 7]);
   });
-  it("pick: 待ち先が needs-human の Issue を取り出す", () => {
+  it("pick: 待ち先が status:needs-human の Issue を取り出す", () => {
     const i210 = issue(210, [queued("wait=#84 files=src/app/tasks/page.tsx", "2026-11-12T11:19:40Z")]);
     assert.deepEqual(pick({ queued: [i210], inProgressCount: 0, isOpen: open(84), isStalled: stalled(84) }).pick, [210]);
     assert.deepEqual(pick({ queued: [i210], inProgressCount: 0, isOpen: open(84) }).pick, []);
@@ -212,7 +214,7 @@ describe("待ち先が人を待って止まっているとき（#255）", () => 
     assert.deepEqual(pick({ queued: [q], inProgressCount: 0, isOpen: open(), openPrs }).pick, [210]);
   });
   it("待ち先が PR で、止まった印がその Issue にだけ付いていても、待ちを解く（#257 のレビュー）", () => {
-    const isStalled = makeIsStalled(new Map([[84, ["enhancement", "needs-human"]], [300, []]]), new Map([[300, 84]]));
+    const isStalled = makeIsStalled(new Map([[84, ["type:feat", "status:needs-human"]], [300, []]]), new Map([[300, 84]]));
     assert.equal(isStalled(300), true);
     assert.equal(isStalled(84), true);
     assert.equal(makeIsStalled(new Map([[300, []]]), new Map([[300, 84]]))(300), false);
@@ -341,10 +343,10 @@ describe("1 時間あたりの起動の数（budget。#250）", () => {
 });
 
 describe("役がそのまま行う操作（precheckActions・relabelTargets）", () => {
-  it("go なら ready を外して in-progress を付け、着手の記録を書く", () => {
+  it("go なら status:ready を外して status:in-progress を付け、着手の記録を書く", () => {
     const a = precheckActions(issue(5), ["a.ts"], { decision: "go" });
-    assert.deepEqual(a.removeLabels, ["ready"]);
-    assert.deepEqual(a.addLabels, ["in-progress"]);
+    assert.deepEqual(a.removeLabels, ["status:ready"]);
+    assert.deepEqual(a.addLabels, ["status:in-progress"]);
     assert.match(a.comment ?? "", /^<!-- factory:touch files=a\.ts -->/);
   });
   it("queue ならラベルを変えず、待ち先が前と同じならコメントもしない", () => {
@@ -354,7 +356,7 @@ describe("役がそのまま行う操作（precheckActions・relabelTargets）",
     assert.equal(precheckActions(waited, ["a.ts"], d).comment, null);
   });
   it("付け直しは、時間がたち・着手のコメントも PR も無いものを、残りの回数まで。2 回目は人に回す", () => {
-    const base = { label: "in-progress", hasPr: false };
+    const base = { label: "status:in-progress", hasPr: false };
     const r = relabelTargets({
       now: "2026-11-12T12:00:00Z",
       minMinutes: 15,
@@ -367,12 +369,12 @@ describe("役がそのまま行う操作（precheckActions・relabelTargets）",
         { ...base, number: 5, labeledAt: "2026-11-12T11:00:00Z", comments: [{ body: "<!-- factory:patrol action=relabel-start -->", createdAt: "2026-11-12T11:20:00Z" }] },
       ],
     });
-    assert.deepEqual(r.relabel, [{ issue: 1, label: "in-progress" }]);
+    assert.deepEqual(r.relabel, [{ issue: 1, label: "status:in-progress" }]);
     assert.deepEqual(r.needsHuman, [5]);
   });
 });
 
-describe("merge を付けてよいか（mergeCheck。#293）", () => {
+describe("merge:requested を付けてよいか（mergeCheck。#293）", () => {
   const ok = (c: string, association = "OWNER") => ({ body: `<!-- factory:review verdict=ok round=1 commit=${c} -->\n本文`, association });
   const ng = (c: string) => ({ body: `<!-- factory:review verdict=changes round=1 commit=${c} -->\n本文`, association: "OWNER" });
   it("レビューが無い・最新が changes なら付けない", () => {
@@ -398,5 +400,20 @@ describe("merge を付けてよいか（mergeCheck。#293）", () => {
     const r = mergeCheck({ reviews: [ok("aaa")], headSha: "ddd", after: [{ sha: "ccc", mergeOnly: true }, { sha: "ddd1234", mergeOnly: false }] });
     assert.equal(r.ok, false);
     assert.match(r.reason, /ddd1234/);
+  });
+});
+
+describe("ラベルの名前（接頭を付けた名前への切り替え）", () => {
+  it("旧名を今の名前に直し、それ以外の名前はそのまま返す", () => {
+    assert.equal(normalizeLabel("in-progress"), "status:in-progress");
+    assert.equal(normalizeLabel("in-progress:hard"), "status:in-progress-hard");
+    assert.equal(normalizeLabel("status:in-progress"), "status:in-progress");
+    assert.equal(normalizeLabel("risk:high"), "risk:high");
+  });
+
+  it("旧名で付けられた起動のラベルも、起動のきっかけとして数える", () => {
+    assert.ok(START_LABELS.includes(normalizeLabel("in-progress")));
+    assert.ok(START_LABELS.includes(normalizeLabel("in-progress:hard")));
+    assert.ok(!START_LABELS.includes(normalizeLabel("ready")));
   });
 });
