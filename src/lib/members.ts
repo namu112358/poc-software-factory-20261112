@@ -1,5 +1,5 @@
 import { getDb, type Db } from "./db/index.ts";
-import { formatLeaveNote, listLeaveEndDates } from "./absence.ts";
+import { formatLeaveNote, listLeaveEndDates, listUpcomingLeaveEndDates } from "./absence.ts";
 import { todayInJapan } from "./task-dates.ts";
 
 export type MemberOpenTask = { id: number; title: string; label: string };
@@ -45,7 +45,7 @@ export function sortMembersByOverdue<T extends Pick<MemberRow, "id" | "openCount
 
 /**
  * 担当者の選択肢の文言。「佐藤（未完了 5・期限切れ 1）」。期限切れが 0 件なら「佐藤（未完了 5）」。
- * 休み中なら末尾に「（休み: 11/20 まで）」を付ける（知らせるだけで、選ぶことは止めない）。
+ * 休みがあれば末尾に「（休み: 11/20 まで）」を付ける（知らせるだけで、選ぶことは止めない）。
  */
 export function formatAssigneeOption(
   m: Pick<MemberRow, "name" | "openCount" | "overdueCount"> & { leaveUntil?: string | null },
@@ -57,7 +57,15 @@ export function formatAssigneeOption(
 
 export type AssigneeOption = { id: string; name: string; label: string };
 
-/** 担当者の選択肢（id・name・件数つきの label）。件数はメンバーの一覧と同じ数え方。並びはユーザー ID 順。 */
+/**
+ * 担当者の選択肢（id・name・件数つきの label）。件数はメンバーの一覧と同じ数え方。並びはユーザー ID 順。
+ * 休みは、休み中の人に加えて、これから始まる休みを登録している人にも付ける（先の休みに気づかず割り当てないため。#437）。
+ */
 export function listAssigneeOptions(db: Db = getDb(), today: string = todayInJapan()): AssigneeOption[] {
-  return listMemberWorkload(db, today).map((m) => ({ id: m.id, name: m.name, label: formatAssigneeOption(m) }));
+  const leaveEndDates = listUpcomingLeaveEndDates(db, today);
+  return listMemberWorkload(db, today).map((m) => ({
+    id: m.id,
+    name: m.name,
+    label: formatAssigneeOption({ ...m, leaveUntil: leaveEndDates.get(m.id) ?? null }),
+  }));
 }
