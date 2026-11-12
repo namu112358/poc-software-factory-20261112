@@ -12,6 +12,7 @@ export type Task = {
   dueDate: string; // YYYY-MM-DD
   priority: TaskPriority;
   estimateMinutes: number | null; // 見積もり時間（分）。未設定は null
+  memo: string; // メモ（詳しい説明）。0〜2000 文字。既定は空文字
 };
 
 export const TASK_STATUSES: readonly TaskStatus[] = ["todo", "in_progress", "done"];
@@ -84,6 +85,7 @@ type TaskRow = {
   due_date: string;
   priority: TaskPriority;
   estimate_minutes: number | null;
+  memo: string;
 };
 
 function toTask(row: TaskRow): Task {
@@ -95,6 +97,7 @@ function toTask(row: TaskRow): Task {
     dueDate: row.due_date,
     priority: row.priority,
     estimateMinutes: row.estimate_minutes,
+    memo: row.memo,
   };
 }
 
@@ -105,7 +108,7 @@ export function listTasks(filter: TaskFilter = {}, db: Db = getDb()): Task[] {
       : "ORDER BY id";
   const rows = db
     .prepare(
-      "SELECT id, title, status, assignee, due_date, priority, estimate_minutes FROM tasks WHERE (:status IS NULL OR status = :status) AND (:assignee IS NULL OR assignee = :assignee) AND (:tag IS NULL OR EXISTS (SELECT 1 FROM task_tags g WHERE g.task_id = tasks.id AND g.name = :tag)) " + orderBy,
+      "SELECT id, title, status, assignee, due_date, priority, estimate_minutes, memo FROM tasks WHERE (:status IS NULL OR status = :status) AND (:assignee IS NULL OR assignee = :assignee) AND (:tag IS NULL OR EXISTS (SELECT 1 FROM task_tags g WHERE g.task_id = tasks.id AND g.name = :tag)) " + orderBy,
     )
     .all({ status: filter.status ?? null, assignee: filter.assignee ?? null, tag: filter.tag ?? null }) as TaskRow[];
   return rows.map(toTask);
@@ -123,7 +126,7 @@ export function formatTaskCount(count: number): string {
 }
 
 export function getTask(id: number, db: Db = getDb()): Task | undefined {
-  const row = db.prepare("SELECT id, title, status, assignee, due_date, priority, estimate_minutes FROM tasks WHERE id = ?").get(id) as
+  const row = db.prepare("SELECT id, title, status, assignee, due_date, priority, estimate_minutes, memo FROM tasks WHERE id = ?").get(id) as
     | TaskRow
     | undefined;
   return row && toTask(row);
@@ -135,10 +138,13 @@ export function parseTaskId(value: unknown): number | undefined {
   return Number(value);
 }
 
-export type TaskInput = Omit<Task, "id" | "priority" | "estimateMinutes"> & {
+export type TaskInput = Omit<Task, "id" | "priority" | "estimateMinutes" | "memo"> & {
   priority?: TaskPriority;
   estimateMinutes?: number | null;
+  memo?: string;
 };
+
+export const MEMO_MAX_LENGTH = 2000;
 
 export type ValidationResult<T> = { ok: true; value: T } | { ok: false; errors: string[] };
 
@@ -192,13 +198,18 @@ export function validateTaskInput(
       errors.push("見積もり時間は 1〜10000 の整数（分）で入力してください");
     } else value.estimateMinutes = m;
   }
+  if ("memo" in b) {
+    if (typeof b.memo !== "string" || b.memo.length > MEMO_MAX_LENGTH) {
+      errors.push(`メモは ${MEMO_MAX_LENGTH} 文字以内の文字列で入力してください`);
+    } else value.memo = b.memo;
+  }
   return errors.length > 0 ? { ok: false, errors } : { ok: true, value };
 }
 
 export function createTask(input: TaskInput, db: Db = getDb()): Task {
   const { lastInsertRowid } = db
-    .prepare("INSERT INTO tasks (title, status, assignee, due_date, priority, estimate_minutes) VALUES (?, ?, ?, ?, ?, ?)")
-    .run(input.title, input.status, input.assignee, input.dueDate, input.priority ?? "medium", input.estimateMinutes ?? null);
+    .prepare("INSERT INTO tasks (title, status, assignee, due_date, priority, estimate_minutes, memo) VALUES (?, ?, ?, ?, ?, ?, ?)")
+    .run(input.title, input.status, input.assignee, input.dueDate, input.priority ?? "medium", input.estimateMinutes ?? null, input.memo ?? "");
   return getTask(Number(lastInsertRowid), db)!;
 }
 
@@ -207,13 +218,14 @@ export function updateTask(id: number, changes: Partial<TaskInput>, db: Db = get
   const current = getTask(id, db);
   if (!current) return undefined;
   const next = { ...current, ...changes };
-  db.prepare("UPDATE tasks SET title = ?, status = ?, assignee = ?, due_date = ?, priority = ?, estimate_minutes = ? WHERE id = ?").run(
+  db.prepare("UPDATE tasks SET title = ?, status = ?, assignee = ?, due_date = ?, priority = ?, estimate_minutes = ?, memo = ? WHERE id = ?").run(
     next.title,
     next.status,
     next.assignee,
     next.dueDate,
     next.priority,
     next.estimateMinutes,
+    next.memo,
     id,
   );
   return getTask(id, db);
