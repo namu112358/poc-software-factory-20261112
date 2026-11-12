@@ -201,14 +201,17 @@ async function main(): Promise<unknown> {
         .at(-1);
       let after: { sha: string; mergeOnly: boolean }[] | null = [];
       if (last && !pr.head.sha.startsWith(last)) {
-        git("fetch", "-q", "origin", `pull/${n}/head:refs/factory/pr-${n}`);
+        const fetched = git("fetch", "-q", "origin", `pull/${n}/head:refs/factory/pr-${n}`, "main:refs/factory/main");
+        if (fetched.status !== 0) throw new Error(`git fetch に失敗した（${fetched.stderr.trim()}）。付けずに、後でやり直す。`);
         const list = git("rev-list", "--first-parent", `${last}..refs/factory/pr-${n}`);
         if (list.status !== 0) after = null;
         else
           after = list.stdout.split("\n").filter(Boolean).map((sha) => {
-            const parents = git("rev-list", "--parents", "-n1", sha).stdout.trim().split(" ").length - 1;
+            const parents = git("rev-list", "--parents", "-n1", sha).stdout.trim().split(" ").slice(1);
             const diff = git("show", "--format=", "--remerge-diff", sha).stdout.trim();
-            return { sha, mergeOnly: parents === 2 && diff === "" };
+            // 取り込みだけのコミット: main を取り込んだ（2 つ目の親が main に含まれる）マージで、--remerge-diff の差分が空
+            const fromMain = parents.length === 2 && git("merge-base", "--is-ancestor", parents[1], "refs/factory/main").status === 0;
+            return { sha, mergeOnly: fromMain && diff === "" };
           });
       }
       return { pr: n, ...mergeCheck({ reviews, headSha: pr.head.sha, after }) };
