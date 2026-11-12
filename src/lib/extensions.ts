@@ -1,6 +1,7 @@
 import { getDb, type Db } from "./db/index.ts";
 import { getTask, type Task } from "./tasks.ts";
 import type { ValidationResult } from "./tasks.ts";
+import { isCoordinator } from "./users.ts";
 
 export type ExtensionStatus = "pending" | "approved" | "rejected";
 
@@ -106,12 +107,20 @@ export function createExtension(
 export type DecideResult =
   | { result: "decided"; extension: Extension; task: Task }
   | { result: "not_found" }
-  | { result: "forbidden" } // 申請した本人（自分の申請は自分で判断できない）
+  | { result: "forbidden"; reason: "own" } // 申請した本人（自分の申請は自分で判断できない）
+  | { result: "forbidden"; reason: "not_coordinator" } // 取りまとめる人ではない
   | { result: "conflict" }; // すでに判断済み
 
+/** 判断できないとき（403）の理由ごとの文言。 */
+export const DECIDE_FORBIDDEN_MESSAGE: Record<"own" | "not_coordinator", string> = {
+  own: "自分の申請は判断できません",
+  not_coordinator: "延長の申請を判断できるのは取りまとめる人だけです",
+};
+
 /**
- * 申請を承認（approved）または却下（rejected）する。承認のときはタスクの期限も変える。
- * 判定の順は「申請が無い（not_found）→ 申請した本人（forbidden）→ 判断済み（conflict）」。
+ * 申請を承認（approved）または却下（rejected）する。承認のときはタスクの期限も変える。判断できるのは取りまとめる人だけ。
+ * 判定の順は「申請が無い（not_found）→ 申請した本人（forbidden）→ 取りまとめる人でない（forbidden）→ 判断済み（conflict）」。
+ * 取りまとめる人でない人には、判断済みかどうかを知らせない（409 より先に 403）。
  * 申請の更新は保留中のときだけ行い、先にほかの人が判断していればタスクも変えずに conflict を返す。
  */
 export function decideExtension(
@@ -124,7 +133,8 @@ export function decideExtension(
 ): DecideResult {
   const current = getExtension(extensionId, db);
   if (!current || current.taskId !== taskId) return { result: "not_found" };
-  if (current.requester === userId) return { result: "forbidden" };
+  if (current.requester === userId) return { result: "forbidden", reason: "own" };
+  if (!isCoordinator(userId, db)) return { result: "forbidden", reason: "not_coordinator" };
   if (current.status !== "pending") return { result: "conflict" };
   db.exec("BEGIN");
   try {

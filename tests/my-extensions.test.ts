@@ -33,8 +33,8 @@ describe("listMyExtensions", () => {
     make(db, 3, "2026-11-08T00:00:00.000Z");
     const a = make(db, 4, "2026-11-09T00:00:00.000Z");
     const r = make(db, 5, "2026-11-10T00:00:00.000Z");
-    decideExtension(4, a.id, "approved", "suzuki", db, new Date("2026-11-10T03:00:00.000Z"));
-    decideExtension(5, r.id, "rejected", "suzuki", db, new Date("2026-11-11T03:00:00.000Z"));
+    decideExtension(4, a.id, "approved", "tanaka", db, new Date("2026-11-10T03:00:00.000Z"));
+    decideExtension(5, r.id, "rejected", "tanaka", db, new Date("2026-11-11T03:00:00.000Z"));
     const rows = listMyExtensions("sato", db, NOW);
     assert.deepEqual(rows.map((x) => x.status), ["rejected", "approved", "pending"]);
     assert.equal(rows[0].decidedAt, "2026-11-11T03:00:00.000Z");

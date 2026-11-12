@@ -1,5 +1,6 @@
 import { getDb, type Db } from "./db/index.ts";
 import { listPendingExtensions, type PendingExtensionRow } from "./extensions.ts";
+import { isCoordinator } from "./users.ts";
 import { addDays, DUE_SOON_DAYS, todayInJapan } from "./task-dates.ts";
 
 export type MyTaskRow = {
@@ -27,7 +28,11 @@ export function listMyDueTasks(userId: string, db: Db = getDb(), today: string =
   return rows.map((r) => ({ ...r, kind: r.dueDate < today ? "overdue" : "due-soon" }));
 }
 
-/** 自分の対応を待っている延長の申請。自分以外が出した承認待ちのすべて（自分の申請は承認できないので除く）。 */
+/**
+ * 自分の対応を待っている延長の申請。取りまとめる人なら、自分以外が出した承認待ちのすべて（自分の申請は承認できないので除く）。
+ * 取りまとめる人でなければ、承認できないので何も返さない。
+ */
 export function listExtensionsAwaitingMe(userId: string, db: Db = getDb()): PendingExtensionRow[] {
+  if (!isCoordinator(userId, db)) return [];
   return listPendingExtensions(db).filter((e) => e.requester !== userId);
 }

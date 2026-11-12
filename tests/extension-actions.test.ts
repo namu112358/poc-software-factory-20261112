@@ -1,7 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { openDb } from "../src/lib/db/index.ts";
-import { createExtension, decideExtension, getExtension, listPendingExtensions } from "../src/lib/extensions.ts";
+import { createExtension, DECIDE_FORBIDDEN_MESSAGE, decideExtension, getExtension, listPendingExtensions } from "../src/lib/extensions.ts";
 import {
   ALREADY_DECIDED_MESSAGE,
   canDecideExtension,
@@ -27,15 +27,17 @@ function apiFetch(db: Db, userId: string) {
     if (!getTask(taskId, db)) return respond(404, { error: "タスクが見つかりません" });
     const out = decideExtension(taskId, Number(m[2]), m[3] === "approve" ? "approved" : "rejected", userId, db);
     if (out.result === "not_found") return respond(404, { error: "延長申請が見つかりません" });
-    if (out.result === "forbidden") return respond(403, { error: "自分の申請は判断できません" });
+    if (out.result === "forbidden") return respond(403, { error: DECIDE_FORBIDDEN_MESSAGE[out.reason] });
     if (out.result === "conflict") return respond(409, { error: "この延長申請はすでに判断されています" });
     return respond(200, { extension: out.extension });
   };
   return { fetch, sent };
 }
 
+/** 佐藤の申請が 1 件ある DB。ほかの人が先に判断する場面を作れるよう、田中に加えて鈴木も取りまとめる人にする。 */
 function setup() {
   const db = openDb();
+  db.prepare("UPDATE users SET role = 'coordinator' WHERE id = 'suzuki'").run();
   const ext = createExtension({ taskId: 3, requester: "sato", newDueDate: "2026-11-30", reason: "レビュー待ち" }, db);
   if (ext === "conflict") throw new Error("setup");
   const row = listPendingExtensions(db).find((r) => r.id === ext.id)!;
@@ -153,12 +155,34 @@ describe("一覧から承認・却下する", () => {
 });
 
 describe("canDecideExtension", () => {
-  it("自分が出した申請の行には、承認・却下のボタンを出さない", () => {
-    assert.equal(canDecideExtension("sato", "sato"), false);
+  it("自分が出した申請の行には、取りまとめる人でも承認・却下のボタンを出さない", () => {
+    assert.equal(canDecideExtension("tanaka", "tanaka", true), false);
+    assert.equal(canDecideExtension("sato", "sato", false), false);
   });
 
-  it("ほかの人の申請の行には出す（ID で比べ、表示名が同じでも ID が違えば出す）", () => {
-    assert.equal(canDecideExtension("sato", "suzuki"), true);
-    assert.equal(canDecideExtension("佐藤", "sato"), true);
+  it("取りまとめる人には、ほかの人の申請の行に出す（ID で比べ、表示名が同じでも ID が違えば出す）", () => {
+    assert.equal(canDecideExtension("sato", "tanaka", true), true);
+    assert.equal(canDecideExtension("田中", "tanaka", true), true);
   });
+
+  it("取りまとめる人でなければ、ほかの人の申請の行にも出さない", () => {
+    assert.equal(canDecideExtension("sato", "suzuki", false), false);
+    assert.equal(canDecideExtension("tanaka", "suzuki", false), false);
+  });
+});
+
+describe("一覧から承認・却下する: 取りまとめる人でないとき", () => {
+  for (const decision of ["approve", "reject"] as const) {
+    it(`画面を通さずに ${decision} しようとしても断られて理由が出て、申請も期限も変わらない`, async () => {
+      const { db, target } = setup();
+      db.prepare("UPDATE users SET role = 'member' WHERE id = 'suzuki'").run();
+      const taskBefore = getTask(3, db);
+      const extBefore = getExtension(target.id, db);
+      const api = apiFetch(db, "suzuki");
+      const result = await confirmAndDecideExtension(target, decision, { confirm: () => true, fetch: api.fetch });
+      assert.deepEqual(result, { status: "error", message: DECIDE_FORBIDDEN_MESSAGE.not_coordinator, reload: false });
+      assert.deepEqual(getTask(3, db), taskBefore);
+      assert.deepEqual(getExtension(target.id, db), extBefore);
+    });
+  }
 });

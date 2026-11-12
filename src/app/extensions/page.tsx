@@ -1,5 +1,6 @@
 import { countLongWaiting, extensionStatusLabel, formatExtensionRequestedAt, longWaitDays, listMyExtensions, listPendingExtensions } from "@/lib/extensions";
 import { requireUser } from "@/lib/session";
+import { isCoordinator } from "@/lib/users";
 import { PendingExtensionsTable } from "./extension-actions";
 
 export default async function ExtensionsPage() {
@@ -30,7 +31,7 @@ export default async function ExtensionsPage() {
           2 日以上待っている申請: {longWaiting} 件
         </p>
       )}
-      <PendingExtensionsTable rows={rows} userId={user.id} />
+      <PendingExtensionsTable rows={rows} userId={user.id} isCoordinator={isCoordinator(user.id)} />
       <h2>自分が出した申請（直近 30 日）</h2>
       {mine.length === 0 ? (
         <p data-testid="my-extensions-empty">出した申請はありません</p>
