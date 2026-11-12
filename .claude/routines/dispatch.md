@@ -1,6 +1,6 @@
 # 割り当ての手順書
 
-`claude/` で始まるブランチの PR が閉じたとき（マージを含む）に起動します。マージの直後に起きる 2 つの変化を拾います。どちらも、待たされる Issue・PR の側にはイベントが来ないためです。コードは書きません。
+`claude/` で始まるブランチの PR が閉じたとき（マージを含む）に起動します。マージの直後に起きる 2 つの変化と、起動しなかった実装を拾います。どれも、待たされる Issue・PR の側にはイベントが来ないためです。コードは書きません。
 
 ## 1. 衝突した PR を修正に回す
 
@@ -18,6 +18,10 @@ Mergify のキューに入っている PR（チェック「Mergify Merge Queue�
 
 `README.md` の「キュー」のとおり、空きの数だけ `queued` の Issue を取り出す。閉じた PR が依存先の Issue を閉じたときは、それを待っていた Issue が取り出せるようになっている。
 
-## 4. 終える
+## 4. 起動しなかった実装を起こし直す
+
+開いている Issue のうち、`ready` か `ready:hard` が付いて 15 分以上たち、その後に実装の役のコメント（`factory:touch`・`factory:queued` など）も `in-progress` も付いていないものは、実装の起動のイベントが捨てられたものとして、付いていたラベルを外して同じラベルを付け直す（実装がもう一度起動する）。時刻は、Issue のイベント（REST の `GET /repos/{owner}/{repo}/issues/{number}/events`）の最後の `labeled` で見る。コメントの先頭に `<!-- factory:dispatch action=relabel-ready -->` を付ける。同じ Issue に、すでに `factory:dispatch action=relabel-ready` か `factory:patrol action=relabel-ready` のコメントがあれば、付け直さない（巡回が 2 回目として `needs-human` にする）。`epic`・`blocked:question`・`needs-human` の付いた Issue には触らない。巡回（1 時間ごと、30 分以上たったものだけ）より早く拾うため（#190。取りこぼされた Issue が 87 分止まった）。
+
+## 5. 終える
 
 何かしたときだけ、した Issue・PR にコメントする。何もしなければ、コメントせずに終える。
