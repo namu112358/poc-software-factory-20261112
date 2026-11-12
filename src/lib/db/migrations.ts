@@ -52,4 +52,23 @@ export const MIGRATIONS: readonly Migration[] = [
       CREATE INDEX comments_task ON comments(task_id);
     `,
   },
+  {
+    version: 4,
+    name: "due_date_extensions",
+    sql: `
+      CREATE TABLE due_date_extensions (
+        id           INTEGER PRIMARY KEY AUTOINCREMENT,
+        task_id      INTEGER NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+        requester    TEXT NOT NULL REFERENCES users(id),
+        new_due_date TEXT NOT NULL, -- YYYY-MM-DD
+        reason       TEXT NOT NULL,
+        status       TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'approved', 'rejected')),
+        created_at   TEXT NOT NULL, -- ISO 8601（UTC）
+        decided_by   TEXT REFERENCES users(id),
+        decided_at   TEXT -- ISO 8601（UTC）
+      );
+      CREATE INDEX due_date_extensions_task ON due_date_extensions(task_id);
+      CREATE UNIQUE INDEX due_date_extensions_one_pending ON due_date_extensions(task_id) WHERE status = 'pending';
+    `,
+  },
 ];
