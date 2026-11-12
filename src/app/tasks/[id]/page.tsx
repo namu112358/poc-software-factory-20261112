@@ -152,7 +152,7 @@ export default async function TaskDetailPage({ params }: Props) {
                 {c.author === user.id && (
                   <>
                     <EditCommentForm taskId={task.id} commentId={c.id} body={c.body} />{" "}
-                    <DeleteCommentButton taskId={task.id} commentId={c.id} />
+                    <DeleteCommentButton taskId={task.id} commentId={c.id} body={c.body} />
                   </>
                 )}
               </li>

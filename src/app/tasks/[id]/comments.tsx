@@ -2,6 +2,7 @@
 // コメントの投稿フォームと削除ボタン。操作のあと、サーバー側の一覧を読み直す。
 import { useRouter } from "next/navigation";
 import { useState, type FormEvent } from "react";
+import { confirmAndDeleteComment } from "@/lib/comment-delete";
 
 export function CommentForm({ taskId }: { taskId: number }) {
   const router = useRouter();
@@ -47,22 +48,18 @@ export function CommentForm({ taskId }: { taskId: number }) {
   );
 }
 
-export function DeleteCommentButton({ taskId, commentId }: { taskId: number; commentId: number }) {
+export function DeleteCommentButton({ taskId, commentId, body }: { taskId: number; commentId: number; body: string }) {
   const router = useRouter();
   const [error, setError] = useState<string>();
 
   async function onClick() {
     setError(undefined);
-    try {
-      const res = await fetch(`/api/tasks/${taskId}/comments/${commentId}`, { method: "DELETE" });
-      if (!res.ok) {
-        setError("コメントを削除できませんでした。");
-        return;
-      }
-      router.refresh();
-    } catch {
-      setError("コメントを削除できませんでした。");
-    }
+    const result = await confirmAndDeleteComment(taskId, commentId, body, {
+      confirm: (message) => window.confirm(message),
+      fetch: (url, init) => fetch(url, init),
+    });
+    if (result.status === "error") setError(result.message);
+    else if (result.status === "deleted") router.refresh();
   }
 
   return (
