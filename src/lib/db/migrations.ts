@@ -239,4 +239,14 @@ export const MIGRATIONS: readonly Migration[] = [
       );
     `,
   },
+  {
+    version: 21,
+    name: "session_last_used_at",
+    sql: `
+      -- この端末（セッション）で最後に画面・API を使った日時。ISO 8601（UTC）。
+      -- 書き込みを減らすため、前の値から 5 分を過ぎた利用のときだけ更新する。
+      -- このマイグレーションより前に作られたセッションは NULL（不明）から始まる。
+      ALTER TABLE sessions ADD COLUMN last_used_at TEXT;
+    `,
+  },
 ];

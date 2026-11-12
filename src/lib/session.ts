@@ -1,12 +1,13 @@
 // Cookie からログイン中のユーザーを取り出す（Server Component・Route Handler 用）。
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
-import { SESSION_COOKIE, getFailedLoginsBefore, getLoginWindow, getPreviousLogin, getSessionUser } from "./auth.ts";
+import { SESSION_COOKIE, getFailedLoginsBefore, getLoginWindow, getPreviousLogin, getSessionUserAndTouch } from "./auth.ts";
 import type { User } from "./users.ts";
 
+/** ログイン中のユーザーを返し、この端末の「最後に使った日時」を更新する（5 分以内の再利用では更新しない）。 */
 export async function getCurrentUser(): Promise<User | undefined> {
   const store = await cookies();
-  return getSessionUser(store.get(SESSION_COOKIE)?.value);
+  return getSessionUserAndTouch(store.get(SESSION_COOKIE)?.value);
 }
 
 /** ログイン中のセッションの「前回のログイン」（ISO 8601・UTC）。前回が無ければ null、未ログインなら undefined。 */
