@@ -43,6 +43,19 @@ export function deleteSession(token: string, db: Db = getDb()): void {
   db.prepare("DELETE FROM sessions WHERE token = ?").run(token);
 }
 
+/**
+ * すべての端末からログアウトする。token が有効なセッションなら、その利用者のセッションを
+ * （呼んだ端末のもの・期限切れのものを含めて）すべて消し、利用者を返す。
+ * 未ログイン（トークンなし・不明・期限切れ）なら何も消さずに undefined を返す。
+ */
+export function logoutAllDevices(token: string | undefined, db: Db = getDb(), now: Date = new Date()): User | undefined {
+  return transaction(db, () => {
+    const user = getSessionUser(token, db, now);
+    if (user) db.prepare("DELETE FROM sessions WHERE user_id = ?").run(user.id);
+    return user;
+  });
+}
+
 export const MIN_PASSWORD_LENGTH = 8;
 
 export type PasswordChangeInput = { currentPassword: string; newPassword: string };

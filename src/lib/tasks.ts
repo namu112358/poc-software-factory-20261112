@@ -285,6 +285,11 @@ export function taskRowDoneAttr(status: TaskStatus): { "data-done"?: "true" } {
   return status === "done" ? { "data-done": "true" } : {};
 }
 
+/** 優先度の欄の文字の太さ。「高」だけ太字にする。 */
+export function priorityFontWeight(priority: TaskPriority): "bold" | undefined {
+  return priority === "high" ? "bold" : undefined;
+}
+
 /** 見積もり時間の表示用の文字列。未設定は「—」。 */
 export function formatEstimate(minutes: number | null): string {
   return minutes === null ? "—" : `${minutes} 分`;
