@@ -148,7 +148,7 @@ describe("完了日時: 一括変更", () => {
 describe("完了日時: マイグレーションと取得", () => {
   it("マイグレーション前からある完了済みタスクは、マイグレーション後 completedAt が null", () => {
     const db = new DatabaseSync(":memory:");
-    const before = MIGRATIONS.filter((m) => m.name !== "task_completed_at");
+    const before = MIGRATIONS.filter((m) => m.version < 11);
     migrate(db, before);
     db.prepare("INSERT INTO users (id, name) VALUES ('sato', '佐藤')").run();
     db.prepare("INSERT INTO tasks (title, status, assignee, due_date) VALUES ('済', 'done', 'sato', '2026-11-01')").run();

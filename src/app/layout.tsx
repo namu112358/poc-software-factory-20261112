@@ -13,6 +13,9 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
             <a href="/tasks">タスク一覧</a>
             <a href="/overdue">期限切れ</a>
             <a href="/tags">タグ一覧</a>
+            <a href="/members">メンバー</a>
+            <a href="/board">ステータス別</a>
+            <a href="/settings/password">パスワード変更</a>
             <span data-testid="header-user">{user.name}（{user.id}）</span>
             <form method="post" action="/api/logout">
               <button type="submit">ログアウト</button>
