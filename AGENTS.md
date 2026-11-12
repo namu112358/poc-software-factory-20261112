@@ -9,6 +9,7 @@ GitHub のイベントで起動する Claude Code の Routines（scheduled tasks
 | 作業 | 読むもの |
 |---|---|
 | Issue・PR を作る | [docs/github-writing.md](docs/github-writing.md) |
+| 何を Issue にするかを決める | [docs/product.md](docs/product.md)（だれが何のために使うか、次の 1 か月で良くしたいこと） |
 | Routine として動く（実装・レビュー・修正・巡回） | [.claude/routines/README.md](.claude/routines/README.md) と、各役の手順書 |
 | アプリの構成（DB・ログイン・初期ユーザー）を知る | [docs/architecture.md](docs/architecture.md) |
 

@@ -3,9 +3,10 @@ import { commentEditedLabel, listComments, splitCommentBody } from "@/lib/commen
 import { requireUser } from "@/lib/session";
 import { listTags, listTagSuggestions } from "@/lib/tags";
 import { PRIORITY_LABELS, STATUS_LABELS, formatCompletedAt, formatEstimate, formatJstDateTime, formatTaskNumber, getTask, isDueSoon, isOverdue, parseTaskId, todayInJapan } from "@/lib/tasks";
-import { getUser } from "@/lib/users";
+import { getUser, listUserOptions } from "@/lib/users";
 import { DeleteTaskButton } from "./delete";
 import { DuplicateButton } from "./duplicate";
+import { EditTaskForm } from "./edit-form";
 import { CommentForm, DeleteCommentButton, EditCommentForm } from "./comments";
 import { RemoveTagButton, TagForm } from "./tags";
 
@@ -70,6 +71,7 @@ export default async function TaskDetailPage({ params }: Props) {
         <dt>完了</dt>
         <dd data-testid="completed-at">{formatCompletedAt(task)}</dd>
       </dl>
+      <EditTaskForm task={task} users={listUserOptions()} />
       <p>
         <DuplicateButton taskId={task.id} /> <DeleteTaskButton taskId={task.id} title={task.title} />
       </p>

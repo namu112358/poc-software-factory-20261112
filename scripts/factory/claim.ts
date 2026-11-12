@@ -101,7 +101,7 @@ async function loadIssue(n: number, raw?: RawIssue): Promise<IssueInfo> {
 }
 
 /** 待っている Issue から外すラベル（作業中・人を待っている・実装しない） */
-const NOT_WAITING_LABELS = [...START_LABELS, ...STALLED_LABELS, LABEL.epic];
+const NOT_WAITING_LABELS = [...START_LABELS, ...STALLED_LABELS, LABEL.epic, LABEL.kaizen];
 
 async function loadLabeled(label: string): Promise<IssueInfo[]> {
   const raws = (await getAll<RawIssue>(`/repos/${REPO}/issues?state=open&labels=${encodeURIComponent(label)}`)).filter((i) => !i.pull_request);
@@ -115,7 +115,7 @@ async function loadInProgress(): Promise<IssueInfo[]> {
   return [...byNumber.values()];
 }
 
-/** 待っている Issue: status:ready があり、作業中・人待ち・Epic のラベルが無い開いている Issue */
+/** 待っている Issue: status:ready があり、作業中・人待ち・Epic・kaizen のラベルが無い開いている Issue */
 async function loadWaiting(): Promise<IssueInfo[]> {
   const raws = (await getAll<RawIssue>(`/repos/${REPO}/issues?state=open&labels=${encodeURIComponent(LABEL.ready)}`)).filter(
     (i) => !i.pull_request && !(i.labels ?? []).some((l) => NOT_WAITING_LABELS.includes(l.name)),

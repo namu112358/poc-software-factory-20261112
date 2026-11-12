@@ -18,7 +18,7 @@ Routine（`.claude/routines/`）が使う判定のスクリプトです。GitHub
 ## 決まり
 
 - **同時に実装する Issue は 4 件まで**（`WIP_LIMIT`）。`status:in-progress` か `status:in-progress-hard` の付いた開いている Issue の数で数える。
-- **待っている Issue**: `status:ready` があり、`status:in-progress`・`status:in-progress-hard`・`status:blocked-question`・`status:needs-human`・`kind:epic` の無い開いている Issue。待つ理由は、割り当ての役が `<!-- factory:queued wait=<#番号|slot> files=<ファイル> -->` のコメントで書く（コード上は queued と呼ぶ）。
+- **待っている Issue**: `status:ready` があり、`status:in-progress`・`status:in-progress-hard`・`status:blocked-question`・`status:needs-human`・`kind:epic`・`kind:kaizen` の無い開いている Issue。待つ理由は、割り当ての役が `<!-- factory:queued wait=<#番号|slot> files=<ファイル> -->` のコメントで書く（コード上は queued と呼ぶ）。
 - **依存先**: blocked by に登録された Issue、本文の「#N の後」、待ちの記録の `wait=#N`（同じファイル待ち）。同じファイル待ちは、待ち先が人を待っている（`status:needs-human`・`status:blocked-question`）・待ち先の今のファイルと重ならなくなった・待ち先が待っているだけの Issue、のどれかなら待ち終わりとする。`wait=slot`（空き待ち）は依存先ではない。人が決めた依存（blocked by・「#N の後」）は、どの例外にもしない。
 - **`precheck`**: 依存先が開いていれば待つ。自分以外の作業中が 4 件以上なら空き待ち。変えるファイルが、開いている `claude/` の PR（自分の PR と人待ちの PR を除く）・作業中の Issue の `factory:touch`・自分より先に待ち始めた先頭の Issue と重なれば、その相手を待つ。この Issue の PR がもう開いていれば `go`（引き継ぐ）。
 - **`pick`**: 空き（4 − 作業中）と budget の残りの小さいほうの数だけ、依存先の閉じた待っている Issue を、待ち始めの早い順（最初の `factory:queued` の時刻。待ったことが無いものは後ろ、番号の小さい順）に選ぶ。先頭どうし・開いている PR・作業中の Issue・同じ回に選んだ Issue とファイルが重なるものは、選ばずに `rewait` に入れる（待ち先が今と同じなら入れない）。

@@ -16,19 +16,20 @@
 
 `pick` の Issue ごとに、順に次を行う。2 件目からは、前の 1 件にラベルを付けてから 30 秒あける（`node -e "setTimeout(() => {}, 30000)"`）。
 
-1. ラベルを読み直し、`status:ready` が無いか、`status:in-progress`・`status:blocked-question`・`status:needs-human`・`kind:epic` が付いていれば、次へ。
+1. ラベルを読み直し、`status:ready` が無いか、`status:in-progress`・`status:blocked-question`・`status:needs-human`・`kind:epic`・`kind:kaizen` が付いていれば、次へ。
 2. `status:ready` を付けた人が書き込み権限を持つかを確かめる（Issue のイベントの最後の `labeled status:ready` の人を、GitHub MCP の `list_repository_collaborators` で見る）。持たなければ `status:ready` を外して `status:needs-human` を付け、理由をコメントして次へ。
-3. 変えるファイル（テストを除く）を決める。受入条件から、変える画面・API・表を挙げ、`main` の最新を検索する（`src/lib/db/migrations.ts` も含める）。
-4. `node scripts/factory/claim.ts precheck <番号> --files <カンマ区切りのパス>` を実行する。`decision` が `go` でなければ、`actions` のとおりにして次へ（`comment` が `null` ならコメントしない。`actions` が無い＝スクリプトが失敗したときは、その Issue には何もせず次へ）。
-5. 難易度を判定する。次の 1 つでも当たれば「難しい」。
+3. Issue の受入条件と補足に、決まっていない点（「未決」「決めていない」「どちらにするか」「要確認」など、選び方で受入条件の結果が変わるもの）が残っていれば、着手させない。`status:ready` を外して `status:blocked-question` を付け、決めてほしいことを選択肢つきでコメント（先頭に `<!-- factory:<役> action=undecided -->`）して次へ（実装を起動しても、質問だけで止まるため）。Issue の後のコメントで答えが出ていれば、決まったものとして扱う。
+4. 変えるファイル（テストを除く）を決める。受入条件から、変える画面・API・表を挙げ、`main` の最新を検索する（`src/lib/db/migrations.ts` も含める）。
+5. `node scripts/factory/claim.ts precheck <番号> --files <カンマ区切りのパス>` を実行する。`decision` が `go` でなければ、`actions` のとおりにして次へ（`comment` が `null` ならコメントしない。`actions` が無い＝スクリプトが失敗したときは、その Issue には何もせず次へ）。
+6. 難易度を判定する。次の 1 つでも当たれば「難しい」。
    - 元に戻しにくい（データの書き換え・削除、外部への送信）
    - 外部の利用者がいる（ほかのシステム・端末・集計が読む API や列）
    - 触る場所にテストが無く、理由の書かれていない分岐がある
    - まとめて処理する・同時に更新される・止められない処理が絡む
    - 認証・権限・お金が絡む
-6. `actions` のとおりにする: `removeLabels` を外し、`addLabels`（難しければ代わりに `addLabelsIfHard`）を付け、`comment` を書く（難しければ、当たった観点を書き足す）。
+7. `actions` のとおりにする: `removeLabels` を外し、`addLabels`（難しければ代わりに `addLabelsIfHard`）を付け、`comment` を書く（難しければ、当たった観点を書き足す）。
 
-`precheck` で待たせた分だけ空きが残っていれば、もう一度だけ `pick` から繰り返す。
+`precheck` で待たせた分・未決で返した分だけ空きが残っていれば、もう一度だけ `pick` から繰り返す。
 
 ## 3. 起動しなかった実装を起こし直す
 

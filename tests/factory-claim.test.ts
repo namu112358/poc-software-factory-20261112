@@ -374,7 +374,7 @@ describe("役がそのまま行う操作（precheckActions・relabelTargets）",
   });
 });
 
-describe("merge を付けてよいか（mergeCheck。#293）", () => {
+describe("merge:requested を付けてよいか（mergeCheck。#293）", () => {
   const ok = (c: string, association = "OWNER") => ({ body: `<!-- factory:review verdict=ok round=1 commit=${c} -->\n本文`, association });
   const ng = (c: string) => ({ body: `<!-- factory:review verdict=changes round=1 commit=${c} -->\n本文`, association: "OWNER" });
   it("レビューが無い・最新が changes なら付けない", () => {

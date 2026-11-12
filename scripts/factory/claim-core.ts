@@ -16,6 +16,7 @@ export const LABEL = {
   blockedQuestion: "status:blocked-question",
   needsHuman: "status:needs-human",
   epic: "kind:epic",
+  kaizen: "kind:kaizen",
   merge: "merge:requested",
 } as const;
 
@@ -27,6 +28,7 @@ export const OLD_LABEL_NAMES: Readonly<Record<string, string>> = {
   "blocked:question": LABEL.blockedQuestion,
   "needs-human": LABEL.needsHuman,
   epic: LABEL.epic,
+  kaizen: LABEL.kaizen,
   merge: LABEL.merge,
 };
 
