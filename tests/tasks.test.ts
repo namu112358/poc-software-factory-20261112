@@ -59,6 +59,32 @@ describe("listAssignees", () => {
   });
 });
 
+describe("担当者なしの絞り込み", () => {
+  it("parseAssignee は none を受け付ける", () => {
+    assert.equal(parseAssignee("none", openDb()), "none");
+  });
+
+  it("担当者が決まっていないタスクが無ければ 0 件になる", () => {
+    assert.equal(listTasks({ assignee: "none" }, openDb()).length, 0);
+  });
+
+  it("担当者が決まっていないタスクだけを返し、ステータスと併用できる", () => {
+    const db = openDb();
+    db.exec("PRAGMA foreign_keys = OFF");
+    db.exec("CREATE TABLE tasks_bak AS SELECT * FROM tasks");
+    db.exec("DROP TABLE tasks");
+    db.exec(
+      "CREATE TABLE tasks (id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT NOT NULL, status TEXT NOT NULL, assignee TEXT, due_date TEXT NOT NULL, priority TEXT NOT NULL DEFAULT 'medium', estimate_minutes INTEGER)",
+    );
+    db.exec("INSERT INTO tasks SELECT * FROM tasks_bak");
+    db.exec("INSERT INTO tasks (title, status, assignee, due_date) VALUES ('未割当', 'todo', NULL, '2026-12-01')");
+    db.exec("INSERT INTO tasks (title, status, assignee, due_date) VALUES ('未割当完了', 'done', NULL, '2026-12-01')");
+    const none = listTasks({ assignee: "none" }, db);
+    assert.deepEqual(none.map((t) => t.title), ["未割当", "未割当完了"]);
+    assert.deepEqual(listTasks({ assignee: "none", status: "todo" }, db).map((t) => t.title), ["未割当"]);
+  });
+});
+
 describe("parseAssignee", () => {
   it("accepts a known assignee and treats unknown values as unspecified", () => {
     const db = openDb();

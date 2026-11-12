@@ -47,6 +47,7 @@ export default async function TasksPage({ searchParams }: Props) {
                 {a.name}
               </option>
             ))}
+            <option value="none">担当者なし</option>
           </select>
         </label>{" "}
         <label>

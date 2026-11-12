@@ -59,6 +59,9 @@ export type TaskFilter = {
   sort?: TaskSort;
 };
 
+/** 「担当者なし」を表す絞り込みの値。 */
+export const UNASSIGNED = "none";
+
 export type Assignee = { id: string; name: string };
 
 /** タスクに登場する担当者（重複なし）。 */
@@ -70,9 +73,10 @@ export function listAssignees(db: Db = getDb()): Assignee[] {
     .all() as Assignee[];
 }
 
-/** クエリの担当者 ID を検証する。タスクに登場する担当者でなければ undefined（指定なし）。 */
+/** クエリの担当者 ID を検証する。`none`（担当者なし）かタスクに登場する担当者でなければ undefined（指定なし）。 */
 export function parseAssignee(value: unknown, db: Db = getDb()): string | undefined {
   if (typeof value !== "string") return undefined;
+  if (value === UNASSIGNED) return UNASSIGNED;
   return listAssignees(db).some((a) => a.id === value) ? value : undefined;
 }
 
@@ -105,7 +109,7 @@ export function listTasks(filter: TaskFilter = {}, db: Db = getDb()): Task[] {
       : "ORDER BY id";
   const rows = db
     .prepare(
-      "SELECT id, title, status, assignee, due_date, priority, estimate_minutes FROM tasks WHERE (:status IS NULL OR status = :status) AND (:assignee IS NULL OR assignee = :assignee) AND (:tag IS NULL OR EXISTS (SELECT 1 FROM task_tags g WHERE g.task_id = tasks.id AND g.name = :tag)) " + orderBy,
+      "SELECT id, title, status, assignee, due_date, priority, estimate_minutes FROM tasks WHERE (:status IS NULL OR status = :status) AND (:assignee IS NULL OR (:assignee = 'none' AND assignee IS NULL) OR (:assignee <> 'none' AND assignee = :assignee)) AND (:tag IS NULL OR EXISTS (SELECT 1 FROM task_tags g WHERE g.task_id = tasks.id AND g.name = :tag)) " + orderBy,
     )
     .all({ status: filter.status ?? null, assignee: filter.assignee ?? null, tag: filter.tag ?? null }) as TaskRow[];
   return rows.map(toTask);
