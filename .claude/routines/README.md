@@ -43,7 +43,7 @@ flowchart LR
 
 - **同時に実装する Issue は 4 件まで。** `in-progress` の付いた開いている Issue の数で数える。
 - **依存は GitHub の依存関係（blocked by）で表す。** 人が Issue を作るときに、先に終わらせる Issue を「blocked by」に登録する。調べ方は GitHub MCP の `issue_read`、または REST の `GET /repos/{owner}/{repo}/issues/{number}/dependencies/blocked_by`。
-- **依存先**は、blocked by に登録された Issue と、本文に「#N の後」のように書かれた #N の両方を指す（登録し忘れても待てるように）。キューに載せる側も取り出す側も、この定義を使う。
+- **依存先**は、blocked by に登録された Issue と、本文に「#N の後」のように書かれた #N と、実装の役が「同じファイルを変える PR」として記録した PR（`<!-- factory:queued wait=#N -->` のコメント）の 3 つを指す。キューに載せる側も取り出す側も、この定義を使う。
 - 実装の役は、着手する前に「依存先がすべて閉じている」「作業中が 4 件未満」を確かめる。どちらかに当たらなければ、`ready` を外して `queued` を付け、何を待っているかをコメントして終える。
 - **キューから取り出す:** `queued` の Issue のうち、依存先がすべて閉じているものを、古い順に 1 件選び、`queued` を外して `ready` を付ける（実装が起動する）。作業中が 4 件以上なら取り出さない。取り出すのは次のとき。
   - 実装の役が終わるとき（PR を Ready にしたとき、または止まるとき）に 1 件。
