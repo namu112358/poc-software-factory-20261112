@@ -1,12 +1,13 @@
 import { Fragment } from "react";
 import { listCommentersByTask } from "@/lib/comments";
 import { exportHref } from "@/lib/export";
+import { parseIncludeArchived } from "@/lib/task-query";
 import { requireUser } from "@/lib/session";
 import { listTagsByTask } from "@/lib/tags";
 import { assigneeName, PRIORITY_LABELS, STATUS_LABELS, SORT_LABELS, TASK_LIST_HELP, TASK_SORTS, TASK_STATUSES, formatCurrentUser, clearFilterHref, formatEstimate, formatJstDate, formatDaysLeft, formatEstimateTotal, countUnestimated, formatUnestimatedCount, formatMemoPreview, formatTaskCount, formatDoneCount, priorityFontWeight, formatOverdueCount, countOverdue, memoTooltip, isOverdue, isTaskStatus, listAssignees, listTasks, parseAssignee, parseKeyword, parseSort, parseTagFilter, sumEstimateMinutes, taskRowDoneAttr, todayInJapan } from "@/lib/tasks";
 
 type Props = {
-  searchParams: Promise<{ status?: string; assignee?: string; tag?: string; q?: string; sort?: string }>;
+  searchParams: Promise<{ status?: string; assignee?: string; tag?: string; q?: string; sort?: string; archived?: string }>;
 };
 
 export default async function TasksPage({ searchParams }: Props) {
@@ -17,8 +18,9 @@ export default async function TasksPage({ searchParams }: Props) {
   const tag = parseTagFilter(params.tag);
   const q = parseKeyword(params.q);
   const sort = parseSort(params.sort);
+  const includeArchived = parseIncludeArchived(params.archived);
   const assignees = listAssignees();
-  const tasks = listTasks({ status, assignee, tag, q, sort });
+  const tasks = listTasks({ status, assignee, tag, q, sort, includeArchived });
   const today = todayInJapan();
   const clearHref = clearFilterHref(tasks.length);
   const unestimatedText = formatUnestimatedCount(countUnestimated(tasks));
@@ -74,6 +76,9 @@ export default async function TasksPage({ searchParams }: Props) {
             ))}
           </select>
         </label>{" "}
+        <label>
+          <input type="checkbox" name="archived" value="include" defaultChecked={includeArchived} data-testid="include-archived" /> アーカイブ済みも表示
+        </label>{" "}
         {tag !== undefined && <input type="hidden" name="tag" value={tag} />}
         <button type="submit">絞り込む</button>
       </form>
@@ -114,6 +119,12 @@ export default async function TasksPage({ searchParams }: Props) {
                 <a href={`/tasks/${task.id}`} title={memoTooltip(task.memo)} style={task.status === "done" ? { color: "inherit" } : undefined}>
                   {task.title}
                 </a>
+                {task.archived && (
+                  <>
+                    {" "}
+                    <small data-testid="archived-label">アーカイブ済み</small>
+                  </>
+                )}
                 {formatMemoPreview(task.memo) !== null && (
                   <small data-testid="memo-preview" style={{ display: "block" }}>
                     {formatMemoPreview(task.memo)}
