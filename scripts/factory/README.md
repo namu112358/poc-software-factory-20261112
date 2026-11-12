@@ -11,6 +11,7 @@ Routine（`.claude/routines/`）が使う判定のスクリプトです。GitHub
 | `relabel --minutes N` | 割り当て（15）・巡回（30） | 起動しなかった実装の付け直しの対象（`relabel`）と、2 回目で人に回すもの（`needsHuman`） |
 | `handled --since <時刻>` | 割り当て | ほかの割り当てのセッションが、その時刻より後に処理した Issue・PR |
 | `budget` | （確かめ用） | 直近 60 分に `in-progress`・`in-progress:hard` を付けた回数と、残り |
+| `merge-check <PR>` | 人（`merge` を付ける前） | `merge` を付けてよいか（`ok`）と理由。最新の `factory:review` が `verdict=ok` で、そのコミットより後が「取り込みだけのコミット」（`git show --remerge-diff` の差分が空）だけなら `ok` |
 
 `node scripts/factory/claim.ts <コマンド>` で動かす（Node 22.18 以上。クラウドのプロキシを通すため、自分を `NODE_USE_ENV_PROXY=1` で起動し直す）。`decision` が `error` のときは終了コード 2。
 
@@ -24,6 +25,10 @@ Routine（`.claude/routines/`）が使う判定のスクリプトです。GitHub
 - **budget**: 実装の Routine は 1 時間あたりの起動の上限を超えると、起動のイベントが捨てられる（数値は非公開）。直近 60 分の起動のきっかけを 45 回（`READY_EVENTS_PER_HOUR_BUDGET`）までにする。2026-11-12 は 53〜55 回で止まった（#250）。
 - **`relabel`**: `in-progress` が付いて N 分以上たち、その後に実装の着手のコメント（`factory:implement action=start`）も PR も無いもの。付け直しは 1 回まで（`relabel-start` のコメントがあれば `needsHuman`）。
 - **`handled`**: PR が続けて閉じると割り当てが同時に動くので、ほかのセッションが先に処理したものを飛ばす。ほぼ同時に始まった 2 つは防げない。
+
+## 人の手順: merge を付ける前
+
+PR に `merge` を付ける前に、必ず `node scripts/factory/claim.ts merge-check <PR>` を実行し、`ok` が `true` のときだけ付ける。`false` なら `reason` のとおりにする（レビューを起こし直す、など）。レビューの ok が無いまま `merge` が付いた PR が 4 本あったため（#293）。
 
 ## 人の手順: 最初に動かすとき
 

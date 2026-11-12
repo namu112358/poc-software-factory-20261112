@@ -4,6 +4,7 @@
 //   node scripts/factory/claim.ts precheck <Issue> --files a.ts,b.ts   候補 1 件を着手させてよいかの確かめ（actions に、そのまま行う操作）
 //   node scripts/factory/claim.ts relabel --minutes 15                  起動しなかった実装の付け直しの対象（付け直す数は budget の残りまで）
 //   node scripts/factory/claim.ts handled --since <ISO 8601>            ほかの割り当てがもう処理した Issue・PR
+//   node scripts/factory/claim.ts merge-check <PR>                      merge のラベルを付けてよいか（最新のレビューが ok で、その後は取り込みだけか）
 //   node scripts/factory/claim.ts budget                                直近 60 分に in-progress を付けた回数と、あと何回付けてよいか
 // Node 22.18 以上（型を外して .ts をそのまま動かす）。クラウドのプロキシを通すため、NODE_USE_ENV_PROXY=1 で自分を起動し直す。
 import { spawnSync } from "node:child_process";
@@ -14,6 +15,8 @@ import {
   pick,
   STALLED_LABELS,
   errorActions,
+  mergeCheck,
+  TRUSTED_ASSOCIATIONS,
   precheck,
   precheckActions,
   readyBudget,
@@ -183,6 +186,39 @@ async function main(): Promise<unknown> {
     }
     case "budget":
       return loadBudget();
+    case "merge-check": {
+      if (!Number.isInteger(n)) throw new Error("PR の番号を指定する");
+      const pr = (await get<{ head: { sha: string } }>(`/repos/${REPO}/pulls/${n}`)).data;
+      const reviews = (await getAll<{ body: string | null; submitted_at: string; author_association: string }>(`/repos/${REPO}/pulls/${n}/reviews`))
+        .sort((a, b) => (a.submitted_at < b.submitted_at ? -1 : 1))
+        .map((r) => ({ body: r.body ?? "", association: r.author_association }));
+      const git = (...a: string[]) => spawnSync("git", a, { encoding: "utf-8" });
+      const commitOf = /<!--\s*factory:review\s+verdict=\w+[^>]*?commit=([0-9a-f]+)/;
+      const last = reviews
+        .filter((r) => TRUSTED_ASSOCIATIONS.includes(r.association))
+        .map((r) => commitOf.exec(r.body)?.[1])
+        .filter(Boolean)
+        .at(-1);
+      let after: { sha: string; mergeOnly: boolean }[] | null = [];
+      if (last && !pr.head.sha.startsWith(last)) {
+        const fetched = git("fetch", "-q", "origin", `+pull/${n}/head:refs/factory/pr-${n}`, "+main:refs/factory/main");
+        if (fetched.status !== 0) throw new Error(`git fetch に失敗した（${fetched.stderr.trim()}）。付けずに、後でやり直す。`);
+        // 手元の参照が古いまま判定しないよう、取り込んだ PR の先頭が GitHub の head と同じかを確かめる
+        const local = git("rev-parse", `refs/factory/pr-${n}`).stdout.trim();
+        if (local !== pr.head.sha) throw new Error(`手元の PR の先頭（${local.slice(0, 7)}）が GitHub の head（${pr.head.sha.slice(0, 7)}）と違う。付けずに、後でやり直す。`);
+        const list = git("rev-list", "--first-parent", `${last}..refs/factory/pr-${n}`);
+        if (list.status !== 0) after = null;
+        else
+          after = list.stdout.split("\n").filter(Boolean).map((sha) => {
+            const parents = git("rev-list", "--parents", "-n1", sha).stdout.trim().split(" ").slice(1);
+            const diff = git("show", "--format=", "--remerge-diff", sha).stdout.trim();
+            // 取り込みだけのコミット: main を取り込んだ（2 つ目の親が main に含まれる）マージで、--remerge-diff の差分が空
+            const fromMain = parents.length === 2 && git("merge-base", "--is-ancestor", parents[1], "refs/factory/main").status === 0;
+            return { sha, mergeOnly: fromMain && diff === "" };
+          });
+      }
+      return { pr: n, ...mergeCheck({ reviews, headSha: pr.head.sha, after }) };
+    }
     case "relabel": {
       const minutes = Number(arg("minutes") ?? "15");
       const [inProgress, b] = await Promise.all([loadInProgress(), loadBudget()]);
@@ -204,7 +240,7 @@ async function main(): Promise<unknown> {
       return { since, mySession: mySession(), handled: handledByOthers({ comments, since, mySession: mySession() }) };
     }
     default:
-      throw new Error("pick / precheck / relabel / handled / budget のどれかを指定する");
+      throw new Error("pick / precheck / relabel / handled / budget / merge-check のどれかを指定する");
   }
 }
 
