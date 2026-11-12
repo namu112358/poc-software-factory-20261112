@@ -6,7 +6,7 @@ export function assigneeName(assignee: string | null | undefined, assignees: Ass
   return assignees.find((a) => a.id === assignee)?.name ?? assignee;
 }
 
-export const TASK_LIST_HELP = "ステータス・担当者・タグで絞り込み、優先度の高い順に並べ替えられます。";
+export const TASK_LIST_HELP = "キーワード・ステータス・担当者・タグ・期限で絞り込み、作成順・優先度の高い順・期限の近い順に並べ替えられます。";
 
 export function formatTaskCount(count: number): string {
   return `${count} 件`;
