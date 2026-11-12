@@ -29,7 +29,13 @@ flowchart LR
 | `blocked:question` | Issue | 確認事項があり止まっている | 実装・修正 |
 | `needs-human` | Issue・PR | 上限に達した・手順の外のことが要る | どの役でも |
 
-止まるときは、`ready` と `in-progress` を外してから `blocked:question` か `needs-human` を付ける。人は、答えた後に `ready` を付け直す。`ready` が付いたまま止まると、付け直しても「ラベルが付いた」というイベントが起きず、実装が起動しないため。
+止まるときは、`ready` と `in-progress` を外してから `blocked:question` か `needs-human` を付ける。`ready` が付いたまま止まると、付け直しても「ラベルが付いた」というイベントが起きず、実装が起動しないため。
+
+人が答えた後の再開のしかたは、どこで止まったかで変わる。
+
+- **実装で止まった（PR が無い）:** `blocked:question`・`needs-human` を外し、Issue に `ready` を付け直す。
+- **修正で止まった（PR が draft）:** `blocked:question`・`needs-human` を外し、PR を Ready にしてから draft に戻す。Ready にしたときはレビューも起動するが、同じ版はレビュー済みなので何もせずに終え、draft に戻したときに修正が起動する。
+- **レビューを通った後に人が直してほしい:** PR にコメントを書いて draft に戻す（修正が起動する。コメントを指摘として読むよう、`fix.md` の 1 を満たすには人がレビューのコメントを書く）。
 
 ## GitHub トリガーの設定
 
