@@ -1,6 +1,8 @@
 # 巡回の手順書
 
-1 時間ごとに起動します。GitHub のイベントは上限を超えると捨てられ、セッションが途中で止まることもあり、PR どうしの衝突はイベントにならないため、それらを拾います。コードは書きません。
+1 時間ごとに起動します。GitHub のイベントは上限を超えると捨てられ、セッションが途中で止まることもあり、PR どうしの衝突はイベントにならないため、それらを拾います。割り当ての役が動かなかったときの備えとして、待っている Issue に着手もさせます。コードは書きません。
+
+以下の `in-progress` は、`in-progress:hard` も含みます。
 
 ## 1. 取りこぼしを拾う
 
@@ -8,9 +10,9 @@
 
 | 状態 | 見なすこと | すること |
 |---|---|---|
-| Issue に `ready` か `ready:hard` が付いたまま | 実装が起動しなかった | 付け直す直前に `node scripts/factory/claim.ts budget` を実行し、`remaining` 件まで（古い順）、付いていたラベルを外して、同じラベルを付け直す（実装がもう一度起動する）。残りを超えた分と、残りが 0 のときは付け直さず、次の巡回に回す（#250。「2.」の `pick` は、ここで付けた `ready` も数えて取り出す数を減らす） |
+| Issue に `in-progress` が付き、その後に実装の役の着手のコメント（`<!-- factory:implement action=start -->`）も `claude/issue-<番号>` の PR も無い | 実装が起動しなかった | 付け直す直前に `node scripts/factory/claim.ts budget` を実行し、`remaining` 件まで（古い順。2 件以上なら 30 秒あけて 1 件ずつ）、付いていたラベル（`in-progress` か `in-progress:hard`）を外して、同じラベルを付け直す（実装がもう一度起動する。`action=relabel-start`）。残りを超えた分と、残りが 0 のときは付け直さず、次の巡回に回す（#250。「2.」の `pick` は、ここで付けた分も数えて選ぶ数を減らす） |
 | `claude/issue-<番号>` の draft の PR で、最新のコミットの CI（`app-check`）が成功し、最新のレビューの後に「取り込みだけのコミット」（`README.md`）でないコミットがあり（レビューが一度も無ければ、それでよい）、`main` と衝突しておらず（`mergeable` が true）、最後の動き（下の行と同じ）から 15 分以上 | 実装か修正が CI を待ちきれずに終えたか、途中で止まった（PR を Ready にする直前） | PR を Ready にし、Issue に `in-progress` が残っていれば外す（レビューが起動する。#184・#219） |
-| Issue に `in-progress` が付き、`claude/issue-<番号>` の PR が無いか draft のまま（上の行に当たらないもの）。最後の動き（Issue・PR のコメント、PR へのコミット、ラベルの変化のうち最も新しいもの）から 60 分以上 | 実装が途中で止まった | `in-progress` を外し、経過をコメントして `needs-human` を付ける |
+| Issue に `in-progress` が付き、`claude/issue-<番号>` の PR が無いか draft のまま（上の 2 行に当たらないもの）。最後の動き（Issue・PR のコメント、PR へのコミット、ラベルの変化のうち最も新しいもの）から 60 分以上 | 実装が途中で止まった | `in-progress` を外し、経過をコメントして `needs-human` を付ける |
 | `claude/issue-<番号>` の draft の PR で、最新のコミットの CI（`app-check`）が失敗しているか終わっておらず、Issue に `in-progress` が無く、最後の動き（上の行と同じ）から 60 分以上（下の `verdict=changes` の行・衝突の行に当たらないもの） | 実装が CI を待ちきれずに終え、その後に CI が落ちたか終わらなかった | 経過をコメントして `needs-human` を付ける |
 | Ready の PR で、最新のコミットに対するレビュー（`commit=<最新のコミット>`）が無い。ただし、最新の `verdict=ok` のレビューの後のコミットが「取り込みだけのコミット」（`README.md`）だけなら対象にしない | レビューが起動しなかった | PR を draft にしてから Ready に戻す（レビューがもう一度起動する。修正も起動するが、直すものが無いので何もせずに終える） |
 | draft の PR で、最新のレビューが `verdict=changes` かつ `commit=` が最新のコミットと同じ | 修正が起動しなかった | `needs-human` を付けて理由をコメントする |
@@ -18,11 +20,11 @@
 | Ready の PR が `main` と衝突している（`mergeable` が false） | 割り当ての役が拾わなかった | 衝突していることをコメントし、PR を draft に戻す（修正が起動して `main` を取り込む） |
 | 閉じた Issue に `in-progress` が残っている | 片付け漏れ | `in-progress` を外す |
 
-同じものに同じことをするのは 1 回まで。2 回目は `needs-human` を付けて理由をコメントする。`ready` の付け直しは、割り当ての役の `factory:dispatch action=relabel-ready` も 1 回目として数える。したことは、コメントの `<!-- factory:patrol action=<したこと> -->` で数える。
+同じものに同じことをするのは 1 回まで。2 回目は `needs-human` を付けて理由をコメントする。`in-progress` の付け直しは、割り当ての役の `factory:dispatch action=relabel-start` も 1 回目として数える。したことは、コメントの `<!-- factory:patrol action=<したこと> -->` で数える。
 
-## 2. キューから取り出す
+## 2. 待っている Issue に着手させる
 
-`README.md` の「キュー」のとおり、`node scripts/factory/claim.ts pick` の結果に従って `queued` の Issue を取り出す（`pick` が `error` なら取り出さず、出力を集計のコメントに書く。割り当ての役が動かなかったときの備え）。
+`dispatch.md` の「3. 待っている Issue に着手させる」と同じことをする（`pick` → 1 件ずつ、変えるファイルを決めて `precheck`、難易度を判定して `in-progress` か `in-progress:hard` を付ける。2 件目からは 30 秒あける）。`pick` が `error` なら着手させず、出力を集計のコメントに書く。割り当ての役が動かなかったときと、作業中が 0 件で割り当ての役が動くきっかけ（PR が閉じること）が無いときの備え。
 
 ## 3. 集計する
 

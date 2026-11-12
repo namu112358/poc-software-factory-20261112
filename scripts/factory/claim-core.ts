@@ -1,21 +1,23 @@
-// Factory の Routine が使う「着手してよいか・キューから取り出してよいか」の判定（#137・#218・#220）。
-// GitHub への書き込み（ラベルの付け外し・コメント）はしない。判定だけを返し、役がその結果に従う。
-// 決まりの本文は .claude/routines/README.md の「キュー」と implement.md の「1.」「2.」。
+// Factory の Routine が使う「着手してよいか・待っている Issue のどれから着手するか」の判定（#137・#218・#220）。
+// GitHub への書き込み（ラベルの付け外し・コメント）はしない。判定だけを返し、割り当ての役がその結果に従う。
+// 決まりの本文は .claude/routines/README.md の「キュー」と dispatch.md の「3.」。
+// 用語: 「待っている Issue」は、ready があり in-progress / in-progress:hard の無い Issue（コード上は queued と呼ぶ。実装の起動の合図を ready から in-progress に変えたとき、queued のラベルをやめた）。
 
 export const WIP_LIMIT = 4;
 
 /**
- * 実装の Routine の起動のきっかけ（`ready` / `ready:hard` が付いたこと）を、直近 60 分に何回まで使うか（#250）。
+ * 実装の Routine の起動のきっかけ（`in-progress` / `in-progress:hard` が付いたこと）を、直近 60 分に何回まで使うか（#250）。
  * GitHub のイベントには Routine ごとの 1 時間あたりの上限があり、超えたイベントは捨てられる（数値は非公開）。
  * 2026-11-12 は、直近 60 分のきっかけが 53〜55 回になったところで実装の Routine が起動しなくなった。
  * 余裕をみて 45 回にする。上限が分かったら、この値だけを直す。
- * 上限が ready 以外のイベント（ほかのラベルなど、フィルタを通る前のもの）も数えるなら、数える対象も見直す。
+ * 上限が起動のきっかけ以外のイベント（ほかのラベルなど、フィルタを通る前のもの）も数えるなら、数える対象も見直す。
+ * （名前の READY は、きっかけが ready だったときの名残り。値の意味は「起動のきっかけ」）
  */
 export const READY_EVENTS_PER_HOUR_BUDGET = 45;
 
-/** 直近 60 分のきっかけの数から、あと何回 ready を付けてよいか */
-export function readyBudget(readyLastHour: number): { readyLastHour: number; budget: number; remaining: number } {
-  return { readyLastHour, budget: READY_EVENTS_PER_HOUR_BUDGET, remaining: Math.max(0, READY_EVENTS_PER_HOUR_BUDGET - readyLastHour) };
+/** 直近 60 分のきっかけの数から、あと何回 in-progress を付けてよいか */
+export function readyBudget(startsLastHour: number): { startsLastHour: number; budget: number; remaining: number } {
+  return { startsLastHour, budget: READY_EVENTS_PER_HOUR_BUDGET, remaining: Math.max(0, READY_EVENTS_PER_HOUR_BUDGET - startsLastHour) };
 }
 
 export type Comment = { body: string; createdAt: string; author?: string };
@@ -313,43 +315,6 @@ export function precheck(args: {
 /** 自分の PR がすでにあれば、引き下がらせずに進めさせる（残った PR が Issue の再開を止めるため。#248） */
 function ownPrGo(pr: number): Decision {
   return { decision: "go", note: `この Issue の PR #${pr} がすでに開いている。引き下がらずに、その PR を引き継いで進める（CI を見て Ready にする）。` };
-}
-
-/** 記録の前後: 時刻が早いほうが先。同じ時刻なら番号が小さいほうが先 */
-function isBefore(a: { number: number; at: string }, b: { number: number; at: string }): boolean {
-  return a.at < b.at || (a.at === b.at && a.number < b.number);
-}
-
-/**
- * 着手して 30 秒後の読み直し（implement.md の「2. 着手する」の 2）。
- * 時刻は、それぞれの Issue の最新の factory:touch を使う。
- */
-export function confirm(args: { self: IssueInfo; inProgress: IssueInfo[]; ownPr?: number | null }): Decision | { decision: "error"; reason: string } {
-  if (args.ownPr) return ownPrGo(args.ownPr);
-  const mine = latestTouch(args.self);
-  if (!mine) return { decision: "error", reason: `#${args.self.number} に factory:touch の記録が無い。先に記録してから実行する。` };
-  const me = { number: args.self.number, at: mine.createdAt };
-  const others = args.inProgress.filter((i) => i.number !== args.self.number);
-  const earlier: number[] = [];
-  let firstOverlap: { number: number; files: string[] } | null = null;
-  for (const i of [...others].sort((a, b) => a.number - b.number)) {
-    const t = latestTouch(i);
-    if (!t) {
-      earlier.push(i.number); // 記録の無い作業中の Issue は、先に着手したものとして数える
-      continue;
-    }
-    if (!isBefore({ number: i.number, at: t.createdAt }, me)) continue;
-    earlier.push(i.number);
-    const o = overlap(mine.value, t.value);
-    if (o.length > 0 && firstOverlap === null) firstOverlap = { number: i.number, files: o };
-  }
-  if (firstOverlap) {
-    return queue("retreat", firstOverlap.number, mine.value, `先に着手した #${firstOverlap.number} と同じファイル（${firstOverlap.files.join("、")}）を変えるので、引き下がって待つ。`);
-  }
-  if (earlier.length >= WIP_LIMIT) {
-    return queue("retreat", "slot", mine.value, `空き待ち。自分より先に着手した作業中の Issue が ${earlier.length} 件（#${earlier.join("・#")}）あり、上限の ${WIP_LIMIT} 件に達しているので引き下がる。`);
-  }
-  return { decision: "go" };
 }
 
 /** 開いている PR（自分の PR を除く）と作業中の Issue のうち、files と同じファイルを変えるもの */
