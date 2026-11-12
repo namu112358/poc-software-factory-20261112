@@ -17,7 +17,7 @@ export function hasTaskViewParams(params: Record<string, unknown>): boolean {
   return TASK_VIEW_KEYS.some((k) => params[k] !== undefined);
 }
 
-/** 条件を検証して、有効な項目だけの文字列の組にする。不正な値・今は無いタグや担当者・既定値の項目は入れない（指定なし）。 */
+/** 条件を検証して、有効な項目だけの文字列の組にする。不正な値・今は無いタグ・利用者でない担当者・既定値の項目は入れない（指定なし）。 */
 export function sanitizeTaskViewQuery(raw: Record<string, unknown>, db: Db = getDb()): TaskViewQuery {
   const out: TaskViewQuery = {};
   const status = raw.status;
@@ -53,7 +53,7 @@ export function clearTaskViewPrefs(userId: string, db: Db = getDb()): void {
   db.prepare("DELETE FROM task_view_prefs WHERE user_id = ?").run(userId);
 }
 
-/** この利用者の覚えた条件を返す。読むときにも検証し直し、壊れた値や今は無いタグ・担当者の項目は外す。 */
+/** この利用者の覚えた条件を返す。読むときにも検証し直し、壊れた値や今は無いタグ・利用者でない担当者の項目は外す。 */
 export function loadTaskViewPrefs(userId: string, db: Db = getDb()): TaskViewQuery {
   const row = db.prepare("SELECT query FROM task_view_prefs WHERE user_id = ?").get(userId) as { query: string } | undefined;
   if (!row) return {};

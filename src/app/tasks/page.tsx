@@ -4,7 +4,7 @@ import { listCommentersByTask } from "@/lib/comments";
 import { NOTHING_TO_DO_TEXT, listExtensionsAwaitingMe, listMyDueTasks } from "@/lib/my-attention";
 import { listAssigneeOptions } from "@/lib/members";
 import { BulkBar, BulkCheckbox, BulkSelection } from "./BulkActions";
-import { buildCheckboxOptions } from "@/lib/task-filter-form";
+import { buildAssigneeFilterOptions, buildCheckboxOptions } from "@/lib/task-filter-form";
 import { exportHref } from "@/lib/export";
 import { parseIncludeArchived } from "@/lib/task-query";
 import { RESET_TASK_VIEW_HREF, resolveTaskViewQuery } from "@/lib/task-view-prefs";
@@ -121,7 +121,7 @@ export default async function TasksPage({ searchParams }: Props) {
         </label>{" "}
         <fieldset data-testid="assignee-filter">
           <legend>担当者（選んだだれかが担当のタスクが出ます）</legend>
-          {buildCheckboxOptions([...assignees.map((a) => ({ value: a.id, label: a.name })), { value: "none", label: "担当者なし" }], selectedAssignees).map((o) => (
+          {buildAssigneeFilterOptions(selectedAssignees).map((o) => (
             <label key={o.value}>
               <input type="checkbox" name="assignee" value={o.value} defaultChecked={o.checked} /> {o.label}{" "}
             </label>
