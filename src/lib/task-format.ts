@@ -12,6 +12,12 @@ export function formatTaskCount(count: number): string {
   return `${count} 件`;
 }
 
+/** 表示中のタスクのうち、完了したものの件数の表示（「完了 N 件 / 全 M 件」）。 */
+export function formatDoneCount(tasks: { status: TaskStatus }[]): string {
+  const done = tasks.filter((t) => t.status === "done").length;
+  return `完了 ${done} 件 / 全 ${tasks.length} 件`;
+}
+
 /** 一覧の見出しの下に出す、ログイン中のユーザーの表示。ログイン ID ではなく表示名を使う。 */
 export function formatCurrentUser(name: string): string {
   return `ログイン中: ${name}`;
