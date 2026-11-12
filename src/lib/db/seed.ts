@@ -2,10 +2,11 @@
 
 /** 初期ユーザー共通のパスワード（PoC の検証用。本番では使わない）。 */
 export const SEED_PASSWORD = "password";
+/** role: member（メンバー）・coordinator（取りまとめる人。延長の申請を承認・却下できる）。 */
 export const SEED_USERS = [
-  { id: "sato", name: "佐藤" },
-  { id: "suzuki", name: "鈴木" },
-  { id: "tanaka", name: "田中" },
+  { id: "sato", name: "佐藤", role: "member" },
+  { id: "suzuki", name: "鈴木", role: "member" },
+  { id: "tanaka", name: "田中", role: "coordinator" },
 ] as const;
 
 export const SEED_TASKS = [

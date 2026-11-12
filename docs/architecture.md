@@ -11,6 +11,7 @@
 ## ログイン
 
 - 初期ユーザーは `sato` / `suzuki` / `tanaka`（パスワードは共通で `password`。PoC の検証用）。`/login` からログインする。
+- 利用者には役割（`users.role`）がある。`tanaka` だけが取りまとめる人（`coordinator`）で、`sato`・`suzuki` はメンバー（`member`）。延長の申請を承認・却下できるのは取りまとめる人だけ（自分の申請は除く）。
 - セッションは DB の `sessions` テーブルと Cookie `poc_session`（`src/lib/auth.ts`）。
 
 ## API

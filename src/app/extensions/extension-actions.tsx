@@ -1,6 +1,6 @@
 "use client";
 // 承認待ちの申請の一覧。各行の「承認」「却下」は、確認のダイアログで OK したときだけ送り、結果を一覧の上に出して読み込み直す。
-// 自分の申請の行にはボタンを出さない。
+// ボタンは取りまとめる人にだけ出し、自分の申請の行には出さない。
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import {
@@ -18,7 +18,15 @@ export type PendingExtensionView = DecidableExtension & {
   waitDays: number | null; // 48 時間以上待っているときの日数。満たなければ null
 };
 
-export function PendingExtensionsTable({ rows, userId }: { rows: PendingExtensionView[]; userId: string }) {
+export function PendingExtensionsTable({
+  rows,
+  userId,
+  isCoordinator,
+}: {
+  rows: PendingExtensionView[];
+  userId: string;
+  isCoordinator: boolean;
+}) {
   const router = useRouter();
   const [message, setMessage] = useState<{ text: string; error: boolean }>();
   const [pendingId, setPendingId] = useState<number>();
@@ -85,7 +93,7 @@ export function PendingExtensionsTable({ rows, userId }: { rows: PendingExtensio
                   )}
                 </td>
                 <td>
-                  {canDecideExtension(r.requester, userId) ? (
+                  {canDecideExtension(r.requester, userId, isCoordinator) ? (
                     <>
                       <button
                         type="button"
@@ -104,8 +112,10 @@ export function PendingExtensionsTable({ rows, userId }: { rows: PendingExtensio
                         却下
                       </button>
                     </>
-                  ) : (
+                  ) : r.requester === userId ? (
                     <span data-testid="extension-own">自分の申請</span>
+                  ) : (
+                    <span data-testid="extension-coordinator-only">取りまとめる人が判断します</span>
                   )}
                 </td>
               </tr>

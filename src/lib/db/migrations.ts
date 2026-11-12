@@ -273,4 +273,14 @@ export const MIGRATIONS: readonly Migration[] = [
       );
     `,
   },
+  {
+    version: 23,
+    name: "user_role",
+    sql: `
+      -- 利用者の役割。member（メンバー）か coordinator（取りまとめる人）。延長の申請を承認・却下できるのは coordinator だけ。
+      -- すでにいる利用者は member から始め、初期の 3 人のうち田中（tanaka）だけを coordinator にする。
+      ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'member' CHECK (role IN ('member', 'coordinator'));
+      UPDATE users SET role = 'coordinator' WHERE id = 'tanaka';
+    `,
+  },
 ];

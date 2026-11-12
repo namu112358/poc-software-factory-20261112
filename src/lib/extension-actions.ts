@@ -24,9 +24,12 @@ type Deps = {
 
 export const ALREADY_DECIDED_MESSAGE = "この申請はすでに判断されています。一覧を読み込み直しました。";
 
-/** 承認・却下のボタンを出すか。自分の申請は自分で判断できないので出さない（ID で比べる）。 */
-export function canDecideExtension(requester: string, userId: string): boolean {
-  return requester !== userId;
+/**
+ * 承認・却下のボタンを出すか。取りまとめる人だけに出し、自分の申請には出さない（ID で比べる）。
+ * 画面の出し分けだけで、判断できるかは API（decideExtension）でも確かめる。
+ */
+export function canDecideExtension(requester: string, userId: string, isCoordinator: boolean): boolean {
+  return isCoordinator && requester !== userId;
 }
 
 /** 確認のダイアログに出す文言。 */

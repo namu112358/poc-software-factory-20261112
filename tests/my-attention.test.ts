@@ -47,14 +47,26 @@ describe("listMyDueTasks", () => {
 });
 
 describe("listExtensionsAwaitingMe", () => {
-  it("lists pending requests from others, not my own or decided ones", () => {
+  it("取りまとめる人には、ほかの人が出した承認待ちを出し、自分の申請・判断済みは出さない", () => {
+    const db = emptyDb();
+    const t = add(db, "対象", "2026-11-10");
+    const t2 = add(db, "対象2", "2026-11-10");
+    const t3 = add(db, "判断済み", "2026-11-10");
+    createExtension({ taskId: t.id, requester: "suzuki", newDueDate: "2026-11-20", reason: "r" }, db);
+    createExtension({ taskId: t2.id, requester: "tanaka", newDueDate: "2026-11-20", reason: "r" }, db);
+    const decided = createExtension({ taskId: t3.id, requester: "sato", newDueDate: "2026-11-20", reason: "r" }, db);
+    db.prepare("UPDATE due_date_extensions SET status = 'rejected', decided_by = 'tanaka' WHERE id = ?").run((decided as { id: number }).id);
+    assert.deepEqual(listExtensionsAwaitingMe("tanaka", db).map((r) => r.taskId), [t.id]);
+  });
+
+  it("取りまとめる人でなければ、ほかの人の承認待ちがあっても何も出さない", () => {
     const db = emptyDb();
     const t = add(db, "対象", "2026-11-10");
     const t2 = add(db, "対象2", "2026-11-10");
     createExtension({ taskId: t.id, requester: "suzuki", newDueDate: "2026-11-20", reason: "r" }, db);
-    createExtension({ taskId: t2.id, requester: "sato", newDueDate: "2026-11-20", reason: "r" }, db);
-    const rows = listExtensionsAwaitingMe("sato", db);
-    assert.deepEqual(rows.map((r) => r.taskId), [t.id]);
-    assert.deepEqual(listExtensionsAwaitingMe("suzuki", db).map((r) => r.taskId), [t2.id]);
+    createExtension({ taskId: t2.id, requester: "tanaka", newDueDate: "2026-11-20", reason: "r" }, db);
+    assert.deepEqual(listExtensionsAwaitingMe("sato", db), []);
+    assert.deepEqual(listExtensionsAwaitingMe("suzuki", db), []);
+    assert.deepEqual(listExtensionsAwaitingMe("unknown", db), []);
   });
 });
