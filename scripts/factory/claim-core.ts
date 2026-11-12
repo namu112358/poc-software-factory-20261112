@@ -18,7 +18,7 @@ export type PrInfo = { number: number; headRef: string; files: string[] };
 export type Wait = number | "slot";
 
 export type Decision =
-  | { decision: "go" }
+  | { decision: "go"; note?: string }
   | { decision: "queue" | "retreat"; wait: Wait; files: string[]; reason: string; comment: string };
 
 const TOUCH_RE = /<!--\s*factory:touch\s+files=(\S*)\s*-->/;
@@ -111,6 +111,8 @@ function queue(kind: "queue" | "retreat", wait: Wait, files: string[], reason: s
  */
 export function precheck(args: {
   self: IssueInfo;
+  ownPr?: number | null; // claude/issue-<自分の番号> の開いている PR
+
   files: string[];
   inProgress: IssueInfo[];
   queued: IssueInfo[];
@@ -118,6 +120,7 @@ export function precheck(args: {
   isOpen: (n: number) => boolean;
 }): Decision {
   const { self, files } = args;
+  if (args.ownPr) return ownPrGo(args.ownPr);
   const openDeps = dependencies(self).filter((n) => args.isOpen(n));
   if (openDeps.length > 0) {
     return queue("queue", openDeps[0], files, `依存先 #${openDeps.join("・#")} がまだ開いているので待つ。`);
@@ -143,6 +146,11 @@ export function precheck(args: {
   return { decision: "go" };
 }
 
+/** 自分の PR がすでにあれば、引き下がらせずに進めさせる（残った PR が Issue の再開を止めるため。#248） */
+function ownPrGo(pr: number): Decision {
+  return { decision: "go", note: `この Issue の PR #${pr} がすでに開いている。引き下がらずに、その PR を引き継いで進める（CI を見て Ready にする）。` };
+}
+
 /** 記録の前後: 時刻が早いほうが先。同じ時刻なら番号が小さいほうが先 */
 function isBefore(a: { number: number; at: string }, b: { number: number; at: string }): boolean {
   return a.at < b.at || (a.at === b.at && a.number < b.number);
@@ -152,7 +160,8 @@ function isBefore(a: { number: number; at: string }, b: { number: number; at: st
  * 着手して 30 秒後の読み直し（implement.md の「2. 着手する」の 2）。
  * 時刻は、それぞれの Issue の最新の factory:touch を使う。
  */
-export function confirm(args: { self: IssueInfo; inProgress: IssueInfo[] }): Decision | { decision: "error"; reason: string } {
+export function confirm(args: { self: IssueInfo; inProgress: IssueInfo[]; ownPr?: number | null }): Decision | { decision: "error"; reason: string } {
+  if (args.ownPr) return ownPrGo(args.ownPr);
   const mine = latestTouch(args.self);
   if (!mine) return { decision: "error", reason: `#${args.self.number} に factory:touch の記録が無い。先に記録してから実行する。` };
   const me = { number: args.self.number, at: mine.createdAt };
