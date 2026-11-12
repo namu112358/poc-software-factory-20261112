@@ -2,6 +2,7 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { openDb } from "../src/lib/db/index.ts";
 import { listTasksByQuery } from "../src/lib/task-query.ts";
+import { updateTask } from "../src/lib/tasks.ts";
 
 const q = (s: string) => new URLSearchParams(s);
 
@@ -115,5 +116,29 @@ describe("listTasksByQuery: q（キーワード）", () => {
     assert.deepEqual(ids(db, `q=${k}&status=todo&assignee=sato`), [a]);
     db.prepare("INSERT INTO task_tags (task_id, name) VALUES (?, 'Bug')").run(a);
     assert.deepEqual(ids(db, `q=${k}&tag=Bug`), [a]);
+  });
+});
+
+describe("archived クエリ", () => {
+  it("指定なしのとき、アーカイブしたタスクは出ない", () => {
+    const db = openDb();
+    updateTask(4, { archived: true }, db);
+    assert.ok(!listTasksByQuery(q(""), db).some((t) => t.id === 4));
+  });
+
+  it("archived=include のとき、アーカイブしたタスクも出る", () => {
+    const db = openDb();
+    updateTask(4, { archived: true }, db);
+    const t = listTasksByQuery(q("archived=include"), db).find((x) => x.id === 4);
+    assert.ok(t);
+    assert.equal(t.archived, true);
+  });
+
+  it("include 以外の値は指定なしとして扱う", () => {
+    const db = openDb();
+    updateTask(4, { archived: true }, db);
+    for (const v of ["true", "1", "INCLUDE", "", "exclude"]) {
+      assert.ok(!listTasksByQuery(q(`archived=${v}`), db).some((t) => t.id === 4), v);
+    }
   });
 });
