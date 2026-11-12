@@ -2,7 +2,7 @@ import { notFound } from "next/navigation";
 import { listComments } from "@/lib/comments";
 import { requireUser } from "@/lib/session";
 import { listTags } from "@/lib/tags";
-import { PRIORITY_LABELS, STATUS_LABELS, formatEstimate, formatJstDateTime, getTask, parseTaskId } from "@/lib/tasks";
+import { PRIORITY_LABELS, STATUS_LABELS, formatEstimate, formatJstDateTime, formatTaskNumber, getTask, parseTaskId } from "@/lib/tasks";
 import { getUser } from "@/lib/users";
 import { DuplicateButton } from "./duplicate";
 import { CommentForm, DeleteCommentButton } from "./comments";
@@ -26,7 +26,12 @@ export default async function TaskDetailPage({ params }: Props) {
       <p>
         <a href="/tasks">← タスク一覧へ戻る</a>
       </p>
-      <h1 data-testid="task-title">{task.title}</h1>
+      <h1>
+        <span data-testid="task-title">{task.title}</span>{" "}
+        <span data-testid="task-number" style={{ color: "#666", fontWeight: "normal" }}>
+          {formatTaskNumber(task.id)}
+        </span>
+      </h1>
       <dl>
         <dt>ステータス</dt>
         <dd data-testid="task-status">{STATUS_LABELS[task.status]}</dd>

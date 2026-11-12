@@ -10,6 +10,7 @@ import {
   formatEstimate,
   formatJstDateTime,
   formatMemoPreview,
+  formatTaskNumber,
   formatTaskCount,
   getTask,
   isTaskStatus,
@@ -319,6 +320,13 @@ describe("estimateMinutes", () => {
   it("formats for display", () => {
     assert.equal(formatEstimate(90), "90 分");
     assert.equal(formatEstimate(null), "—");
+  });
+});
+
+describe("タスクの番号", () => {
+  it("formats as #<ID>", () => {
+    assert.equal(formatTaskNumber(3), "#3");
+    assert.equal(formatTaskNumber(120), "#120");
   });
 });
 
