@@ -13,9 +13,10 @@ queue_rules:
       - -draft
       - check-success = app-check
       - check-success = pr-body-check
+    # キューの中では一時的な draft の PR で CI を回すので、PR 本文の検査（draft では動かない）は
+    # キューに入る条件（queue_conditions）だけで確かめ、マージの条件には入れない。
     merge_conditions:
       - check-success = app-check
-      - check-success = pr-body-check
 
 pull_request_rules:
   - name: merge のラベルが付いた PR をキューに入れる
