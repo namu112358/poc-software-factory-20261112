@@ -88,3 +88,17 @@ describe("sortMembersByOverdue", () => {
     assert.equal(sortMembersByOverdue(rows)[0].id, "tanaka");
   });
 });
+
+describe("新しいタスクの担当者の選択肢（#437）", () => {
+  it("候補と並びは listUserOptions と同じで、休みの終わりの日が付き、休みの無い人には付かない", async () => {
+    const { listAssigneeOptions } = await import("../src/lib/members.ts");
+    const { listUserOptions } = await import("../src/lib/users.ts");
+    const { setAbsence } = await import("../src/lib/absence.ts");
+    const db = openDb();
+    setAbsence("suzuki", { startDate: "2026-11-13", endDate: "2026-11-20" }, db);
+    const options = listAssigneeOptions(db, "2026-11-15");
+    assert.deepEqual(options.map((o) => o.id), listUserOptions(db).map((u) => u.id));
+    assert.ok(options.find((o) => o.id === "suzuki")!.label.endsWith("（休み: 11/20 まで）"));
+    assert.ok(!options.find((o) => o.id === "sato")!.label.includes("休み"));
+  });
+});
