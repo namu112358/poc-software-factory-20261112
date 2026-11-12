@@ -477,3 +477,39 @@ describe("キューに入る条件のチェック（ciCheck。#364）", () => {
     assert.equal(ciCheck([run("app-check", "success"), old, run("pr-body-check", "failure", "2026-11-12T19:00:00Z")]).ok, false);
   });
 });
+
+describe("main の CI を壊している不具合の直しを先に着手させる（#363）", () => {
+  const pr355 = { number: 355, headRef: "claude/issue-354", files: ["src/lib/tasks.ts"], stalled: false };
+  const fix = { ...issue(362, [queued("wait=#355 files=src/lib/tasks.ts", "2026-11-12T18:28:00Z")]), labels: ["status:ready", "type:fix"] };
+  const feat = { ...issue(361, [queued("wait=#355 files=src/lib/tasks.ts", "2026-11-12T18:00:00Z")]), labels: ["status:ready", "type:feat"] };
+
+  it("precheck: main の CI が壊れていて type:fix なら、同じファイルの PR を待たずに go", () => {
+    const d = precheck({ self: fix, files: ["src/lib/tasks.ts"], inProgress: [], queued: [], openPrs: [pr355], isOpen: () => false, mainBroken: true });
+    assert.equal(d.decision, "go");
+  });
+
+  it("precheck: main の CI が壊れていなければ、type:fix でもふだんどおり待つ", () => {
+    const d = precheck({ self: fix, files: ["src/lib/tasks.ts"], inProgress: [], queued: [], openPrs: [pr355], isOpen: () => false, mainBroken: false });
+    assert.equal(waitOf(d), 355);
+  });
+
+  it("precheck: type:fix でなければ、main の CI が壊れていても待つ", () => {
+    const d = precheck({ self: feat, files: ["src/lib/tasks.ts"], inProgress: [], queued: [], openPrs: [pr355], isOpen: () => false, mainBroken: true });
+    assert.equal(waitOf(d), 355);
+  });
+
+  it("precheck: 同時に実装する数の上限は、直しでも守る", () => {
+    const four = [1, 2, 3, 4].map((n) => issue(n));
+    const d = precheck({ self: fix, files: ["src/lib/tasks.ts"], inProgress: four, queued: [], openPrs: [], isOpen: () => false, mainBroken: true });
+    assert.equal(waitOf(d), "slot");
+  });
+
+  it("pick: 先に待っている Issue より先に、同じファイルの PR を越えて取り出す", () => {
+    const r = pick({ queued: [feat, fix], inProgressCount: 3, isOpen: () => false, openPrs: [pr355], mainBroken: true });
+    assert.deepEqual(r.pick, [362]);
+  });
+
+  it("pick: main の CI が壊れていなければ、ふだんどおり（同じファイルの PR を待つ）", () => {
+    assert.deepEqual(pick({ queued: [feat, fix], inProgressCount: 3, isOpen: () => false, openPrs: [pr355], mainBroken: false }).pick, []);
+  });
+});
