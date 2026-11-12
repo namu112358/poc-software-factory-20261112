@@ -1,10 +1,10 @@
 import { Fragment } from "react";
 import { requireUser } from "@/lib/session";
 import { listTagsByTask } from "@/lib/tags";
-import { PRIORITY_LABELS, STATUS_LABELS, TASK_STATUSES, formatEstimate, formatTaskCount, isTaskStatus, listAssignees, listTasks, parseAssignee, parseTagFilter } from "@/lib/tasks";
+import { PRIORITY_LABELS, STATUS_LABELS, SORT_LABELS, TASK_SORTS, TASK_STATUSES, formatEstimate, formatTaskCount, isTaskStatus, listAssignees, listTasks, parseAssignee, parseSort, parseTagFilter } from "@/lib/tasks";
 
 type Props = {
-  searchParams: Promise<{ status?: string; assignee?: string; tag?: string }>;
+  searchParams: Promise<{ status?: string; assignee?: string; tag?: string; sort?: string }>;
 };
 
 export default async function TasksPage({ searchParams }: Props) {
@@ -13,8 +13,9 @@ export default async function TasksPage({ searchParams }: Props) {
   const status = isTaskStatus(params.status) ? params.status : undefined;
   const assignee = parseAssignee(params.assignee);
   const tag = parseTagFilter(params.tag);
+  const sort = parseSort(params.sort);
   const assignees = listAssignees();
-  const tasks = listTasks({ status, assignee, tag });
+  const tasks = listTasks({ status, assignee, tag, sort });
   const tagsByTask = listTagsByTask(tasks.map((t) => t.id));
 
   return (
@@ -44,6 +45,16 @@ export default async function TasksPage({ searchParams }: Props) {
             {assignees.map((a) => (
               <option key={a.id} value={a.id}>
                 {a.name}
+              </option>
+            ))}
+          </select>
+        </label>{" "}
+        <label>
+          並び順{" "}
+          <select name="sort" defaultValue={sort}>
+            {TASK_SORTS.map((s) => (
+              <option key={s} value={s}>
+                {SORT_LABELS[s]}
               </option>
             ))}
           </select>

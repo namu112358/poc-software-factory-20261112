@@ -9,6 +9,7 @@ import {
   isTaskStatus,
   listAssignees,
   listTasks,
+  parseSort,
   parseAssignee,
   parseTaskId,
   updateTask,
@@ -183,6 +184,50 @@ describe("formatTaskCount", () => {
 
   it("shows 「0 件」 when nothing matches", () => {
     assert.equal(formatTaskCount(0), "0 件");
+  });
+});
+
+describe("sort by priority", () => {
+  const mk = (db: ReturnType<typeof openDb>, title: string, priority: "high" | "medium" | "low", assignee = "sato") =>
+    createTask({ title, status: "todo", assignee, dueDate: "2026-12-01", priority }, db);
+
+  it("orders high → medium → low, and by creation order within the same priority", () => {
+    const db = openDb();
+    const l1 = mk(db, "低1", "low");
+    const h1 = mk(db, "高1", "high");
+    const m1 = mk(db, "中1", "medium");
+    const h2 = mk(db, "高2", "high");
+    const ids = listTasks({ sort: "priority" }, db).map((t) => t.id);
+    const ps = listTasks({ sort: "priority" }, db).map((t) => t.priority);
+    const rank = { high: 0, medium: 1, low: 2 };
+    assert.deepEqual(ps, [...ps].sort((a, b) => rank[a] - rank[b]));
+    assert.ok(ids.indexOf(h1.id) < ids.indexOf(h2.id));
+    assert.ok(ids.indexOf(h2.id) < ids.indexOf(m1.id));
+    assert.ok(ids.indexOf(m1.id) < ids.indexOf(l1.id));
+  });
+
+  it("keeps creation order by default", () => {
+    const db = openDb();
+    mk(db, "低", "low");
+    mk(db, "高", "high");
+    const ids = listTasks({}, db).map((t) => t.id);
+    assert.deepEqual(ids, [...ids].sort((a, b) => a - b));
+    assert.deepEqual(listTasks({ sort: "created" }, db).map((t) => t.id), ids);
+  });
+
+  it("works together with the status filter", () => {
+    const db = openDb();
+    const done = createTask({ title: "完了の低", status: "done", assignee: "sato", dueDate: "2026-12-01", priority: "low" }, db);
+    createTask({ title: "完了の高", status: "done", assignee: "sato", dueDate: "2026-12-01", priority: "high" }, db);
+    const r = listTasks({ status: "done", sort: "priority" }, db);
+    assert.ok(r.every((t) => t.status === "done"));
+    assert.equal(r[0].priority, "high");
+    assert.equal(r[r.length - 1].id, done.id);
+  });
+
+  it("treats invalid sort values as creation order", () => {
+    assert.equal(parseSort("priority"), "priority");
+    for (const v of [undefined, "", "bogus", "PRIORITY", ["priority"], 1]) assert.equal(parseSort(v), "created");
   });
 });
 
