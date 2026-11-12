@@ -10,7 +10,7 @@
 
 ## 2. 遅れているだけの PR を更新する
 
-`merge` のラベルが付いた PR は、Mergify がキューの中で `main` を取り込むので、触らない。それ以外の PR だけを対象にする。
+Mergify のキューに入っている PR（チェック「Mergify Merge Queue」が、キューに入っている・実行中の状態のもの）は、Mergify がキューの中で `main` を取り込むので、触らない。それ以外の PR だけを対象にする。
 
 開いている `claude/` の PR のうち、Ready で、衝突はしていないが `main` より遅れているもの（`mergeable_state` が `behind`）は、GitHub MCP の `update_pull_request_branch` でブランチを更新する（`main` を取り込む）。Ruleset が「`main` を取り込み済み」をマージの条件にしているため、更新しないと人がマージできない。更新は `main` を取り込むだけで中身を変えないので、レビューはやり直さない。`needs-human` が付いた PR には触らない。
 
