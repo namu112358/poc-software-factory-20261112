@@ -13,6 +13,7 @@ import {
   sumEstimateMinutes,
   formatJstDateTime,
   formatMemoPreview,
+  memoTooltip,
   formatTaskNumber,
   formatTaskCount,
   TASK_LIST_HELP,
@@ -374,6 +375,7 @@ describe("formatJstDateTime", () => {
   it("UTC の日時を日本時間の YYYY/MM/DD HH:mm にする", () => {
     assert.equal(formatJstDateTime("2026-11-12T06:04:00.000Z"), "2026/11/12 15:04");
     assert.equal(formatJstDateTime("2026-11-12T16:30:00.000Z"), "2026/11/13 01:30");
+    assert.equal(formatJstDateTime("2026-11-12T15:30:00.000Z"), "2026/11/13 00:30");
   });
   it("解釈できない値は「—」にする", () => {
     assert.equal(formatJstDateTime(""), "—");
@@ -455,6 +457,16 @@ describe("formatMemoPreview", () => {
   });
   it("改行は空白 1 つに置き換える", () => {
     assert.equal(formatMemoPreview("a\nb\r\nc"), "a b c");
+  });
+});
+
+describe("memoTooltip", () => {
+  it("メモの全文をそのまま返す（長くても省略しない・改行も残す）", () => {
+    const long = "あ".repeat(100) + "\n続き";
+    assert.equal(memoTooltip(long), long);
+  });
+  it("空のメモには付けない", () => {
+    assert.equal(memoTooltip(""), undefined);
   });
 });
 
