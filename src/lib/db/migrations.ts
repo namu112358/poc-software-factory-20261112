@@ -105,4 +105,24 @@ export const MIGRATIONS: readonly Migration[] = [
       ALTER TABLE tasks ADD COLUMN memo TEXT NOT NULL DEFAULT '' CHECK (length(memo) <= 2000);
     `,
   },
+  {
+    version: 9,
+    name: "login_attempts",
+    sql: `
+      CREATE TABLE login_attempts (
+        user_id      TEXT PRIMARY KEY, -- 入力された ID（存在しない ID も数える）
+        failures     INTEGER NOT NULL,
+        locked_until TEXT -- ISO 8601（UTC）。ロックしていなければ NULL
+      );
+    `,
+  },
+  {
+    version: 10,
+    name: "task_timestamps",
+    sql: `
+      ALTER TABLE tasks ADD COLUMN created_at TEXT NOT NULL DEFAULT ''; -- ISO 8601（UTC）
+      ALTER TABLE tasks ADD COLUMN updated_at TEXT NOT NULL DEFAULT ''; -- ISO 8601（UTC）
+      UPDATE tasks SET created_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now');
+    `,
+  },
 ];

@@ -1,9 +1,14 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { openDb } from "../src/lib/db/index.ts";
+import { DatabaseSync } from "node:sqlite";
+import { migrate, openDb } from "../src/lib/db/index.ts";
+import { MIGRATIONS } from "../src/lib/db/migrations.ts";
 import {
   createTask,
+  isOverdue,
+  todayInJapan,
   formatEstimate,
+  formatJstDateTime,
   formatMemoPreview,
   formatTaskCount,
   getTask,
@@ -60,6 +65,32 @@ describe("listAssignees", () => {
   });
 });
 
+describe("担当者なしの絞り込み", () => {
+  it("parseAssignee は none を受け付ける", () => {
+    assert.equal(parseAssignee("none", openDb()), "none");
+  });
+
+  it("担当者が決まっていないタスクが無ければ 0 件になる", () => {
+    assert.equal(listTasks({ assignee: "none" }, openDb()).length, 0);
+  });
+
+  it("担当者が決まっていないタスクだけを返し、ステータスと併用できる", () => {
+    const db = openDb();
+    db.exec("PRAGMA foreign_keys = OFF");
+    db.exec("CREATE TABLE tasks_bak AS SELECT * FROM tasks");
+    db.exec("DROP TABLE tasks");
+    db.exec(
+      "CREATE TABLE tasks (id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT NOT NULL, status TEXT NOT NULL, assignee TEXT, due_date TEXT NOT NULL, priority TEXT NOT NULL DEFAULT 'medium', estimate_minutes INTEGER, memo TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL DEFAULT '', updated_at TEXT NOT NULL DEFAULT '')",
+    );
+    db.exec("INSERT INTO tasks SELECT * FROM tasks_bak");
+    db.exec("INSERT INTO tasks (title, status, assignee, due_date) VALUES ('未割当', 'todo', NULL, '2026-12-01')");
+    db.exec("INSERT INTO tasks (title, status, assignee, due_date) VALUES ('未割当完了', 'done', NULL, '2026-12-01')");
+    const none = listTasks({ assignee: "none" }, db);
+    assert.deepEqual(none.map((t) => t.title), ["未割当", "未割当完了"]);
+    assert.deepEqual(listTasks({ assignee: "none", status: "todo" }, db).map((t) => t.title), ["未割当"]);
+  });
+});
+
 describe("parseAssignee", () => {
   it("accepts a known assignee and treats unknown values as unspecified", () => {
     const db = openDb();
@@ -73,8 +104,11 @@ describe("parseAssignee", () => {
 describe("getTask", () => {
   it("returns a task by id, or undefined", () => {
     const db = openDb();
-    assert.deepEqual(getTask(1, db), {
+    const task = getTask(1, db);
+    assert.deepEqual({ ...task, createdAt: "", updatedAt: "" }, {
       id: 1,
+      createdAt: "",
+      updatedAt: "",
       title: "要件定義書のレビュー",
       status: "done",
       assignee: "sato",
@@ -146,7 +180,7 @@ describe("createTask / updateTask", () => {
     assert.equal(created.id, 8);
     assert.equal(listTasks({}, db).length, 8);
     const updated = updateTask(created.id, { status: "done" }, db);
-    assert.deepEqual(updated, { ...created, status: "done" });
+    assert.deepEqual(updated, { ...created, status: "done", updatedAt: updated!.updatedAt });
     assert.equal(updateTask(999, { status: "done" }, db), undefined);
   });
 });
@@ -186,6 +220,25 @@ describe("formatTaskCount", () => {
 
   it("shows 「0 件」 when nothing matches", () => {
     assert.equal(formatTaskCount(0), "0 件");
+  });
+});
+
+describe("isOverdue", () => {
+  const today = "2026-11-12";
+  it("期限日の翌日以降の未完了タスクは期限切れ", () => {
+    assert.equal(isOverdue({ status: "todo", dueDate: "2026-11-11" }, today), true);
+    assert.equal(isOverdue({ status: "in_progress", dueDate: "2026-01-01" }, today), true);
+  });
+  it("期限当日と期限前は期限切れではない", () => {
+    assert.equal(isOverdue({ status: "todo", dueDate: today }, today), false);
+    assert.equal(isOverdue({ status: "todo", dueDate: "2026-11-13" }, today), false);
+  });
+  it("完了したタスクは期限を過ぎても期限切れではない", () => {
+    assert.equal(isOverdue({ status: "done", dueDate: "2026-11-01" }, today), false);
+  });
+  it("「今日」は日本時間で判断する", () => {
+    assert.equal(todayInJapan(new Date("2026-11-11T15:00:00Z")), "2026-11-12");
+    assert.equal(todayInJapan(new Date("2026-11-11T14:59:59Z")), "2026-11-11");
   });
 });
 
@@ -266,6 +319,82 @@ describe("estimateMinutes", () => {
   it("formats for display", () => {
     assert.equal(formatEstimate(90), "90 分");
     assert.equal(formatEstimate(null), "—");
+  });
+});
+
+describe("作成日時・更新日時", () => {
+  const ISO = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
+  const base = { title: "新規", status: "todo", assignee: "sato", dueDate: "2026-12-01" } as const;
+
+  it("作成すると、作成日時と更新日時が ISO 8601（UTC）で入る", () => {
+    const db = openDb();
+    const task = createTask(base, db);
+    assert.match(task.createdAt, ISO);
+    assert.equal(task.updatedAt, task.createdAt);
+    assert.equal(getTask(task.id, db)?.createdAt, task.createdAt);
+  });
+
+  it("更新すると更新日時だけが変わる", () => {
+    const db = openDb();
+    const task = createTask(base, db);
+    db.prepare("UPDATE tasks SET created_at = ?, updated_at = ? WHERE id = ?").run("2026-01-01T00:00:00.000Z", "2026-01-01T00:00:00.000Z", task.id);
+    const updated = updateTask(task.id, { status: "done" }, db)!;
+    assert.equal(updated.createdAt, "2026-01-01T00:00:00.000Z");
+    assert.notEqual(updated.updatedAt, "2026-01-01T00:00:00.000Z");
+    assert.match(updated.updatedAt, ISO);
+  });
+
+  it("既存のタスクには、マイグレーションを入れた時点の日時が入る", () => {
+    const old = new DatabaseSync(":memory:");
+    migrate(old, MIGRATIONS.filter((m) => m.version < 10));
+    old.exec("INSERT INTO users (id, name) VALUES ('u', 'U')");
+    old.exec("INSERT INTO tasks (title, status, assignee, due_date) VALUES ('既存', 'todo', 'u', '2026-01-01')");
+    const t0 = Date.now();
+    migrate(old);
+    const task = getTask(1, old)!;
+    assert.match(task.createdAt, ISO);
+    assert.equal(task.updatedAt, task.createdAt);
+    assert.ok(Date.parse(task.createdAt) >= t0 - 1000);
+  });
+});
+
+describe("formatJstDateTime", () => {
+  it("UTC の日時を日本時間の YYYY/MM/DD HH:mm にする", () => {
+    assert.equal(formatJstDateTime("2026-11-12T06:04:00.000Z"), "2026/11/12 15:04");
+    assert.equal(formatJstDateTime("2026-11-12T16:30:00.000Z"), "2026/11/13 01:30");
+  });
+  it("解釈できない値は「—」にする", () => {
+    assert.equal(formatJstDateTime(""), "—");
+  });
+});
+
+describe("duplicateTask", () => {
+  it("copies title, assignee, due date, priority, estimate and tags, with status todo and no comments", async () => {
+    const { duplicateTask, getTask } = await import("../src/lib/tasks.ts");
+    const { addTag, listTags } = await import("../src/lib/tags.ts");
+    const db = openDb();
+    db.prepare("UPDATE tasks SET status = 'done', priority = 'high', estimate_minutes = 90 WHERE id = 1").run();
+    addTag(1, "急ぎ", db);
+    addTag(1, "週次", db);
+    db.prepare("INSERT INTO comments (task_id, author, body, created_at) VALUES (1, 'sato', 'メモ', '2026-01-01 00:00:00')").run();
+    const source = getTask(1, db)!;
+    const copy = duplicateTask(1, db)!;
+    assert.notEqual(copy.id, 1);
+    assert.equal(copy.status, "todo");
+    assert.equal(copy.title, source.title);
+    assert.equal(copy.assignee, source.assignee);
+    assert.equal(copy.dueDate, source.dueDate);
+    assert.equal(copy.priority, "high");
+    assert.equal(copy.estimateMinutes, 90);
+    assert.deepEqual(listTags(copy.id, db), ["急ぎ", "週次"]);
+    const n = db.prepare("SELECT COUNT(*) AS n FROM comments WHERE task_id = ?").get(copy.id) as { n: number };
+    assert.equal(n.n, 0);
+    assert.equal(getTask(1, db)!.status, "done");
+  });
+
+  it("returns undefined for a missing task", async () => {
+    const { duplicateTask } = await import("../src/lib/tasks.ts");
+    assert.equal(duplicateTask(9999, openDb()), undefined);
   });
 });
 

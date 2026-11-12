@@ -1,7 +1,7 @@
 import { Fragment } from "react";
 import { requireUser } from "@/lib/session";
 import { listTagsByTask } from "@/lib/tags";
-import { PRIORITY_LABELS, STATUS_LABELS, SORT_LABELS, TASK_SORTS, TASK_STATUSES, formatEstimate, formatMemoPreview, formatTaskCount, isTaskStatus, listAssignees, listTasks, parseAssignee, parseSort, parseTagFilter } from "@/lib/tasks";
+import { PRIORITY_LABELS, STATUS_LABELS, SORT_LABELS, TASK_SORTS, TASK_STATUSES, formatEstimate, formatMemoPreview, formatTaskCount, isOverdue, isTaskStatus, listAssignees, listTasks, parseAssignee, parseSort, parseTagFilter, todayInJapan } from "@/lib/tasks";
 
 type Props = {
   searchParams: Promise<{ status?: string; assignee?: string; tag?: string; sort?: string }>;
@@ -16,6 +16,7 @@ export default async function TasksPage({ searchParams }: Props) {
   const sort = parseSort(params.sort);
   const assignees = listAssignees();
   const tasks = listTasks({ status, assignee, tag, sort });
+  const today = todayInJapan();
   const tagsByTask = listTagsByTask(tasks.map((t) => t.id));
 
   return (
@@ -47,6 +48,7 @@ export default async function TasksPage({ searchParams }: Props) {
                 {a.name}
               </option>
             ))}
+            <option value="none">担当者なし</option>
           </select>
         </label>{" "}
         <label>
@@ -89,7 +91,15 @@ export default async function TasksPage({ searchParams }: Props) {
               <td>{STATUS_LABELS[task.status]}</td>
               <td>{task.assignee}</td>
               <td data-testid="task-priority">{PRIORITY_LABELS[task.priority]}</td>
-              <td>{task.dueDate}</td>
+              <td>
+                {task.dueDate}
+                {isOverdue(task, today) && (
+                  <>
+                    {" "}
+                    <strong data-testid="overdue">期限切れ</strong>
+                  </>
+                )}
+              </td>
               <td data-testid="task-estimate">{formatEstimate(task.estimateMinutes)}</td>
               <td>
                 {(tagsByTask.get(task.id) ?? []).map((name, i) => (

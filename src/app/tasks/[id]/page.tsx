@@ -2,8 +2,9 @@ import { notFound } from "next/navigation";
 import { listComments } from "@/lib/comments";
 import { requireUser } from "@/lib/session";
 import { listTags } from "@/lib/tags";
-import { PRIORITY_LABELS, STATUS_LABELS, formatEstimate, getTask, parseTaskId } from "@/lib/tasks";
+import { PRIORITY_LABELS, STATUS_LABELS, formatEstimate, formatJstDateTime, getTask, parseTaskId } from "@/lib/tasks";
 import { getUser } from "@/lib/users";
+import { DuplicateButton } from "./duplicate";
 import { CommentForm, DeleteCommentButton } from "./comments";
 import { RemoveTagButton, TagForm } from "./tags";
 
@@ -37,7 +38,14 @@ export default async function TaskDetailPage({ params }: Props) {
         <dd data-testid="task-due-date">{task.dueDate}</dd>
         <dt>見積もり時間</dt>
         <dd data-testid="task-estimate">{formatEstimate(task.estimateMinutes)}</dd>
+        <dt>作成</dt>
+        <dd data-testid="created-at">{formatJstDateTime(task.createdAt)}</dd>
+        <dt>更新</dt>
+        <dd data-testid="updated-at">{formatJstDateTime(task.updatedAt)}</dd>
       </dl>
+      <p>
+        <DuplicateButton taskId={task.id} />
+      </p>
       <section>
         <h2>メモ</h2>
         {task.memo === "" ? (

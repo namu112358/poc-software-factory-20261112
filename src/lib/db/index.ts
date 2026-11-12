@@ -26,8 +26,9 @@ export function seed(db: Db): void {
   transaction(db, () => {
     const insertUser = db.prepare("INSERT INTO users (id, name, password_hash) VALUES (?, ?, ?)");
     for (const u of SEED_USERS) insertUser.run(u.id, u.name, hashPassword(SEED_PASSWORD));
-    const insertTask = db.prepare("INSERT INTO tasks (title, status, assignee, due_date) VALUES (?, ?, ?, ?)");
-    for (const t of SEED_TASKS) insertTask.run(t.title, t.status, t.assignee, t.dueDate);
+    const insertTask = db.prepare("INSERT INTO tasks (title, status, assignee, due_date, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)");
+    const now = new Date().toISOString();
+    for (const t of SEED_TASKS) insertTask.run(t.title, t.status, t.assignee, t.dueDate, now, now);
   });
 }
 

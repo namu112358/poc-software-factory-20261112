@@ -12,6 +12,8 @@ export type Task = {
   dueDate: string; // YYYY-MM-DD
   priority: TaskPriority;
   estimateMinutes: number | null; // 見積もり時間（分）。未設定は null
+  createdAt: string; // ISO 8601（UTC）
+  updatedAt: string; // ISO 8601（UTC）
   memo: string; // メモ（詳しい説明）。0〜2000 文字。既定は空文字
 };
 
@@ -60,6 +62,9 @@ export type TaskFilter = {
   sort?: TaskSort;
 };
 
+/** 「担当者なし」を表す絞り込みの値。 */
+export const UNASSIGNED = "none";
+
 export type Assignee = { id: string; name: string };
 
 /** タスクに登場する担当者（重複なし）。 */
@@ -71,9 +76,10 @@ export function listAssignees(db: Db = getDb()): Assignee[] {
     .all() as Assignee[];
 }
 
-/** クエリの担当者 ID を検証する。タスクに登場する担当者でなければ undefined（指定なし）。 */
+/** クエリの担当者 ID を検証する。`none`（担当者なし）かタスクに登場する担当者でなければ undefined（指定なし）。 */
 export function parseAssignee(value: unknown, db: Db = getDb()): string | undefined {
   if (typeof value !== "string") return undefined;
+  if (value === UNASSIGNED) return UNASSIGNED;
   return listAssignees(db).some((a) => a.id === value) ? value : undefined;
 }
 
@@ -85,6 +91,8 @@ type TaskRow = {
   due_date: string;
   priority: TaskPriority;
   estimate_minutes: number | null;
+  created_at: string;
+  updated_at: string;
   memo: string;
 };
 
@@ -97,6 +105,8 @@ function toTask(row: TaskRow): Task {
     dueDate: row.due_date,
     priority: row.priority,
     estimateMinutes: row.estimate_minutes,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
     memo: row.memo,
   };
 }
@@ -108,7 +118,7 @@ export function listTasks(filter: TaskFilter = {}, db: Db = getDb()): Task[] {
       : "ORDER BY id";
   const rows = db
     .prepare(
-      "SELECT id, title, status, assignee, due_date, priority, estimate_minutes, memo FROM tasks WHERE (:status IS NULL OR status = :status) AND (:assignee IS NULL OR assignee = :assignee) AND (:tag IS NULL OR EXISTS (SELECT 1 FROM task_tags g WHERE g.task_id = tasks.id AND g.name = :tag)) " + orderBy,
+      "SELECT id, title, status, assignee, due_date, priority, estimate_minutes, created_at, updated_at, memo FROM tasks WHERE (:status IS NULL OR status = :status) AND (:assignee IS NULL OR (:assignee = 'none' AND assignee IS NULL) OR (:assignee <> 'none' AND assignee = :assignee)) AND (:tag IS NULL OR EXISTS (SELECT 1 FROM task_tags g WHERE g.task_id = tasks.id AND g.name = :tag)) " + orderBy,
     )
     .all({ status: filter.status ?? null, assignee: filter.assignee ?? null, tag: filter.tag ?? null }) as TaskRow[];
   return rows.map(toTask);
@@ -126,7 +136,7 @@ export function formatTaskCount(count: number): string {
 }
 
 export function getTask(id: number, db: Db = getDb()): Task | undefined {
-  const row = db.prepare("SELECT id, title, status, assignee, due_date, priority, estimate_minutes, memo FROM tasks WHERE id = ?").get(id) as
+  const row = db.prepare("SELECT id, title, status, assignee, due_date, priority, estimate_minutes, created_at, updated_at, memo FROM tasks WHERE id = ?").get(id) as
     | TaskRow
     | undefined;
   return row && toTask(row);
@@ -138,7 +148,7 @@ export function parseTaskId(value: unknown): number | undefined {
   return Number(value);
 }
 
-export type TaskInput = Omit<Task, "id" | "priority" | "estimateMinutes" | "memo"> & {
+export type TaskInput = Omit<Task, "id" | "priority" | "estimateMinutes" | "memo" | "createdAt" | "updatedAt"> & {
   priority?: TaskPriority;
   estimateMinutes?: number | null;
   memo?: string;
@@ -207,9 +217,10 @@ export function validateTaskInput(
 }
 
 export function createTask(input: TaskInput, db: Db = getDb()): Task {
+  const now = new Date().toISOString();
   const { lastInsertRowid } = db
-    .prepare("INSERT INTO tasks (title, status, assignee, due_date, priority, estimate_minutes, memo) VALUES (?, ?, ?, ?, ?, ?, ?)")
-    .run(input.title, input.status, input.assignee, input.dueDate, input.priority ?? "medium", input.estimateMinutes ?? null, input.memo ?? "");
+    .prepare("INSERT INTO tasks (title, status, assignee, due_date, priority, estimate_minutes, memo, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)")
+    .run(input.title, input.status, input.assignee, input.dueDate, input.priority ?? "medium", input.estimateMinutes ?? null, input.memo ?? "", now, now);
   return getTask(Number(lastInsertRowid), db)!;
 }
 
@@ -218,7 +229,7 @@ export function updateTask(id: number, changes: Partial<TaskInput>, db: Db = get
   const current = getTask(id, db);
   if (!current) return undefined;
   const next = { ...current, ...changes };
-  db.prepare("UPDATE tasks SET title = ?, status = ?, assignee = ?, due_date = ?, priority = ?, estimate_minutes = ?, memo = ? WHERE id = ?").run(
+  db.prepare("UPDATE tasks SET title = ?, status = ?, assignee = ?, due_date = ?, priority = ?, estimate_minutes = ?, memo = ?, updated_at = ? WHERE id = ?").run(
     next.title,
     next.status,
     next.assignee,
@@ -226,9 +237,20 @@ export function updateTask(id: number, changes: Partial<TaskInput>, db: Db = get
     next.priority,
     next.estimateMinutes,
     next.memo,
+    new Date().toISOString(),
     id,
   );
   return getTask(id, db);
+}
+
+/** 日本時間の「今日」を YYYY-MM-DD で返す。 */
+export function todayInJapan(now: Date = new Date()): string {
+  return new Intl.DateTimeFormat("sv-SE", { timeZone: "Asia/Tokyo" }).format(now);
+}
+
+/** 期限切れか。未完了で、期限日の翌日以降（期限当日は含めない）。日付は日本時間の YYYY-MM-DD。 */
+export function isOverdue(task: Pick<Task, "status" | "dueDate">, today: string = todayInJapan()): boolean {
+  return task.status !== "done" && task.dueDate < today;
 }
 
 /** 見積もり時間の表示用の文字列。未設定は「—」。 */
@@ -244,4 +266,34 @@ export function formatMemoPreview(memo: string): string | null {
   const chars = Array.from(memo.replace(/\r\n|\r|\n/g, " "));
   if (chars.length <= MEMO_PREVIEW_LENGTH) return chars.join("");
   return chars.slice(0, MEMO_PREVIEW_LENGTH).join("") + "…";
+}
+
+/** ISO 8601（UTC）の日時を、日本時間の「YYYY/MM/DD HH:mm」にする。解釈できなければ「—」。 */
+export function formatJstDateTime(iso: string): string {
+  const t = Date.parse(iso);
+  if (Number.isNaN(t)) return "—";
+  const jst = new Date(t + 9 * 60 * 60 * 1000).toISOString();
+  return `${jst.slice(0, 10).replaceAll("-", "/")} ${jst.slice(11, 16)}`;
+}
+
+/**
+ * タスクを複製する。タイトル・担当者・期限・優先度・見積もり時間・タグを写し、ステータスは常に todo。
+ * コメントと延長申請は写さない。元のタスクが無ければ undefined。
+ */
+export function duplicateTask(id: number, db: Db = getDb()): Task | undefined {
+  const source = getTask(id, db);
+  if (!source) return undefined;
+  const copy = createTask(
+    {
+      title: source.title,
+      status: "todo",
+      assignee: source.assignee,
+      dueDate: source.dueDate,
+      priority: source.priority,
+      estimateMinutes: source.estimateMinutes,
+    },
+    db,
+  );
+  db.prepare("INSERT INTO task_tags (task_id, name) SELECT ?, name FROM task_tags WHERE task_id = ? ORDER BY id").run(copy.id, id);
+  return copy;
 }
