@@ -71,4 +71,17 @@ export const MIGRATIONS: readonly Migration[] = [
       CREATE UNIQUE INDEX due_date_extensions_one_pending ON due_date_extensions(task_id) WHERE status = 'pending';
     `,
   },
+  {
+    version: 5,
+    name: "task_tags",
+    sql: `
+      CREATE TABLE task_tags (
+        id      INTEGER PRIMARY KEY AUTOINCREMENT,
+        task_id INTEGER NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+        name    TEXT NOT NULL,
+        UNIQUE (task_id, name)
+      );
+      CREATE INDEX task_tags_name ON task_tags(name);
+    `,
+  },
 ];

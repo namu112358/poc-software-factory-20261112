@@ -1,8 +1,10 @@
+import { Fragment } from "react";
 import { requireUser } from "@/lib/session";
-import { STATUS_LABELS, TASK_STATUSES, formatTaskCount, isTaskStatus, listAssignees, listTasks, parseAssignee } from "@/lib/tasks";
+import { listTagsByTask } from "@/lib/tags";
+import { STATUS_LABELS, TASK_STATUSES, formatTaskCount, isTaskStatus, listAssignees, listTasks, parseAssignee, parseTagFilter } from "@/lib/tasks";
 
 type Props = {
-  searchParams: Promise<{ status?: string; assignee?: string }>;
+  searchParams: Promise<{ status?: string; assignee?: string; tag?: string }>;
 };
 
 export default async function TasksPage({ searchParams }: Props) {
@@ -10,12 +12,19 @@ export default async function TasksPage({ searchParams }: Props) {
   const params = await searchParams;
   const status = isTaskStatus(params.status) ? params.status : undefined;
   const assignee = parseAssignee(params.assignee);
+  const tag = parseTagFilter(params.tag);
   const assignees = listAssignees();
-  const tasks = listTasks({ status, assignee });
+  const tasks = listTasks({ status, assignee, tag });
+  const tagsByTask = listTagsByTask(tasks.map((t) => t.id));
 
   return (
     <main>
       <h1>タスク一覧</h1>
+      {tag !== undefined && (
+        <p>
+          <span data-testid="tag-filter">タグ「{tag}」のタスク</span> <a href="/tasks">すべてのタスク</a>
+        </p>
+      )}
       <form method="get" aria-label="絞り込み">
         <label>
           ステータス{" "}
@@ -39,6 +48,7 @@ export default async function TasksPage({ searchParams }: Props) {
             ))}
           </select>
         </label>{" "}
+        {tag !== undefined && <input type="hidden" name="tag" value={tag} />}
         <button type="submit">絞り込む</button>
       </form>
       <p data-testid="task-count">{formatTaskCount(tasks.length)}</p>
@@ -49,6 +59,7 @@ export default async function TasksPage({ searchParams }: Props) {
             <th>ステータス</th>
             <th>担当者</th>
             <th>期限</th>
+            <th>タグ</th>
           </tr>
         </thead>
         <tbody>
@@ -60,6 +71,16 @@ export default async function TasksPage({ searchParams }: Props) {
               <td>{STATUS_LABELS[task.status]}</td>
               <td>{task.assignee}</td>
               <td>{task.dueDate}</td>
+              <td>
+                {(tagsByTask.get(task.id) ?? []).map((name, i) => (
+                  <Fragment key={name}>
+                    {i > 0 && "、"}
+                    <a href={`/tasks?tag=${encodeURIComponent(name)}`} data-testid="task-tag">
+                      {name}
+                    </a>
+                  </Fragment>
+                ))}
+              </td>
             </tr>
           ))}
         </tbody>

@@ -25,6 +25,7 @@ export function isTaskStatus(value: unknown): value is TaskStatus {
 export type TaskFilter = {
   status?: TaskStatus;
   assignee?: string;
+  tag?: string;
 };
 
 export type Assignee = { id: string; name: string };
@@ -53,10 +54,17 @@ function toTask(row: TaskRow): Task {
 export function listTasks(filter: TaskFilter = {}, db: Db = getDb()): Task[] {
   const rows = db
     .prepare(
-      "SELECT id, title, status, assignee, due_date FROM tasks WHERE (:status IS NULL OR status = :status) AND (:assignee IS NULL OR assignee = :assignee) ORDER BY id",
+      "SELECT id, title, status, assignee, due_date FROM tasks WHERE (:status IS NULL OR status = :status) AND (:assignee IS NULL OR assignee = :assignee) AND (:tag IS NULL OR EXISTS (SELECT 1 FROM task_tags g WHERE g.task_id = tasks.id AND g.name = :tag)) ORDER BY id",
     )
-    .all({ status: filter.status ?? null, assignee: filter.assignee ?? null }) as TaskRow[];
+    .all({ status: filter.status ?? null, assignee: filter.assignee ?? null, tag: filter.tag ?? null }) as TaskRow[];
   return rows.map(toTask);
+}
+
+/** URL のクエリのタグ名を検証する。前後の空白を取り除き、空なら undefined（指定なし）。 */
+export function parseTagFilter(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const trimmed = value.trim();
+  return trimmed === "" ? undefined : trimmed;
 }
 
 export function formatTaskCount(count: number): string {

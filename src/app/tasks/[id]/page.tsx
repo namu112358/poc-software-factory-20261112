@@ -1,9 +1,11 @@
 import { notFound } from "next/navigation";
 import { listComments } from "@/lib/comments";
 import { requireUser } from "@/lib/session";
+import { listTags } from "@/lib/tags";
 import { STATUS_LABELS, getTask, parseTaskId } from "@/lib/tasks";
 import { getUser } from "@/lib/users";
 import { CommentForm, DeleteCommentButton } from "./comments";
+import { RemoveTagButton, TagForm } from "./tags";
 
 type Props = {
   params: Promise<{ id: string }>;
@@ -16,6 +18,7 @@ export default async function TaskDetailPage({ params }: Props) {
   if (!task) notFound();
   const assignee = getUser(task.assignee);
   const comments = listComments(task.id);
+  const tags = listTags(task.id);
 
   return (
     <main>
@@ -31,6 +34,21 @@ export default async function TaskDetailPage({ params }: Props) {
         <dt>期限</dt>
         <dd data-testid="task-due-date">{task.dueDate}</dd>
       </dl>
+      <section>
+        <h2>タグ</h2>
+        {tags.length === 0 ? (
+          <p>タグはまだありません。</p>
+        ) : (
+          <ul>
+            {tags.map((name) => (
+              <li key={name}>
+                <span data-testid="tag">{name}</span> <RemoveTagButton taskId={task.id} name={name} />
+              </li>
+            ))}
+          </ul>
+        )}
+        <TagForm taskId={task.id} />
+      </section>
       <section>
         <h2>コメント</h2>
         {comments.length === 0 ? (
