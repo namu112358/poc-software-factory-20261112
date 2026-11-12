@@ -43,6 +43,16 @@ export default async function TaskDetailPage({ params }: Props) {
         <DuplicateButton taskId={task.id} />
       </p>
       <section>
+        <h2>メモ</h2>
+        {task.memo === "" ? (
+          <p>メモはありません。</p>
+        ) : (
+          <p data-testid="memo" style={{ whiteSpace: "pre-wrap" }}>
+            {task.memo}
+          </p>
+        )}
+      </section>
+      <section>
         <h2>タグ</h2>
         {tags.length === 0 ? (
           <p>タグはまだありません。</p>
