@@ -1,4 +1,5 @@
 import { notFound } from "next/navigation";
+import { formatAssigneeChange, listAssigneeChanges } from "@/lib/assignee-history";
 import { commentEditedLabel, listComments, splitCommentBody } from "@/lib/comments";
 import { requireUser } from "@/lib/session";
 import { listTags, listTagSuggestions } from "@/lib/tags";
@@ -23,6 +24,7 @@ export default async function TaskDetailPage({ params }: Props) {
   const comments = listComments(task.id);
   const tags = listTags(task.id);
   const tagSuggestions = listTagSuggestions(task.id);
+  const assigneeChanges = listAssigneeChanges(task.id);
 
   return (
     <main>
@@ -83,6 +85,20 @@ export default async function TaskDetailPage({ params }: Props) {
           <p data-testid="memo" style={{ whiteSpace: "pre-wrap" }}>
             {task.memo}
           </p>
+        )}
+      </section>
+      <section>
+        <h2>担当者の履歴</h2>
+        {assigneeChanges.length === 0 ? (
+          <p>変更はありません</p>
+        ) : (
+          <ul>
+            {assigneeChanges.map((c) => (
+              <li key={c.id} data-testid="assignee-change">
+                {formatAssigneeChange(c)}
+              </li>
+            ))}
+          </ul>
         )}
       </section>
       <section>
