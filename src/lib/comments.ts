@@ -99,3 +99,25 @@ export function listCommentersByTask(taskIds: number[], db: Db = getDb()): Map<n
   }
   return result;
 }
+
+export type CommentPart = { type: "text"; text: string } | { type: "link"; url: string };
+
+// http:// か https:// で始まり、ASCII の印字文字（空白・日本語・< > " ' を除く）が続くものを URL とみなす。
+const URL_PATTERN = /https?:\/\/[\x21\x23-\x26\x28-\x3b\x3d\x3f-\x7e]+/gi;
+// 文の区切りとして付いた末尾の記号は URL に含めない。
+const TRAILING_PUNCTUATION = /[.,;:!?)\]}]+$/;
+
+/** コメントの本文を、文字の部分と http(s) の URL の部分に分ける。URL 以外の文字（改行を含む）はそのまま text に入れる。 */
+export function splitCommentBody(body: string): CommentPart[] {
+  const parts: CommentPart[] = [];
+  let last = 0;
+  for (const match of body.matchAll(URL_PATTERN)) {
+    const url = match[0].replace(TRAILING_PUNCTUATION, "");
+    if (!/^https?:\/\/./i.test(url)) continue;
+    if (match.index > last) parts.push({ type: "text", text: body.slice(last, match.index) });
+    parts.push({ type: "link", url });
+    last = match.index + url.length;
+  }
+  if (last < body.length) parts.push({ type: "text", text: body.slice(last) });
+  return parts;
+}

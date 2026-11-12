@@ -1,8 +1,8 @@
 import { notFound } from "next/navigation";
-import { listComments } from "@/lib/comments";
+import { listComments, splitCommentBody } from "@/lib/comments";
 import { requireUser } from "@/lib/session";
 import { listTags } from "@/lib/tags";
-import { PRIORITY_LABELS, STATUS_LABELS, formatEstimate, formatJstDateTime, formatTaskNumber, getTask, isOverdue, parseTaskId, todayInJapan } from "@/lib/tasks";
+import { PRIORITY_LABELS, STATUS_LABELS, formatEstimate, formatJstDateTime, formatTaskNumber, getTask, isDueSoon, isOverdue, parseTaskId, todayInJapan } from "@/lib/tasks";
 import { getUser } from "@/lib/users";
 import { DuplicateButton } from "./duplicate";
 import { CommentForm, DeleteCommentButton } from "./comments";
@@ -48,6 +48,14 @@ export default async function TaskDetailPage({ params }: Props) {
               <strong data-testid="overdue" style={{ color: "#c00" }}>
                 期限切れ
               </strong>
+            </>
+          )}
+          {isDueSoon(task, todayInJapan()) && (
+            <>
+              {" "}
+              <span data-testid="due-soon" style={{ background: "#fff3b0", padding: "0 0.4em", borderRadius: "3px" }}>
+                期限が近い
+              </span>
             </>
           )}
         </dd>
@@ -97,7 +105,17 @@ export default async function TaskDetailPage({ params }: Props) {
                 <p>
                   <strong>{c.authorName}</strong> <time dateTime={c.createdAt}>{formatJstDateTime(c.createdAt)}</time>
                 </p>
-                <p style={{ whiteSpace: "pre-wrap" }}>{c.body}</p>
+                <p style={{ whiteSpace: "pre-wrap" }}>
+                  {splitCommentBody(c.body).map((part, i) =>
+                    part.type === "link" ? (
+                      <a key={i} href={part.url} target="_blank" rel="noopener noreferrer">
+                        {part.url}
+                      </a>
+                    ) : (
+                      part.text
+                    ),
+                  )}
+                </p>
                 {c.author === user.id && <DeleteCommentButton taskId={task.id} commentId={c.id} />}
               </li>
             ))}
