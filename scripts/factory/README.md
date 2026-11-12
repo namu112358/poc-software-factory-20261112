@@ -11,7 +11,7 @@ Routine（`.claude/routines/`）が使う判定のスクリプトです。GitHub
 | `relabel --minutes N` | 割り当て（15）・巡回（30） | 起動しなかった実装の付け直しの対象（`relabel`）と、2 回目で人に回すもの（`needsHuman`） |
 | `handled --since <時刻>` | 割り当て | ほかの割り当てのセッションが、その時刻より後に処理した Issue・PR |
 | `budget` | （確かめ用） | 直近 60 分に `status:in-progress`・`status:in-progress-hard` を付けた回数と、残り |
-| `merge-check <PR>` | 人（`merge:requested` を付ける前） | `merge:requested` を付けてよいか（`ok`）と理由。最新の `factory:review` が `verdict=ok` で、そのコミットより後が「取り込みだけのコミット」（`git show --remerge-diff` の差分が空）だけなら `ok` |
+| `merge-check <PR>` | 人（`merge:requested` を付ける前） | `merge:requested` を付けてよいか（`ok`）と理由。最新の `factory:review` が `verdict=ok` で、そのコミットより後が「取り込みだけのコミット」（`git show --remerge-diff` の差分が空）だけで、最新のコミットの `app-check`・`pr-body-check`（キューに入る条件）が成功していれば `ok` |
 
 `node scripts/factory/claim.ts <コマンド>` で動かす（Node 22.18 以上。クラウドのプロキシを通すため、自分を `NODE_USE_ENV_PROXY=1` で起動し直す）。`decision` が `error` のときは終了コード 2。
 
