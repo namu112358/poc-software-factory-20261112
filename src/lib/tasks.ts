@@ -334,6 +334,13 @@ export function formatJstDateTime(iso: string): string {
   return `${jst.slice(0, 10).replaceAll("-", "/")} ${jst.slice(11, 16)}`;
 }
 
+/** ISO 8601（UTC）の日時を、日本時間の日付「YYYY-MM-DD」にする。解釈できなければ「—」。 */
+export function formatJstDate(iso: string): string {
+  const t = Date.parse(iso);
+  if (Number.isNaN(t)) return "—";
+  return new Date(t + 9 * 60 * 60 * 1000).toISOString().slice(0, 10);
+}
+
 /**
  * タスクを複製する。タイトル・担当者・期限・優先度・見積もり時間・タグを写し、ステータスは常に todo。
  * コメントと延長申請は写さない。元のタスクが無ければ undefined。
