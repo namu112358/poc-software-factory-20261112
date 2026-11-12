@@ -192,3 +192,18 @@ export function completeTasks(ids: readonly number[], db: Db = getDb()): BulkCom
     return { ok: true, tasks: ids.map((id) => getTask(id, db)!) };
   });
 }
+
+export type DeleteTaskResult = "deleted" | "not_found" | "forbidden";
+
+/**
+ * タスクを消す（物理削除）。消せるのはタスクの担当者だけ。担当者のいないタスク（担当者が空）は、だれも消せない。
+ * 完了済み・アーカイブ済みでも、担当者なら消せる。コメント・タグ・延長の申請は、外部キー（ON DELETE CASCADE）で一緒に消える。
+ * 担当者の確認と削除は 1 つの DELETE 文の条件で行うので、確認の後に担当者が変わっても、担当者でない人は消せない。
+ */
+export function deleteTask(id: number, userId: string, db: Db = getDb()): DeleteTaskResult {
+  return transaction(db, () => {
+    const { changes } = db.prepare("DELETE FROM tasks WHERE id = ? AND assignee = ? AND assignee <> ''").run(id, userId);
+    if (Number(changes) > 0) return "deleted";
+    return getTask(id, db) ? "forbidden" : "not_found";
+  });
+}
