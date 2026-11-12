@@ -135,17 +135,15 @@ describe("休みの表示", () => {
     assert.equal(formatLeaveNote("2026-11-20"), "（休み: 11/20 まで）");
   });
 
-  it("担当者の選択肢: 休み中のメンバーだけ「（休み: M/D まで）」が付く。前後の日は付かない", () => {
+  it("担当者の選択肢: 休みを登録したメンバーだけ、休みが終わるまで「（休み: M/D まで）」が付く。終わった翌日からは付かない", () => {
     const db = openDb();
     setAbsence("sato", LEAVE, db);
-    for (const today of ["2026-11-16", "2026-11-20"]) {
+    for (const today of ["2026-11-15", "2026-11-16", "2026-11-20"]) {
       const options = listAssigneeOptions(db, today);
       assert.ok(options.find((o) => o.id === "sato")!.label.endsWith("（休み: 11/20 まで）"), today);
       for (const o of options.filter((o) => o.id !== "sato")) assert.ok(!o.label.includes("休み"), `${today} ${o.id}`);
     }
-    for (const today of ["2026-11-15", "2026-11-21"]) {
-      assert.ok(!listAssigneeOptions(db, today).some((o) => o.label.includes("休み")), today);
-    }
+    assert.ok(!listAssigneeOptions(db, "2026-11-21").some((o) => o.label.includes("休み")));
   });
 
   it("担当者の選択肢: タスクを持たないメンバーにも付く", () => {
