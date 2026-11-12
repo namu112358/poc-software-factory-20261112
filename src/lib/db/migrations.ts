@@ -190,4 +190,15 @@ export const MIGRATIONS: readonly Migration[] = [
       CREATE UNIQUE INDEX sessions_device_id ON sessions(device_id);
     `,
   },
+  {
+    version: 17,
+    name: "failed_logins_since_login",
+    sql: `
+      -- 前回のログインに成功したあと、この利用者の ID でパスワードを誤った（ロック中の試行を含む）ログインの回数。
+      -- ログインに成功すると 0 に戻す。既存の利用者は 0 から始まる。試されたパスワードは保存しない。
+      ALTER TABLE users ADD COLUMN failed_logins_since_login INTEGER NOT NULL DEFAULT 0;
+      -- このセッションでログインした時点の上の回数（ログイン後に知らせる）。既存のセッションは 0。
+      ALTER TABLE sessions ADD COLUMN failed_logins_before INTEGER NOT NULL DEFAULT 0;
+    `,
+  },
 ];
