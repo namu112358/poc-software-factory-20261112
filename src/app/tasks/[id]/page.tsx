@@ -2,7 +2,7 @@ import { notFound } from "next/navigation";
 import { listComments } from "@/lib/comments";
 import { requireUser } from "@/lib/session";
 import { listTags } from "@/lib/tags";
-import { PRIORITY_LABELS, STATUS_LABELS, formatEstimate, formatJstDateTime, formatTaskNumber, getTask, parseTaskId } from "@/lib/tasks";
+import { PRIORITY_LABELS, STATUS_LABELS, formatEstimate, formatJstDateTime, formatTaskNumber, getTask, isOverdue, parseTaskId, todayInJapan } from "@/lib/tasks";
 import { getUser } from "@/lib/users";
 import { DuplicateButton } from "./duplicate";
 import { CommentForm, DeleteCommentButton } from "./comments";
@@ -40,7 +40,17 @@ export default async function TaskDetailPage({ params }: Props) {
         <dt>優先度</dt>
         <dd data-testid="task-priority">{PRIORITY_LABELS[task.priority]}</dd>
         <dt>期限</dt>
-        <dd data-testid="task-due-date">{task.dueDate}</dd>
+        <dd data-testid="task-due-date">
+          {task.dueDate}
+          {isOverdue(task, todayInJapan()) && (
+            <>
+              {" "}
+              <strong data-testid="overdue" style={{ color: "#c00" }}>
+                期限切れ
+              </strong>
+            </>
+          )}
+        </dd>
         <dt>見積もり時間</dt>
         <dd data-testid="task-estimate">{formatEstimate(task.estimateMinutes)}</dd>
         <dt>作成</dt>
