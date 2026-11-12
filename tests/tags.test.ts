@@ -1,7 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { openDb } from "../src/lib/db/index.ts";
-import { addTag, listTagCounts, listTags, listTagsByTask, removeTag, validateTagInput } from "../src/lib/tags.ts";
+import { addTag, listTagCounts, listTagSuggestions, listTags, listTagsByTask, removeTag, validateTagInput } from "../src/lib/tags.ts";
 import { listTasks, parseTagFilter } from "../src/lib/tasks.ts";
 
 describe("validateTagInput", () => {
@@ -122,5 +122,20 @@ describe("listTagCounts", () => {
     addTag(1, "x", db);
     removeTag(1, "x", db);
     assert.deepEqual(listTagCounts(db), []);
+  });
+});
+
+describe("listTagSuggestions", () => {
+  it("orders by usage count, excludes tags already on the task, and still lets unknown tags be added", () => {
+    const db = openDb();
+    addTag(1, "急ぎ", db);
+    addTag(2, "急ぎ", db);
+    addTag(3, "急ぎ", db);
+    addTag(2, "bug", db);
+    addTag(3, "bug", db);
+    addTag(3, "Bug", db);
+    assert.deepEqual(listTagSuggestions(1, db), ["bug", "Bug"]);
+    assert.deepEqual(listTagSuggestions(4, db), ["急ぎ", "bug", "Bug"]);
+    assert.equal(addTag(4, "新しいタグ", db), "added");
   });
 });

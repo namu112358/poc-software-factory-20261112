@@ -1,11 +1,13 @@
 import { requireUser } from "@/lib/session";
+import { passwordOwnerMessage } from "@/lib/password-owner";
 import { PasswordForm } from "./form";
 
 export default async function PasswordPage() {
-  await requireUser();
+  const user = await requireUser();
   return (
     <main>
       <h1>パスワード変更</h1>
+      <p data-testid="password-owner">{passwordOwnerMessage(user.name)}</p>
       <PasswordForm />
     </main>
   );

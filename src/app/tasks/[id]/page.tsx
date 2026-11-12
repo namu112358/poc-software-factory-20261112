@@ -1,11 +1,12 @@
 import { notFound } from "next/navigation";
-import { listComments, splitCommentBody } from "@/lib/comments";
+import { commentEditedLabel, listComments, splitCommentBody } from "@/lib/comments";
 import { requireUser } from "@/lib/session";
-import { listTags } from "@/lib/tags";
-import { PRIORITY_LABELS, STATUS_LABELS, formatEstimate, formatJstDateTime, formatTaskNumber, getTask, isDueSoon, isOverdue, parseTaskId, todayInJapan } from "@/lib/tasks";
+import { listTags, listTagSuggestions } from "@/lib/tags";
+import { PRIORITY_LABELS, STATUS_LABELS, formatCompletedAt, formatEstimate, formatJstDateTime, formatTaskNumber, getTask, isDueSoon, isOverdue, parseTaskId, todayInJapan } from "@/lib/tasks";
 import { getUser } from "@/lib/users";
+import { DeleteTaskButton } from "./delete";
 import { DuplicateButton } from "./duplicate";
-import { CommentForm, DeleteCommentButton } from "./comments";
+import { CommentForm, DeleteCommentButton, EditCommentForm } from "./comments";
 import { RemoveTagButton, TagForm } from "./tags";
 
 type Props = {
@@ -20,6 +21,7 @@ export default async function TaskDetailPage({ params }: Props) {
   const assignee = getUser(task.assignee);
   const comments = listComments(task.id);
   const tags = listTags(task.id);
+  const tagSuggestions = listTagSuggestions(task.id);
 
   return (
     <main>
@@ -65,9 +67,11 @@ export default async function TaskDetailPage({ params }: Props) {
         <dd data-testid="created-at">{formatJstDateTime(task.createdAt)}</dd>
         <dt>更新</dt>
         <dd data-testid="updated-at">{formatJstDateTime(task.updatedAt)}</dd>
+        <dt>完了</dt>
+        <dd data-testid="completed-at">{formatCompletedAt(task)}</dd>
       </dl>
       <p>
-        <DuplicateButton taskId={task.id} />
+        <DuplicateButton taskId={task.id} /> <DeleteTaskButton taskId={task.id} title={task.title} />
       </p>
       <section>
         <h2>メモ</h2>
@@ -92,7 +96,7 @@ export default async function TaskDetailPage({ params }: Props) {
             ))}
           </ul>
         )}
-        <TagForm taskId={task.id} />
+        <TagForm taskId={task.id} suggestions={tagSuggestions} />
       </section>
       <section>
         <h2>コメント</h2>
@@ -104,6 +108,7 @@ export default async function TaskDetailPage({ params }: Props) {
               <li key={c.id} data-testid="comment">
                 <p>
                   <strong>{c.authorName}</strong> <time dateTime={c.createdAt}>{formatJstDateTime(c.createdAt)}</time>
+                  {commentEditedLabel(c)}
                 </p>
                 <p style={{ whiteSpace: "pre-wrap" }}>
                   {splitCommentBody(c.body).map((part, i) =>
@@ -116,7 +121,12 @@ export default async function TaskDetailPage({ params }: Props) {
                     ),
                   )}
                 </p>
-                {c.author === user.id && <DeleteCommentButton taskId={task.id} commentId={c.id} />}
+                {c.author === user.id && (
+                  <>
+                    <EditCommentForm taskId={task.id} commentId={c.id} body={c.body} />{" "}
+                    <DeleteCommentButton taskId={task.id} commentId={c.id} />
+                  </>
+                )}
               </li>
             ))}
           </ul>

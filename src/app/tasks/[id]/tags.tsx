@@ -3,7 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useState, type FormEvent } from "react";
 
-export function TagForm({ taskId }: { taskId: number }) {
+export function TagForm({ taskId, suggestions = [] }: { taskId: number; suggestions?: string[] }) {
   const router = useRouter();
   const [error, setError] = useState<string>();
   const [pending, setPending] = useState(false);
@@ -37,7 +37,12 @@ export function TagForm({ taskId }: { taskId: number }) {
   return (
     <form aria-label="タグの追加" onSubmit={onSubmit}>
       <p>
-        <input name="name" aria-label="タグの名前" maxLength={40} />
+        <input name="name" aria-label="タグの名前" maxLength={40} list={`tag-suggestions-${taskId}`} />
+        <datalist id={`tag-suggestions-${taskId}`}>
+          {suggestions.map((name) => (
+            <option key={name} value={name} />
+          ))}
+        </datalist>
       </p>
       {error && <p role="alert">{error}</p>}
       <button type="submit" disabled={pending}>

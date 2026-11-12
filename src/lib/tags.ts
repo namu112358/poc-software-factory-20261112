@@ -65,3 +65,11 @@ export function listTagCounts(db: Db = getDb()): TagCount[] {
     .all() as { name: string; count: number }[];
   return rows.map((r) => ({ name: r.name, count: Number(r.count) }));
 }
+
+/** タグの入力候補を返す。そのタスクにすでに付いているタグを除き、使われている件数の多い順（同数なら名前の昇順）。 */
+export function listTagSuggestions(taskId: number, db: Db = getDb()): string[] {
+  const attached = new Set(listTags(taskId, db));
+  return listTagCounts(db)
+    .map((t) => t.name)
+    .filter((name) => !attached.has(name));
+}

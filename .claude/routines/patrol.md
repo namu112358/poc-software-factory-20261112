@@ -1,32 +1,28 @@
 # 巡回の手順書
 
-1 時間ごとに起動します。GitHub のイベントは上限を超えると捨てられ、セッションが途中で止まることもあり、PR どうしの衝突はイベントにならないため、それらを拾います。コードは書きません。
+1 時間ごとに起動します。捨てられたイベント・途中で止まったセッション・PR どうしの衝突を拾い、割り当ての役の代わりに待っている Issue に着手もさせます。コードは書きません。以下の `in-progress` は `in-progress:hard` も含みます。
 
 ## 1. 取りこぼしを拾う
 
-それぞれ、最後に状態が変わってから 30 分以上たっているものだけを対象にする（動いている最中のものに触らないため）。表の行に別の時間が書いてあれば、その行はその時間に従う。PR は、head のブランチが `claude/` で始まるものだけを対象にする（人が出した PR の状態は変えない）。止まって人を待っているもの（PR に `needs-human` が付いている、または PR が `Closes` で参照する Issue に `blocked:question`・`needs-human` が付いている）は、Issue・PR とも対象にしない（意図して止めたものを、取りこぼしと見なさないため）。
+対象は、最後に状態が変わってから 30 分以上たったもの（表に別の時間があればそれに従う）。PR は `claude/` のものだけ。人を待っているもの（PR に `needs-human`、または Issue に `blocked:question`・`needs-human`）は対象にしない。したことは `<!-- factory:patrol action=<したこと> -->` でコメントする。同じものに同じことをするのは 1 回まで。2 回目は `needs-human` を付けて理由をコメントする。
 
-| 状態 | 見なすこと | すること |
-|---|---|---|
-| Issue に `ready` か `ready:hard` が付いたまま | 実装が起動しなかった | 付け直す直前に `node scripts/factory/claim.ts budget` を実行し、`remaining` 件まで（古い順）、付いていたラベルを外して、同じラベルを付け直す（実装がもう一度起動する）。残りを超えた分と、残りが 0 のときは付け直さず、次の巡回に回す（#250。「2.」の `pick` は、ここで付けた `ready` も数えて取り出す数を減らす） |
-| `claude/issue-<番号>` の draft の PR で、最新のコミットの CI（`app-check`）が成功し、最新のレビューの後に「取り込みだけのコミット」（`README.md`）でないコミットがあり（レビューが一度も無ければ、それでよい）、`main` と衝突しておらず（`mergeable` が true）、最後の動き（下の行と同じ）から 15 分以上 | 実装か修正が CI を待ちきれずに終えたか、途中で止まった（PR を Ready にする直前） | PR を Ready にし、Issue に `in-progress` が残っていれば外す（レビューが起動する。#184・#219） |
-| Issue に `in-progress` が付き、`claude/issue-<番号>` の PR が無いか draft のまま（上の行に当たらないもの）。最後の動き（Issue・PR のコメント、PR へのコミット、ラベルの変化のうち最も新しいもの）から 60 分以上 | 実装が途中で止まった | `in-progress` を外し、経過をコメントして `needs-human` を付ける |
-| `claude/issue-<番号>` の draft の PR で、最新のコミットの CI（`app-check`）が失敗しているか終わっておらず、Issue に `in-progress` が無く、最後の動き（上の行と同じ）から 60 分以上（下の `verdict=changes` の行・衝突の行に当たらないもの） | 実装が CI を待ちきれずに終え、その後に CI が落ちたか終わらなかった | 経過をコメントして `needs-human` を付ける |
-| Ready の PR で、最新のコミットに対するレビュー（`commit=<最新のコミット>`）が無い。ただし、最新の `verdict=ok` のレビューの後のコミットが「取り込みだけのコミット」（`README.md`）だけなら対象にしない | レビューが起動しなかった | PR を draft にしてから Ready に戻す（レビューがもう一度起動する。修正も起動するが、直すものが無いので何もせずに終える） |
-| draft の PR で、最新のレビューが `verdict=changes` かつ `commit=` が最新のコミットと同じ | 修正が起動しなかった | `needs-human` を付けて理由をコメントする |
-| draft の PR が `main` と衝突している（`mergeable` が false） | 修正が起動しなかったか、衝突に気づかずに終えた | PR を Ready にしてから draft に戻す（修正がもう一度起動する。レビューも起動するが、同じ版はレビュー済みなので何もせずに終える） |
-| Ready の PR が `main` と衝突している（`mergeable` が false） | 割り当ての役が拾わなかった | 衝突していることをコメントし、PR を draft に戻す（修正が起動して `main` を取り込む） |
-| 閉じた Issue に `in-progress` が残っている | 片付け漏れ | `in-progress` を外す |
+まず `node scripts/factory/claim.ts relabel --minutes 30` を実行する。`relabel` の Issue は（2 件目からは 30 秒あけて）その `label` を外して付け直し（`relabel-start`）、`needsHuman` の Issue は `in-progress` を外して `needs-human` を付ける。
 
-同じものに同じことをするのは 1 回まで。2 回目は `needs-human` を付けて理由をコメントする。`ready` の付け直しは、割り当ての役の `factory:dispatch action=relabel-ready` も 1 回目として数える。したことは、コメントの `<!-- factory:patrol action=<したこと> -->` で数える。
+| 状態 | すること |
+|---|---|
+| `claude/issue-<番号>` の draft の PR で、CI（`app-check`）が成功、最新のレビューの後に「取り込みだけのコミット」でないコミットがある（レビューが無ければよい）、`main` と衝突していない、最後の動きから 15 分以上 | PR を Ready にし、Issue の `in-progress` を外す |
+| Issue に `in-progress`、PR が無いか draft のまま（上に当たらないもの）、最後の動き（コメント・コミット・ラベルの変化）から 60 分以上 | `in-progress` を外し、経過をコメントして `needs-human` を付ける |
+| draft の PR の CI（`app-check`）が失敗か終わっておらず、Issue に `in-progress` が無く、最後の動きから 60 分以上（下の 2 行に当たらないもの） | 経過をコメントして `needs-human` を付ける |
+| Ready の PR に、最新のコミットに対するレビュー（`commit=`）が無い（最新の `verdict=ok` の後が「取り込みだけのコミット」だけなら対象外） | PR を draft にしてから Ready に戻す |
+| draft の PR で、最新のレビューが `verdict=changes` で `commit=` が最新のコミット | `needs-human` を付けて理由をコメントする |
+| draft の PR が `main` と衝突している | PR を Ready にしてから draft に戻す |
+| Ready の PR が `main` と衝突している | 衝突していることをコメントし、draft に戻す |
+| 閉じた Issue に `in-progress` が残っている | `in-progress` を外す |
 
-## 2. キューから取り出す
+## 2. 待っている Issue に着手させる
 
-`README.md` の「キュー」のとおり、`node scripts/factory/claim.ts pick` の結果に従って `queued` の Issue を取り出す（`pick` が `error` なら取り出さず、出力を集計のコメントに書く。割り当ての役が動かなかったときの備え）。
+`dispatch.md` の「2. 待っている Issue に着手させる」と同じことをする。`pick` が `error` なら、出力を集計のコメントに書く。
 
 ## 3. 集計する
 
-`docs/` は変えない。結果は、Issue「Factory の運用の記録」（無ければ作る）に、次の形でコメントする。前回から変化が無ければコメントしない。
-
-- 開いている Issue・PR の数（状態ごと）
-- この 1 時間にしたこと（付け直し・切り替え・`needs-human`）
+Issue「Factory の運用の記録」に、開いている Issue・PR の数（状態ごと）と、この 1 時間にしたことをコメントする。前回から変化が無ければコメントしない。`docs/` は変えない。
