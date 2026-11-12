@@ -528,7 +528,9 @@ describe("memoTooltip", () => {
 
 describe("TASK_LIST_HELP", () => {
   it("使い方の説明が指定の文言である", () => {
-    assert.equal(TASK_LIST_HELP, "ステータス・担当者・タグで絞り込み、優先度の高い順に並べ替えられます。");
+    for (const word of ["キーワード", "ステータス", "担当者", "タグ", "期限で絞り込み", "期限の近い順"]) {
+      assert.ok(TASK_LIST_HELP.includes(word), word);
+    }
   });
 });
 

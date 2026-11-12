@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { HEADER_NAV_LINKS } from "@/lib/nav";
 import { formatFailedLoginNotice, formatPreviousLogin } from "@/lib/auth";
 import { getCurrentFailedLoginsBefore, getCurrentPreviousLogin, getCurrentUser } from "@/lib/session";
 
@@ -12,18 +13,12 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
     <html lang="ja">
       <body style={{ fontFamily: "system-ui, sans-serif", margin: 24 }}>
         {user && (
-          <header style={{ display: "flex", gap: 12, alignItems: "center", marginBottom: 16 }}>
-            <a href="/tasks">タスク一覧</a>
-            <a href="/tasks/new">新しいタスク</a>
-            <a href="/overdue">期限切れ</a>
-            <a href="/tags">タグ一覧</a>
-            <a href="/members">メンバー</a>
-            <a href="/board">ステータス別</a>
-            <a href="/extensions">承認待ちの延長</a>
-            <a href="/tasks/deleted">削除したタスク</a>
-            <a href="/settings/password">パスワード変更</a>
-            <a href="/settings/sessions">ログイン中の端末</a>
-            <a href="/settings/absence">休みの登録</a>
+          <header style={{ display: "flex", flexWrap: "wrap", gap: "8px 12px", alignItems: "center", marginBottom: 16 }}>
+            {HEADER_NAV_LINKS.map((link) => (
+              <a key={link.href} href={link.href} style={{ whiteSpace: "nowrap" }}>
+                {link.label}
+              </a>
+            ))}
             <span data-testid="header-user">{user.name}（{user.id}）</span>
             <span data-testid="previous-login">{formatPreviousLogin(previousLogin ?? null)}</span>
             <form method="post" action="/api/logout">

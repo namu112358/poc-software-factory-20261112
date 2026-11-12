@@ -4,6 +4,7 @@ import { listCommentersByTask } from "@/lib/comments";
 import { NOTHING_TO_DO_TEXT, listExtensionsAwaitingMe, listMyDueTasks } from "@/lib/my-attention";
 import { listAssigneeOptions } from "@/lib/members";
 import { BulkBar, BulkCheckbox, BulkSelection } from "./BulkActions";
+import { buildCheckboxOptions } from "@/lib/task-filter-form";
 import { exportHref } from "@/lib/export";
 import { parseIncludeArchived } from "@/lib/task-query";
 import { RESET_TASK_VIEW_HREF, resolveTaskViewQuery } from "@/lib/task-view-prefs";
@@ -118,17 +119,14 @@ export default async function TasksPage({ searchParams }: Props) {
             ))}
           </select>
         </label>{" "}
-        <label>
-          担当者（Ctrl／Cmd を押しながら複数選べます。選んだだれかが担当のタスクが出ます）{" "}
-          <select name="assignee" multiple size={Math.min(assignees.length + 1, 5)} defaultValue={selectedAssignees} data-testid="assignee-select">
-            {assignees.map((a) => (
-              <option key={a.id} value={a.id}>
-                {a.name}
-              </option>
-            ))}
-            <option value="none">担当者なし</option>
-          </select>
-        </label>{" "}
+        <fieldset data-testid="assignee-filter">
+          <legend>担当者（選んだだれかが担当のタスクが出ます）</legend>
+          {buildCheckboxOptions([...assignees.map((a) => ({ value: a.id, label: a.name })), { value: "none", label: "担当者なし" }], selectedAssignees).map((o) => (
+            <label key={o.value}>
+              <input type="checkbox" name="assignee" value={o.value} defaultChecked={o.checked} /> {o.label}{" "}
+            </label>
+          ))}
+        </fieldset>{" "}
         <label>
           期限{" "}
           <select name="due" defaultValue={due ?? ""} data-testid="due-filter">
@@ -155,16 +153,14 @@ export default async function TasksPage({ searchParams }: Props) {
         </label>{" "}
         {allTags.length > 0 && (
           <>
-            <label>
-              タグ（5 つまで・すべてが付いたタスクだけ。Ctrl／Cmd を押しながら複数選べます）{" "}
-              <select name="tag" multiple size={Math.min(allTags.length, 5)} defaultValue={tags} data-testid="tag-select">
-                {allTags.map((t) => (
-                  <option key={t.name} value={t.name}>
-                    {t.name}
-                  </option>
-                ))}
-              </select>
-            </label>{" "}
+            <fieldset data-testid="tag-filter-options">
+              <legend>タグ（5 つまで・すべてが付いたタスクだけ）</legend>
+              {buildCheckboxOptions(allTags.map((t) => ({ value: t.name, label: t.name })), tags).map((o) => (
+                <label key={o.value}>
+                  <input type="checkbox" name="tag" value={o.value} defaultChecked={o.checked} /> {o.label}{" "}
+                </label>
+              ))}
+            </fieldset>{" "}
           </>
         )}
         <button type="submit">絞り込む</button>{" "}
