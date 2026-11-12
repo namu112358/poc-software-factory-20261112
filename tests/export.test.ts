@@ -138,13 +138,13 @@ describe("parseTaskFilter", () => {
   it("treats invalid values as not specified", () => {
     const db = openDb();
     const filter = parseTaskFilter(new URLSearchParams("status=bogus&assignee=nobody&tag=%20&sort=zzz"), db);
-    assert.deepEqual(filter, { status: undefined, assignee: undefined, tag: undefined, sort: "created" });
+    assert.deepEqual(filter, { status: undefined, assignee: undefined, tag: undefined, q: undefined, sort: "created" });
   });
 
   it("accepts valid values", () => {
     const db = openDb();
     const filter = parseTaskFilter(new URLSearchParams("status=done&assignee=none&tag=x&sort=priority"), db);
-    assert.deepEqual(filter, { status: "done", assignee: "none", tag: "x", sort: "priority" });
+    assert.deepEqual(filter, { status: "done", assignee: "none", tag: "x", q: undefined, sort: "priority" });
   });
 });
 
@@ -163,5 +163,12 @@ describe("exportFilename", () => {
   it("uses the Japan date", () => {
     assert.equal(exportFilename(new Date("2026-11-12T15:00:00Z")), "tasks-2026-11-13.csv");
     assert.equal(exportFilename(new Date("2026-11-12T14:59:00Z")), "tasks-2026-11-12.csv");
+  });
+});
+
+describe("CSV と q（キーワード）", () => {
+  it("exportHref carries q, and parseTaskFilter reads it back", () => {
+    const href = exportHref({ q: "請求 100%" });
+    assert.equal(parseTaskFilter(new URL(href, "http://x").searchParams).q, "請求 100%");
   });
 });

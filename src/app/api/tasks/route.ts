@@ -1,4 +1,4 @@
-// GET /api/tasks?status=…&assignee=…&tag=…&sort=… — タスク一覧 / POST /api/tasks — タスクを作成する。いずれもログインが必要。
+// GET /api/tasks?status=…&assignee=…&tag=…&q=…&sort=… — タスク一覧 / POST /api/tasks — タスクを作成する。いずれもログインが必要。
 import { NextResponse } from "next/server";
 import { jsonError, readJson, requireApiUser } from "@/lib/api";
 import { listTasksByQuery } from "@/lib/task-query";

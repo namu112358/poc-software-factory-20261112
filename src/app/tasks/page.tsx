@@ -3,10 +3,10 @@ import { listCommentersByTask } from "@/lib/comments";
 import { exportHref } from "@/lib/export";
 import { requireUser } from "@/lib/session";
 import { listTagsByTask } from "@/lib/tags";
-import { assigneeName, PRIORITY_LABELS, STATUS_LABELS, SORT_LABELS, TASK_LIST_HELP, TASK_SORTS, TASK_STATUSES, formatCurrentUser, formatEstimate, formatJstDate, formatDaysLeft, formatEstimateTotal, formatMemoPreview, formatTaskCount, priorityFontWeight, formatOverdueCount, countOverdue, memoTooltip, isOverdue, isTaskStatus, listAssignees, listTasks, parseAssignee, parseSort, parseTagFilter, sumEstimateMinutes, taskRowDoneAttr, todayInJapan } from "@/lib/tasks";
+import { assigneeName, PRIORITY_LABELS, STATUS_LABELS, SORT_LABELS, TASK_LIST_HELP, TASK_SORTS, TASK_STATUSES, formatCurrentUser, formatEstimate, formatJstDate, formatDaysLeft, formatEstimateTotal, formatMemoPreview, formatTaskCount, priorityFontWeight, formatOverdueCount, countOverdue, memoTooltip, isOverdue, isTaskStatus, listAssignees, listTasks, parseAssignee, parseKeyword, parseSort, parseTagFilter, sumEstimateMinutes, taskRowDoneAttr, todayInJapan } from "@/lib/tasks";
 
 type Props = {
-  searchParams: Promise<{ status?: string; assignee?: string; tag?: string; sort?: string }>;
+  searchParams: Promise<{ status?: string; assignee?: string; tag?: string; q?: string; sort?: string }>;
 };
 
 export default async function TasksPage({ searchParams }: Props) {
@@ -15,9 +15,10 @@ export default async function TasksPage({ searchParams }: Props) {
   const status = isTaskStatus(params.status) ? params.status : undefined;
   const assignee = parseAssignee(params.assignee);
   const tag = parseTagFilter(params.tag);
+  const q = parseKeyword(params.q);
   const sort = parseSort(params.sort);
   const assignees = listAssignees();
-  const tasks = listTasks({ status, assignee, tag, sort });
+  const tasks = listTasks({ status, assignee, tag, q, sort });
   const today = todayInJapan();
   const overdueText = formatOverdueCount(countOverdue(tasks, today));
   const tagsByTask = listTagsByTask(tasks.map((t) => t.id));
@@ -34,6 +35,10 @@ export default async function TasksPage({ searchParams }: Props) {
         </p>
       )}
       <form method="get" aria-label="絞り込み">
+        <label>
+          キーワード{" "}
+          <input type="search" name="q" defaultValue={q ?? ""} maxLength={100} placeholder="タイトル・メモ" />
+        </label>{" "}
         <label>
           ステータス{" "}
           <select name="status" defaultValue={status ?? ""}>
@@ -72,7 +77,7 @@ export default async function TasksPage({ searchParams }: Props) {
       </form>
       <p data-testid="task-count">{formatTaskCount(tasks.length)}</p>
       <p>
-        <a href={exportHref({ status, assignee, tag, sort })} data-testid="export-link">
+        <a href={exportHref({ status, assignee, tag, q, sort })} data-testid="export-link">
           CSV でダウンロード
         </a>
       </p>

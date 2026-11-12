@@ -61,6 +61,7 @@ export type TaskFilter = {
   status?: TaskStatus;
   assignee?: string;
   tag?: string;
+  q?: string; // キーワード。タイトルかメモに含まれるタスクだけ（英字の大文字・小文字は区別しない）
   sort?: TaskSort;
   includeArchived?: boolean; // true のときだけ、アーカイブ済みも含める
 };
@@ -131,9 +132,9 @@ export function listTasks(filter: TaskFilter = {}, db: Db = getDb()): Task[] {
       : "ORDER BY id";
   const rows = db
     .prepare(
-      "SELECT id, title, status, assignee, due_date, priority, estimate_minutes, created_at, updated_at, completed_at, memo, archived FROM tasks WHERE (:includeArchived = 1 OR archived = 0) AND (:status IS NULL OR status = :status) AND (:assignee IS NULL OR (:assignee = 'none' AND assignee IS NULL) OR (:assignee <> 'none' AND assignee = :assignee)) AND (:tag IS NULL OR EXISTS (SELECT 1 FROM task_tags g WHERE g.task_id = tasks.id AND g.name = :tag)) " + orderBy,
+      "SELECT id, title, status, assignee, due_date, priority, estimate_minutes, created_at, updated_at, completed_at, memo, archived FROM tasks WHERE (:includeArchived = 1 OR archived = 0) AND (:status IS NULL OR status = :status) AND (:assignee IS NULL OR (:assignee = 'none' AND assignee IS NULL) OR (:assignee <> 'none' AND assignee = :assignee)) AND (:tag IS NULL OR EXISTS (SELECT 1 FROM task_tags g WHERE g.task_id = tasks.id AND g.name = :tag)) AND (:q IS NULL OR title LIKE :q ESCAPE '\\' OR memo LIKE :q ESCAPE '\\') " + orderBy,
     )
-    .all({ status: filter.status ?? null, assignee: filter.assignee ?? null, tag: filter.tag ?? null, includeArchived: filter.includeArchived ? 1 : 0 }) as TaskRow[];
+    .all({ status: filter.status ?? null, assignee: filter.assignee ?? null, tag: filter.tag ?? null, q: filter.q === undefined ? null : likePattern(filter.q), includeArchived: filter.includeArchived ? 1 : 0 }) as TaskRow[];
   return rows.map(toTask);
 }
 
@@ -142,6 +143,18 @@ export function parseTagFilter(value: unknown): string | undefined {
   if (typeof value !== "string") return undefined;
   const trimmed = value.trim();
   return trimmed === "" ? undefined : trimmed;
+}
+
+/** URL のクエリのキーワードを検証する。前後の空白を取り除き、空なら undefined（指定なし）。 */
+export function parseKeyword(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const trimmed = value.trim();
+  return trimmed === "" ? undefined : trimmed;
+}
+
+/** キーワードを、含むかどうかの LIKE のパターンにする。`%`・`_`・`\` はその文字そのものとして扱う。 */
+function likePattern(keyword: string): string {
+  return `%${keyword.replace(/[\\%_]/g, "\\$&")}%`;
 }
 
 export const TASK_LIST_HELP = "ステータス・担当者・タグで絞り込み、優先度の高い順に並べ替えられます。";
