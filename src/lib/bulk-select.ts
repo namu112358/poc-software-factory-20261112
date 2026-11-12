@@ -63,6 +63,7 @@ export function bulkSelectionKey(filter: {
   assignee?: string;
   tag?: string;
   q?: string;
+  due?: string;
   sort?: string;
   includeArchived?: boolean;
 }): string {
@@ -71,6 +72,7 @@ export function bulkSelectionKey(filter: {
     filter.assignee ?? "",
     filter.tag ?? "",
     filter.q ?? "",
+    filter.due ?? "",
     filter.sort ?? "",
     filter.includeArchived === true,
   ]);

@@ -7,10 +7,10 @@ import { exportHref } from "@/lib/export";
 import { parseIncludeArchived } from "@/lib/task-query";
 import { requireUser } from "@/lib/session";
 import { listTagsByTask } from "@/lib/tags";
-import { assigneeName, PRIORITY_LABELS, STATUS_LABELS, SORT_LABELS, TASK_LIST_HELP, TASK_SORTS, TASK_STATUSES, formatCurrentUser, clearFilterHref, formatEstimate, formatJstDate, formatDaysLeft, formatEstimateTotal, countUnestimated, formatUnestimatedCount, formatMemoPreview, formatTaskCount, formatDoneCount, priorityFontWeight, formatOverdueCount, countOverdue, memoTooltip, isOverdue, isTaskStatus, listAssignees, listTasks, parseAssignee, parseKeyword, parseSort, parseTagFilter, sumEstimateMinutes, taskRowDoneAttr, todayInJapan } from "@/lib/tasks";
+import { DUE_FILTER_LABELS, TASK_DUE_FILTERS, parseDueFilter, assigneeName, PRIORITY_LABELS, STATUS_LABELS, SORT_LABELS, TASK_LIST_HELP, TASK_SORTS, TASK_STATUSES, formatCurrentUser, clearFilterHref, formatEstimate, formatJstDate, formatDaysLeft, formatEstimateTotal, countUnestimated, formatUnestimatedCount, formatMemoPreview, formatTaskCount, formatDoneCount, priorityFontWeight, formatOverdueCount, countOverdue, memoTooltip, isOverdue, isTaskStatus, listAssignees, listTasks, parseAssignee, parseKeyword, parseSort, parseTagFilter, sumEstimateMinutes, taskRowDoneAttr, todayInJapan } from "@/lib/tasks";
 
 type Props = {
-  searchParams: Promise<{ status?: string; assignee?: string; tag?: string; q?: string; sort?: string; archived?: string }>;
+  searchParams: Promise<{ status?: string; assignee?: string; tag?: string; q?: string; due?: string; sort?: string; archived?: string }>;
 };
 
 export default async function TasksPage({ searchParams }: Props) {
@@ -20,10 +20,11 @@ export default async function TasksPage({ searchParams }: Props) {
   const assignee = parseAssignee(params.assignee);
   const tag = parseTagFilter(params.tag);
   const q = parseKeyword(params.q);
+  const due = parseDueFilter(params.due);
   const sort = parseSort(params.sort);
   const includeArchived = parseIncludeArchived(params.archived);
   const assignees = listAssignees();
-  const tasks = listTasks({ status, assignee, tag, q, sort, includeArchived });
+  const tasks = listTasks({ status, assignee, tag, q, due, sort, includeArchived });
   const today = todayInJapan();
   const clearHref = clearFilterHref(tasks.length);
   const unestimatedText = formatUnestimatedCount(countUnestimated(tasks));
@@ -31,7 +32,7 @@ export default async function TasksPage({ searchParams }: Props) {
   const tagsByTask = listTagsByTask(tasks.map((t) => t.id));
   const commentersByTask = listCommentersByTask(tasks.map((t) => t.id));
   const users = listUserOptions();
-  const selectionKey = bulkSelectionKey({ status, assignee, tag, q, sort, includeArchived });
+  const selectionKey = bulkSelectionKey({ status, assignee, tag, q, due, sort, includeArchived });
 
   return (
     <main>
@@ -77,6 +78,17 @@ export default async function TasksPage({ searchParams }: Props) {
           </select>
         </label>{" "}
         <label>
+          期限{" "}
+          <select name="due" defaultValue={due ?? ""} data-testid="due-filter">
+            <option value="">指定なし</option>
+            {TASK_DUE_FILTERS.map((d) => (
+              <option key={d} value={d}>
+                {DUE_FILTER_LABELS[d]}
+              </option>
+            ))}
+          </select>
+        </label>{" "}
+        <label>
           並び順{" "}
           <select name="sort" defaultValue={sort}>
             {TASK_SORTS.map((s) => (
@@ -94,7 +106,7 @@ export default async function TasksPage({ searchParams }: Props) {
       </form>
       <p data-testid="task-count">{formatTaskCount(tasks.length)}</p>
       <p>
-        <a href={exportHref({ status, assignee, tag, q, sort })} data-testid="export-link">
+        <a href={exportHref({ status, assignee, tag, q, due, sort })} data-testid="export-link">
           CSV でダウンロード
         </a>
       </p>
