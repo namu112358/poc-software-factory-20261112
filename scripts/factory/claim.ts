@@ -89,6 +89,12 @@ async function loadOpenPrs(): Promise<PrInfo[]> {
   );
 }
 
+async function ownPr(n: number): Promise<number | null> {
+  const owner = REPO.split("/")[0];
+  const prs = await getAll<{ number: number }>(`/repos/${REPO}/pulls?state=open&head=${owner}:claude/issue-${n}`);
+  return prs[0]?.number ?? null;
+}
+
 function arg(name: string): string | undefined {
   const i = process.argv.indexOf(`--${name}`);
   return i >= 0 ? process.argv[i + 1] : undefined;
@@ -106,16 +112,16 @@ async function main(): Promise<unknown> {
     case "precheck": {
       if (!Number.isInteger(n)) throw new Error("Issue の番号を指定する");
       const files = splitFiles(arg("files")).filter((f) => !f.startsWith("tests/"));
-      const [self, inProgress, queued, openPrs] = await Promise.all([loadIssue(n), loadLabeled("in-progress"), loadLabeled("queued"), loadOpenPrs()]);
+      const [self, inProgress, queued, openPrs, own] = await Promise.all([loadIssue(n), loadLabeled("in-progress"), loadLabeled("queued"), loadOpenPrs(), ownPr(n)]);
       await loadOpen(dependencies(self));
-      return { issue: n, files, ...precheck({ self, files, inProgress, queued, openPrs, isOpen }) };
+      return { issue: n, files, ...precheck({ self, files, inProgress, queued, openPrs, isOpen, ownPr: own }) };
     }
     case "confirm": {
       if (!Number.isInteger(n)) throw new Error("Issue の番号を指定する");
       const wait = Number(arg("wait") ?? "30");
       await new Promise((r) => setTimeout(r, wait * 1000));
-      const [self, inProgress] = await Promise.all([loadIssue(n), loadLabeled("in-progress")]);
-      return { issue: n, ...confirm({ self, inProgress }) };
+      const [self, inProgress, own] = await Promise.all([loadIssue(n), loadLabeled("in-progress"), ownPr(n)]);
+      return { issue: n, ...confirm({ self, inProgress, ownPr: own }) };
     }
     case "pick": {
       const [queued, inProgress] = await Promise.all([loadLabeled("queued"), getAll<RawIssue>(`/repos/${REPO}/issues?state=open&labels=in-progress`)]);

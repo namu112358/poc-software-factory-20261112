@@ -104,6 +104,17 @@ describe("着手して 30 秒後の読み直し（confirm）", () => {
   });
 });
 
+describe("自分の PR がすでにあるとき（#248）", () => {
+  it("confirm・precheck は、上限を超えていても引き下がらせず go を返す", () => {
+    const four = [1, 2, 3, 4].map((n) => issue(n));
+    const self = issue(229, [touch("tz.ts", "2026-11-12T11:16:25Z")]);
+    const c = confirm({ self, inProgress: [...four, self], ownPr: 239 });
+    assert.equal(c.decision, "go");
+    assert.match(c.decision === "go" ? (c.note ?? "") : "", /#239/);
+    assert.equal(precheck({ self, files: ["tz.ts"], inProgress: four, queued: [], openPrs: [], isOpen: () => false, ownPr: 239 }).decision, "go");
+  });
+});
+
 describe("キューから取り出す（pick）", () => {
   const q = (n: number, attrs: string) => issue(n, [queued(attrs, "2026-01-01T00:00:00Z")]);
   it("空きの数だけ、依存先の閉じたものを古い順に選ぶ", () => {

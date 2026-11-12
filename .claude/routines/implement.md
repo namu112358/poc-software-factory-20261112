@@ -10,13 +10,16 @@ Issue に `ready` か `ready:hard` が付いたときに起動します。1 回�
 - Issue が閉じている。
 - Issue に `epic` が付いている（Epic は子の Issue をまとめるだけで、実装しない）。
 - Issue に `in-progress`・`blocked:question`・`needs-human` のどれかが付いている。
-- その Issue を `Closes #<番号>` で参照する、開いている PR がある。
+- その Issue を `Closes #<番号>` で参照する、開いている PR がある。ただし、その PR が `claude/issue-<番号>` の draft の PR なら終えずに、下の「残った PR を引き継ぐ」に進む。
 - `ready` を付けた人が、リポジトリへの書き込み権限を持たない。次の順に確かめる。
   1. Issue のイベント（GitHub MCP の `issue_read`、または REST の `GET /repos/{owner}/{repo}/issues/{number}/events`）の最後の `labeled`（ラベル `ready`）から、付けた人を調べる。
   2. GitHub MCP の `list_repository_collaborators` で、その人が `write`・`maintain`・`admin` のどれかを持つかを確かめる。REST の `collaborators/{user}/permission` は、クラウドのプロキシで拒まれるので使わない（2026-11-12 の試行で 403）。
   3. どちらの道具でも調べられなければ、`ready` を外して `needs-human` を付け、理由をコメントし、終える。
 
-### キューに載せる
+### 残った PR を引き継ぐ
+
+前の実装のセッションが、PR を出した後に引き下がったり止まったりして、`claude/issue-<番号>` の draft の PR が残っていることがある（#248）。そのときは新しく作らず、その PR を引き継ぐ: `ready` を外して `in-progress` を付け、PR のブランチを取り出して「4. PR を出す」の 2 から続ける（`main` との衝突を見て、CI を待ち、通ったら Ready にする）。
+
 
 変えそうなファイル（テストを除く）を決める。Issue の受入条件から、変える画面・API・表を挙げ、リポジトリを検索して決める（`src/lib/db/migrations.ts` も含める）。続けて判定のスクリプトを実行し、その結果に従う。件数や重なりを、手順書の文を読んで自分で数え直さない（#137）。
 
@@ -24,7 +27,7 @@ Issue に `ready` か `ready:hard` が付いたときに起動します。1 回�
 node scripts/factory/claim.ts precheck <番号> --files <カンマ区切りのパス>
 ```
 
-- `"decision": "go"` なら次に進む。
+- `"decision": "go"` なら次に進む。`note` があれば、それに従う（自分の PR がすでに開いていれば、引き下がらずに「残った PR を引き継ぐ」に進む）。
 - `"decision": "queue"` なら、`ready` を外して `queued` を付け、結果の `comment` をそのままコメントして終える（キューからは取り出さない）。`comment` の先頭の `factory:queued` には、どの理由でも `files=` が付いている（後から来た Issue と取り出す役が、重なりを見るのに使う。#216）。
 - `"decision": "error"` なら、`ready` を外して `needs-human` を付け、出力をコメントして終える。
 
@@ -37,7 +40,7 @@ node scripts/factory/claim.ts precheck <番号> --files <カンマ区切りの�
 ## 2. 着手する
 
 1. `ready` を外し、`in-progress` を付ける。続けて、変えそうなファイルを Issue にコメントする（先頭に `<!-- factory:touch files=<カンマ区切りのパス> -->`）。後から着手する役が、衝突の予防に使う。
-2. 記録した後、`node scripts/factory/claim.ts confirm <番号>` を実行する（中で 30 秒待ってから読み直す）。`"decision": "retreat"` なら、`in-progress` を外して `queued` を付け、結果の `comment` をそのままコメントして終える（キューからは取り出さない）。`"go"` なら次に進む。`"error"` なら、`in-progress` を外して `needs-human` を付け、出力をコメントして終える。スクリプトは、それぞれの Issue の最新の `factory:touch` の時刻で前後を決め（同じ時刻なら番号が小さいほうが先）、先に記録した作業と同じファイルを含むか、先に記録した作業中の Issue（記録の無いものを含む）が 4 件以上あれば、引き下がらせる（ほぼ同時の着手で、お互いの記録を見落としたり上限を超えたりしないため。#137）。
+2. 記録した後、`node scripts/factory/claim.ts confirm <番号>` を実行する（中で 30 秒待ってから読み直す）。`"decision": "retreat"` なら、`in-progress` を外して `queued` を付け、結果の `comment` をそのままコメントして終える（キューからは取り出さない）。`"go"` なら次に進む（`note` があれば、それに従う）。`"error"` なら、`in-progress` を外して `needs-human` を付け、出力をコメントして終える。スクリプトは、それぞれの Issue の最新の `factory:touch` の時刻で前後を決め（同じ時刻なら番号が小さいほうが先）、先に記録した作業と同じファイルを含むか、先に記録した作業中の Issue（記録の無いものを含む）が 4 件以上あれば、引き下がらせる（ほぼ同時の着手で、お互いの記録を見落としたり上限を超えたりしないため。#137）。
 3. `main` の最新から `claude/issue-<番号>` のブランチを作る（ほかの名前にしない。巡回と集計がこの名前で Issue と PR を結び付ける）。
 
 ## 3. 実装する
