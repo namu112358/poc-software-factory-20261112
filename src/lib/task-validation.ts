@@ -21,6 +21,28 @@ export function parseTagFilter(value: unknown): string | undefined {
   return trimmed === "" ? undefined : trimmed;
 }
 
+/** 絞り込みで選べるタグの最大数。6 つ目以降は無視する。 */
+export const TAG_FILTER_MAX = 5;
+
+/** タグ名の最大の長さ（タグの入力欄と同じ）。これより長い値は不正として無視する。 */
+const TAG_FILTER_NAME_MAX = 40;
+
+/**
+ * URL のクエリのタグ名（`?tag=a&tag=b` のように複数）を検証する。文字列 1 つも配列も受け取る。
+ * 前後の空白を取り除き、空・長すぎる値・重複を無視し、先頭の 5 つまでにしたうえで、今は使われていないタグを外す。
+ */
+export function parseTagFilters(value: unknown, db: Db = getDb()): string[] {
+  const values = Array.isArray(value) ? value : [value];
+  const names: string[] = [];
+  for (const v of values) {
+    const name = parseTagFilter(v);
+    if (name === undefined || [...name].length > TAG_FILTER_NAME_MAX || names.includes(name)) continue;
+    names.push(name);
+    if (names.length === TAG_FILTER_MAX) break;
+  }
+  return names.filter((name) => db.prepare("SELECT 1 FROM task_tags WHERE name = ? LIMIT 1").get(name) !== undefined);
+}
+
 /** URL のクエリのキーワードを検証する。前後の空白を取り除き、空なら undefined（指定なし）。 */
 export function parseKeyword(value: unknown): string | undefined {
   if (typeof value !== "string") return undefined;

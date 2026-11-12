@@ -68,6 +68,7 @@ export type TaskFilter = {
   status?: TaskStatus;
   assignee?: string;
   tag?: string;
+  tags?: string[]; // 複数のタグ。すべてが付いたタスクだけ（`tag` と合わせて最大 5 つ）
   q?: string; // キーワード。タイトルかメモに含まれるタスクだけ（英字の大文字・小文字は区別しない）
   qInComments?: boolean; // true のときだけ、キーワードをコメントの本文からも探す（一覧画面と CSV 用。API は指定しない）
   sort?: TaskSort;
