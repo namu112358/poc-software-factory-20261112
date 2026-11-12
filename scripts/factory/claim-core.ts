@@ -124,6 +124,22 @@ export function dependencies(issue: IssueInfo): number[] {
   return [...deps].sort((a, b) => a - b);
 }
 
+export const STALLED_LABELS = ["needs-human", "blocked:question"];
+
+/**
+ * 番号（Issue か PR）が人を待って止まっているか、を返す関数を作る（#255）。
+ * labels: 番号ごとのラベル。prIssue: PR の番号 → その PR の Issue（claude/issue-<番号>）の番号。
+ * PR は、PR 自身か、その Issue のどちらかに印があれば止まっているとみなす（止まるときに印を付けるのは Issue のことが多いため）。
+ */
+export function makeIsStalled(labels: Map<number, string[]>, prIssue: Map<number, number>): (n: number) => boolean {
+  const marked = (n: number) => (labels.get(n) ?? []).some((l) => STALLED_LABELS.includes(l));
+  return (n: number) => {
+    if (marked(n)) return true;
+    const issue = prIssue.get(n);
+    return issue !== undefined && marked(issue);
+  };
+}
+
 /**
  * まだ待つ依存先。blocked by・「#N の後」（人が決めた依存）は、開いていれば待つ。
  * factory:queued の wait=#N（同じファイルを変える作業を待つもの）は、開いていても、

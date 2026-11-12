@@ -11,6 +11,7 @@ import {
   waitingSince,
   waitsOn,
   blockingDeps,
+  makeIsStalled,
   type IssueInfo,
 } from "../scripts/factory/claim-core.ts";
 
@@ -244,6 +245,17 @@ describe("待ち先が人を待って止まっているとき（#255）", () => 
     const q = issue(210, [queued("wait=slot files=a.ts", "2026-11-12T11:00:00Z")]);
     const openPrs = [{ number: 300, headRef: "claude/issue-84", files: ["a.ts"], stalled: true }];
     assert.deepEqual(pick({ queued: [q], inProgressCount: 0, isOpen: open(), openPrs }).pick, [210]);
+  });
+  it("待ち先が PR で、止まった印がその Issue にだけ付いていても、待ちを解く（#257 のレビュー）", () => {
+    const isStalled = makeIsStalled(new Map([[84, ["enhancement", "needs-human"]], [300, []]]), new Map([[300, 84]]));
+    assert.equal(isStalled(300), true);
+    assert.equal(isStalled(84), true);
+    assert.equal(makeIsStalled(new Map([[300, []]]), new Map([[300, 84]]))(300), false);
+    const i210 = issue(210, [queued("wait=#300 files=a.ts", "2026-11-12T11:19:40Z")]);
+    const openPrs = [{ number: 300, headRef: "claude/issue-84", files: ["a.ts"], stalled: true }];
+    assert.deepEqual(pick({ queued: [i210], inProgressCount: 0, isOpen: open(300, 84), isStalled, openPrs }).pick, [210]);
+    const r = precheck({ self: i210, files: ["a.ts"], inProgress: [], queued: [i210], openPrs, isOpen: open(300, 84), isStalled });
+    assert.equal(r.decision, "go");
   });
   it("precheck: 止まった PR と同じファイルを変えるなら、待たずに着手し、そのことを note で伝える", () => {
     const openPrs = [{ number: 300, headRef: "claude/issue-84", files: ["a.ts"], stalled: true }];
