@@ -33,6 +33,11 @@ export default async function TasksPage({ searchParams }: Props) {
       <h1>タスク一覧</h1>
       <p data-testid="current-user">{formatCurrentUser(user.name)}</p>
       <p data-testid="list-help">{TASK_LIST_HELP}</p>
+      <p>
+        <a href="/tasks/new" data-testid="new-task-link">
+          新しいタスク
+        </a>
+      </p>
       {tag !== undefined && (
         <p>
           <span data-testid="tag-filter">タグ「{tag}」のタスク</span> <a href="/tasks">すべてのタスク</a>

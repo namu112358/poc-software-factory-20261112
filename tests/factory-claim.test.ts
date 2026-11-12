@@ -1,13 +1,14 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
-  confirm,
   dependencies,
   handledByOthers,
   parseQueued,
   parseTouch,
   pick,
   precheck,
+  precheckActions,
+  relabelTargets,
   readyBudget,
   READY_EVENTS_PER_HOUR_BUDGET,
   waitingSince,
@@ -87,50 +88,10 @@ describe("着手の前の確かめ（precheck）", () => {
   });
 });
 
-describe("着手して 30 秒後の読み直し（confirm）", () => {
-  // [SF-E] 第 1 回（#137）の再現: 先に 3 件が作業中、6 件がほぼ同時に着手
-  const stale = [80, 88, 91].map((n) => issue(n, [touch(`old${n}.ts`, "2026-11-12T09:00:00Z")]));
-  const sfe = [
-    issue(170, [touch("h.ts", "2026-11-12T10:11:57Z")]),
-    issue(168, [touch("s.ts", "2026-11-12T10:11:58Z")]),
-    issue(171, [touch("v.ts", "2026-11-12T10:11:59Z")]),
-    issue(172, [touch("t.ts", "2026-11-12T10:12:00Z")]),
-    issue(173, [touch("a.ts", "2026-11-12T10:12:00Z")]),
-    issue(169, [touch("p.ts", "2026-11-12T10:12:03Z")]),
-  ];
-  const all = [...stale, ...sfe];
-  it("先に記録した 4 件だけが残り、残りは空き待ちで引き下がる", () => {
-    const go = sfe.filter((s) => confirm({ self: s, inProgress: all }).decision === "go").map((s) => s.number);
-    assert.deepEqual(go, [170]);
-    const r = confirm({ self: sfe[1], inProgress: all });
-    assert.equal(waitOf(r), "slot");
-  });
-  it("同じ時刻なら番号が小さいほうが先", () => {
-    const three = stale;
-    assert.equal(confirm({ self: sfe[3], inProgress: [...three, sfe[3], sfe[4]] }).decision, "go"); // #172 は #173 より先
-    assert.equal(confirm({ self: sfe[4], inProgress: [...three, sfe[3], sfe[4]] }).decision, "retreat");
-  });
-  it("時刻は最新の factory:touch で比べる（取り出し直された Issue の古い記録は使わない）", () => {
-    const a = issue(1, [touch("x.ts", "2026-11-12T09:00:00Z"), touch("x.ts", "2026-11-12T10:00:00Z")]);
-    const b = issue(2, [touch("x.ts", "2026-11-12T09:59:00Z")]);
-    assert.equal(confirm({ self: b, inProgress: [a, b] }).decision, "go");
-    const r = confirm({ self: a, inProgress: [a, b] });
-    assert.equal(waitOf(r), 2);
-  });
-  it("記録の無い作業中の Issue は先に着手したものとして数える。自分の記録が無ければ error", () => {
-    const noTouch = [1, 2, 3, 4].map((n) => issue(n));
-    assert.equal(confirm({ self: sfe[0], inProgress: [...noTouch, sfe[0]] }).decision, "retreat");
-    assert.equal(confirm({ self: issue(9), inProgress: [] }).decision, "error");
-  });
-});
-
 describe("自分の PR がすでにあるとき（#248）", () => {
-  it("confirm・precheck は、上限を超えていても引き下がらせず go を返す", () => {
+  it("precheck は、上限を超えていても待たせず go を返す", () => {
     const four = [1, 2, 3, 4].map((n) => issue(n));
     const self = issue(229, [touch("tz.ts", "2026-11-12T11:16:25Z")]);
-    const c = confirm({ self, inProgress: [...four, self], ownPr: 239 });
-    assert.equal(c.decision, "go");
-    assert.match(c.decision === "go" ? (c.note ?? "") : "", /#239/);
     assert.equal(precheck({ self, files: ["tz.ts"], inProgress: four, queued: [], openPrs: [], isOpen: () => false, ownPr: 239 }).decision, "go");
   });
 });
@@ -375,5 +336,37 @@ describe("1 時間あたりの起動の数（budget。#250）", () => {
     assert.deepEqual(pick({ queued: queuedIssues, inProgressCount: 0, isOpen: open(), readyRemaining: 1 }).pick, [1]);
     assert.deepEqual(pick({ queued: queuedIssues, inProgressCount: 0, isOpen: open(), readyRemaining: 0 }).pick, []);
     assert.deepEqual(pick({ queued: queuedIssues, inProgressCount: 2, isOpen: open() }).pick, [1, 2]);
+  });
+});
+
+describe("役がそのまま行う操作（precheckActions・relabelTargets）", () => {
+  it("go なら ready を外して in-progress を付け、着手の記録を書く", () => {
+    const a = precheckActions(issue(5), ["a.ts"], { decision: "go" });
+    assert.deepEqual(a.removeLabels, ["ready"]);
+    assert.deepEqual(a.addLabels, ["in-progress"]);
+    assert.match(a.comment ?? "", /^<!-- factory:touch files=a\.ts -->/);
+  });
+  it("queue ならラベルを変えず、待ち先が前と同じならコメントもしない", () => {
+    const d = { decision: "queue" as const, wait: 3 as const, files: ["a.ts"], reason: "r", comment: "c" };
+    assert.equal(precheckActions(issue(5), ["a.ts"], d).comment, "c");
+    const waited = issue(5, [queued("wait=#3 files=a.ts", "2026-01-01T00:00:00Z")]);
+    assert.equal(precheckActions(waited, ["a.ts"], d).comment, null);
+  });
+  it("付け直しは、時間がたち・着手のコメントも PR も無いものを、残りの回数まで。2 回目は人に回す", () => {
+    const base = { label: "in-progress", hasPr: false };
+    const r = relabelTargets({
+      now: "2026-11-12T12:00:00Z",
+      minMinutes: 15,
+      remaining: 1,
+      issues: [
+        { ...base, number: 1, labeledAt: "2026-11-12T11:30:00Z", comments: [] },
+        { ...base, number: 2, labeledAt: "2026-11-12T11:31:00Z", comments: [] },
+        { ...base, number: 3, labeledAt: "2026-11-12T11:55:00Z", comments: [] },
+        { ...base, number: 4, labeledAt: "2026-11-12T11:00:00Z", comments: [{ body: "<!-- factory:implement action=start -->", createdAt: "2026-11-12T11:01:00Z" }] },
+        { ...base, number: 5, labeledAt: "2026-11-12T11:00:00Z", comments: [{ body: "<!-- factory:patrol action=relabel-start -->", createdAt: "2026-11-12T11:20:00Z" }] },
+      ],
+    });
+    assert.deepEqual(r.relabel, [{ issue: 1, label: "in-progress" }]);
+    assert.deepEqual(r.needsHuman, [5]);
   });
 });

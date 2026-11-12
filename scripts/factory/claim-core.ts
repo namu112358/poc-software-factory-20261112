@@ -1,21 +1,23 @@
-// Factory の Routine が使う「着手してよいか・キューから取り出してよいか」の判定（#137・#218・#220）。
-// GitHub への書き込み（ラベルの付け外し・コメント）はしない。判定だけを返し、役がその結果に従う。
-// 決まりの本文は .claude/routines/README.md の「キュー」と implement.md の「1.」「2.」。
+// Factory の Routine が使う「着手してよいか・待っている Issue のどれから着手するか」の判定（#137・#218・#220）。
+// GitHub への書き込み（ラベルの付け外し・コメント）はしない。判定だけを返し、割り当ての役がその結果に従う。
+// 決まりの説明は scripts/factory/README.md、役の手順は .claude/routines/dispatch.md の「2.」。
+// 用語: 「待っている Issue」は、ready があり in-progress / in-progress:hard の無い Issue（コード上は queued と呼ぶ。実装の起動の合図を ready から in-progress に変えたとき、queued のラベルをやめた）。
 
 export const WIP_LIMIT = 4;
 
 /**
- * 実装の Routine の起動のきっかけ（`ready` / `ready:hard` が付いたこと）を、直近 60 分に何回まで使うか（#250）。
+ * 実装の Routine の起動のきっかけ（`in-progress` / `in-progress:hard` が付いたこと）を、直近 60 分に何回まで使うか（#250）。
  * GitHub のイベントには Routine ごとの 1 時間あたりの上限があり、超えたイベントは捨てられる（数値は非公開）。
  * 2026-11-12 は、直近 60 分のきっかけが 53〜55 回になったところで実装の Routine が起動しなくなった。
  * 余裕をみて 45 回にする。上限が分かったら、この値だけを直す。
- * 上限が ready 以外のイベント（ほかのラベルなど、フィルタを通る前のもの）も数えるなら、数える対象も見直す。
+ * 上限が起動のきっかけ以外のイベント（ほかのラベルなど、フィルタを通る前のもの）も数えるなら、数える対象も見直す。
+ * （名前の READY は、きっかけが ready だったときの名残り。値の意味は「起動のきっかけ」）
  */
 export const READY_EVENTS_PER_HOUR_BUDGET = 45;
 
-/** 直近 60 分のきっかけの数から、あと何回 ready を付けてよいか */
-export function readyBudget(readyLastHour: number): { readyLastHour: number; budget: number; remaining: number } {
-  return { readyLastHour, budget: READY_EVENTS_PER_HOUR_BUDGET, remaining: Math.max(0, READY_EVENTS_PER_HOUR_BUDGET - readyLastHour) };
+/** 直近 60 分のきっかけの数から、あと何回 in-progress を付けてよいか */
+export function readyBudget(startsLastHour: number): { startsLastHour: number; budget: number; remaining: number } {
+  return { startsLastHour, budget: READY_EVENTS_PER_HOUR_BUDGET, remaining: Math.max(0, READY_EVENTS_PER_HOUR_BUDGET - startsLastHour) };
 }
 
 export type Comment = { body: string; createdAt: string; author?: string };
@@ -129,7 +131,7 @@ export function bodyDeps(body: string): number[] {
   return out;
 }
 
-/** 依存先（README の「キュー」の定義）: blocked by・本文の「#N の後」・最新の factory:queued の wait=#N */
+/** 依存先（scripts/factory/README.md の定義）: blocked by・本文の「#N の後」・最新の factory:queued の wait=#N */
 export function dependencies(issue: IssueInfo): number[] {
   const deps = new Set<number>([...(issue.blockedBy ?? []), ...bodyDeps(issue.body)]);
   const q = latestQueued(issue);
@@ -315,43 +317,6 @@ function ownPrGo(pr: number): Decision {
   return { decision: "go", note: `この Issue の PR #${pr} がすでに開いている。引き下がらずに、その PR を引き継いで進める（CI を見て Ready にする）。` };
 }
 
-/** 記録の前後: 時刻が早いほうが先。同じ時刻なら番号が小さいほうが先 */
-function isBefore(a: { number: number; at: string }, b: { number: number; at: string }): boolean {
-  return a.at < b.at || (a.at === b.at && a.number < b.number);
-}
-
-/**
- * 着手して 30 秒後の読み直し（implement.md の「2. 着手する」の 2）。
- * 時刻は、それぞれの Issue の最新の factory:touch を使う。
- */
-export function confirm(args: { self: IssueInfo; inProgress: IssueInfo[]; ownPr?: number | null }): Decision | { decision: "error"; reason: string } {
-  if (args.ownPr) return ownPrGo(args.ownPr);
-  const mine = latestTouch(args.self);
-  if (!mine) return { decision: "error", reason: `#${args.self.number} に factory:touch の記録が無い。先に記録してから実行する。` };
-  const me = { number: args.self.number, at: mine.createdAt };
-  const others = args.inProgress.filter((i) => i.number !== args.self.number);
-  const earlier: number[] = [];
-  let firstOverlap: { number: number; files: string[] } | null = null;
-  for (const i of [...others].sort((a, b) => a.number - b.number)) {
-    const t = latestTouch(i);
-    if (!t) {
-      earlier.push(i.number); // 記録の無い作業中の Issue は、先に着手したものとして数える
-      continue;
-    }
-    if (!isBefore({ number: i.number, at: t.createdAt }, me)) continue;
-    earlier.push(i.number);
-    const o = overlap(mine.value, t.value);
-    if (o.length > 0 && firstOverlap === null) firstOverlap = { number: i.number, files: o };
-  }
-  if (firstOverlap) {
-    return queue("retreat", firstOverlap.number, mine.value, `先に着手した #${firstOverlap.number} と同じファイル（${firstOverlap.files.join("、")}）を変えるので、引き下がって待つ。`);
-  }
-  if (earlier.length >= WIP_LIMIT) {
-    return queue("retreat", "slot", mine.value, `空き待ち。自分より先に着手した作業中の Issue が ${earlier.length} 件（#${earlier.join("・#")}）あり、上限の ${WIP_LIMIT} 件に達しているので引き下がる。`);
-  }
-  return { decision: "go" };
-}
-
 /** 開いている PR（自分の PR を除く）と作業中の Issue のうち、files と同じファイルを変えるもの */
 function blocker(self: IssueInfo, files: string[], openPrs: PrInfo[], inProgress: IssueInfo[]): number | null {
   for (const pr of openPrs) {
@@ -369,7 +334,7 @@ function blocker(self: IssueInfo, files: string[], openPrs: PrInfo[], inProgress
 }
 
 /**
- * キューから取り出す（README の「キュー」）。ラベルは変えず、取り出してよい Issue と、待ち先を付け替える Issue を返す。
+ * 着手させる候補を選ぶ（scripts/factory/README.md の pick）。ラベルは変えず、取り出してよい Issue と、待ち先を付け替える Issue を返す。
  * 待ち始めが早い順に見る。キューの先頭（先に待っていて、それより前の先頭と重ならない Issue。取り出したものを含む）・開いている PR・作業中の Issue と同じファイルを変えるものは、
  * 取り出さずに待ち先を付け替える（取り出しても着手の前の確かめで戻るだけなので。#183）。待ち先が今と同じなら何もしない。
  */
@@ -438,4 +403,60 @@ export function handledByOthers(args: {
     out.add(c.issue);
   }
   return [...out].sort((a, b) => a - b);
+}
+
+/** 役がそのまま行う操作: 外すラベル・付けるラベル・書くコメント（null なら書かない） */
+export type Actions = { removeLabels: string[]; addLabels: string[]; addLabelsIfHard?: string[]; comment: string | null };
+
+/**
+ * precheck の結果から、割り当て・巡回の役がそのまま行う操作を作る。
+ * go: ready を外して in-progress（難しいと判定したら in-progress:hard）を付け、着手の記録（factory:touch）を書く。
+ * queue: ラベルは変えず、待ちの記録を書く（直前の待ちと待ち先が同じなら書かない）。
+ */
+export function precheckActions(self: IssueInfo, files: string[], d: Decision): Actions {
+  if (d.decision === "go") {
+    const note = d.note ? `\n${d.note}` : "";
+    return {
+      removeLabels: ["ready"],
+      addLabels: ["in-progress"],
+      addLabelsIfHard: ["in-progress:hard"],
+      comment: `<!-- factory:touch files=${files.join(",")} -->\n着手させた（変えるファイルは上のとおり）。難しいと判定したときは、当たった観点をこの下に書く。${note}`,
+    };
+  }
+  const same = latestQueued(self)?.value.wait === d.wait;
+  return { removeLabels: [], addLabels: [], comment: same ? null : d.comment };
+}
+
+/** precheck が error のときの操作: ready を外して needs-human を付け、理由を書く */
+export function errorActions(reason: string): Actions {
+  return { removeLabels: ["ready"], addLabels: ["needs-human"], comment: `着手させる前の確かめが失敗したので止めた。\n${reason}` };
+}
+
+export const START_MARK_RE = /<!--\s*factory:implement action=start\s*-->/;
+
+/**
+ * 起動しなかった実装の付け直しの対象（dispatch.md の「3.」・patrol.md の「1.」）。
+ * in-progress（in-progress:hard）が付いてから minMinutes 以上たち、その後に実装の着手のコメントも PR も無く、
+ * まだ付け直していない（relabel-start のコメントが無い）Issue。古い順に remaining 件まで。
+ * 付け直し済みのものは needsHuman に入れる（2 回目は人に回す）。
+ */
+export function relabelTargets(args: {
+  issues: { number: number; label: string; labeledAt: string; comments: Comment[]; hasPr: boolean }[];
+  now: string;
+  minMinutes: number;
+  remaining: number;
+}): { relabel: { issue: number; label: string }[]; needsHuman: number[] } {
+  const cutoff = new Date(new Date(args.now).getTime() - args.minMinutes * 60 * 1000).toISOString();
+  const relabel: { issue: number; label: string }[] = [];
+  const needsHuman: number[] = [];
+  for (const i of [...args.issues].sort((a, b) => (a.labeledAt < b.labeledAt ? -1 : 1))) {
+    if (i.hasPr || i.labeledAt > cutoff) continue;
+    if (i.comments.some((c) => c.createdAt >= i.labeledAt && START_MARK_RE.test(c.body))) continue;
+    if (i.comments.some((c) => /factory:(dispatch|patrol) action=relabel-start/.test(c.body))) {
+      needsHuman.push(i.number);
+      continue;
+    }
+    if (relabel.length < args.remaining) relabel.push({ issue: i.number, label: i.label });
+  }
+  return { relabel, needsHuman };
 }
