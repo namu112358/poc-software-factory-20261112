@@ -1,8 +1,17 @@
 import { getDb, type Db } from "./db/index.ts";
+import { formatLeaveNote, listLeaveEndDates } from "./absence.ts";
 import { todayInJapan } from "./task-dates.ts";
 
 export type MemberOpenTask = { id: number; title: string; label: string };
-export type MemberRow = { id: string; name: string; openCount: number; overdueCount: number; tasks: MemberOpenTask[] };
+/** leaveUntil は、今日（日本時間）が休みの期間に入っていれば、その終了日（YYYY-MM-DD）。休みでなければ null。 */
+export type MemberRow = {
+  id: string;
+  name: string;
+  openCount: number;
+  overdueCount: number;
+  tasks: MemberOpenTask[];
+  leaveUntil: string | null;
+};
 
 const TITLE_MAX = 10;
 
@@ -18,18 +27,25 @@ export function listMemberWorkload(db: Db = getDb(), today: string = todayInJapa
   const tasks = db
     .prepare("SELECT id, title, assignee, due_date AS dueDate FROM tasks WHERE status <> 'done' AND archived = 0 AND deleted_at IS NULL AND assignee IS NOT NULL ORDER BY due_date IS NULL, due_date, id")
     .all() as { id: number; title: string; assignee: string; dueDate: string | null }[];
+  const leaveEndDates = listLeaveEndDates(db, today);
   return users.map((u) => {
     const own = tasks.filter((t) => t.assignee === u.id);
     const mine = own.map((t) => ({ id: t.id, title: t.title, label: truncateTitle(t.title) }));
     const overdueCount = own.filter((t) => t.dueDate !== null && t.dueDate < today).length;
-    return { id: u.id, name: u.name, openCount: mine.length, overdueCount, tasks: mine };
+    return { id: u.id, name: u.name, openCount: mine.length, overdueCount, tasks: mine, leaveUntil: leaveEndDates.get(u.id) ?? null };
   });
 }
 
-/** 担当者の選択肢の文言。「佐藤（未完了 5・期限切れ 1）」。期限切れが 0 件なら「佐藤（未完了 5）」。 */
-export function formatAssigneeOption(m: Pick<MemberRow, "name" | "openCount" | "overdueCount">): string {
+/**
+ * 担当者の選択肢の文言。「佐藤（未完了 5・期限切れ 1）」。期限切れが 0 件なら「佐藤（未完了 5）」。
+ * 休み中なら末尾に「（休み: 11/20 まで）」を付ける（知らせるだけで、選ぶことは止めない）。
+ */
+export function formatAssigneeOption(
+  m: Pick<MemberRow, "name" | "openCount" | "overdueCount"> & { leaveUntil?: string | null },
+): string {
   const overdue = m.overdueCount > 0 ? `・期限切れ ${m.overdueCount}` : "";
-  return `${m.name}（未完了 ${m.openCount}${overdue}）`;
+  const leave = m.leaveUntil ? formatLeaveNote(m.leaveUntil) : "";
+  return `${m.name}（未完了 ${m.openCount}${overdue}）${leave}`;
 }
 
 export type AssigneeOption = { id: string; name: string; label: string };
