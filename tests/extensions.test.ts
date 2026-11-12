@@ -12,6 +12,7 @@ import {
   withdrawExtension,
 } from "../src/lib/extensions.ts";
 import { getTask } from "../src/lib/tasks.ts";
+import type { Db } from "../src/lib/db/index.ts";
 
 const input = { taskId: 3, requester: "sato", newDueDate: "2026-11-20", reason: "レビュー待ちのため" };
 
@@ -125,18 +126,91 @@ describe("decideExtension", () => {
   it("returns conflict when already decided, without changing the task", () => {
     const db = openDb();
     const ext = createExtension(input, db) as { id: number };
-    decideExtension(3, ext.id, "rejected", "sato", db);
-    assert.deepEqual(decideExtension(3, ext.id, "approved", "sato", db), { result: "conflict" });
+    decideExtension(3, ext.id, "rejected", "suzuki", db);
+    assert.deepEqual(decideExtension(3, ext.id, "approved", "tanaka", db), { result: "conflict" });
     assert.notEqual(getTask(3, db)!.dueDate, "2026-11-20");
   });
 
   it("conflict leaves the task's updatedAt unchanged", () => {
     const db = openDb();
     const ext = createExtension(input, db) as { id: number };
-    decideExtension(3, ext.id, "rejected", "sato", db);
+    decideExtension(3, ext.id, "rejected", "suzuki", db);
     const before = getTask(3, db)!.updatedAt;
-    decideExtension(3, ext.id, "approved", "sato", db, new Date("2026-11-10T00:00:00.000Z"));
+    decideExtension(3, ext.id, "approved", "tanaka", db, new Date("2026-11-10T00:00:00.000Z"));
     assert.equal(getTask(3, db)!.updatedAt, before);
+  });
+});
+
+describe("decideExtension: 申請した本人は判断できない", () => {
+  for (const decision of ["approved", "rejected"] as const) {
+    it(`本人が ${decision} しようとすると forbidden で、申請・期限・最終更新日時は変わらない`, () => {
+      const db = openDb();
+      const ext = createExtension(input, db) as { id: number };
+      const taskBefore = getTask(3, db);
+      const extBefore = getExtension(ext.id, db);
+      assert.deepEqual(decideExtension(3, ext.id, decision, "sato", db, new Date("2026-11-10T00:00:00.000Z")), {
+        result: "forbidden",
+      });
+      assert.deepEqual(getTask(3, db), taskBefore);
+      assert.deepEqual(getExtension(ext.id, db), extBefore);
+    });
+  }
+
+  it("本人の申請がすでに判断済みでも forbidden（本人の判定が判断済みより先）", () => {
+    const db = openDb();
+    const ext = createExtension(input, db) as { id: number };
+    decideExtension(3, ext.id, "rejected", "suzuki", db);
+    assert.deepEqual(decideExtension(3, ext.id, "approved", "sato", db), { result: "forbidden" });
+  });
+
+  it("申請が無い・別のタスクの申請なら、本人でも not_found（無いことの判定が本人より先）", () => {
+    const db = openDb();
+    const ext = createExtension(input, db) as { id: number };
+    assert.deepEqual(decideExtension(4, ext.id, "approved", "sato", db), { result: "not_found" });
+  });
+
+  it("本人以外なら、タスクの担当者でも判断できる", () => {
+    const db = openDb();
+    const ext = createExtension({ ...input, requester: "tanaka" }, db) as { id: number };
+    assert.equal(decideExtension(3, ext.id, "approved", "sato", db).result, "decided");
+  });
+});
+
+describe("decideExtension: 確かめてから書き込むまでに、ほかの人が判断していたとき", () => {
+  /**
+   * 判断済みかを確かめた後、トランザクションを始める直前に、ほかの人（別の接続）の却下を割り込ませる DB。
+   * メソッドは元の DB に結び付けて返す。
+   */
+  function racyDb(db: Db, extensionId: number): { db: Db; interleaved: () => boolean } {
+    let interleaved = false;
+    const proxy = new Proxy(db, {
+      get(target, prop) {
+        const value = Reflect.get(target, prop, target);
+        if (prop !== "exec") return typeof value === "function" ? value.bind(target) : value;
+        return (sql: string) => {
+          if (!interleaved && sql === "BEGIN") {
+            interleaved = true;
+            target
+              .prepare("UPDATE due_date_extensions SET status = 'rejected', decided_by = 'tanaka' WHERE id = ?")
+              .run(extensionId);
+          }
+          return target.exec(sql);
+        };
+      },
+    }) as Db;
+    return { db: proxy, interleaved: () => interleaved };
+  }
+
+  it("承認は conflict になり、タスクの期限・最終更新日時は変わらず、先の判断が残る", () => {
+    const db = openDb();
+    const ext = createExtension(input, db) as { id: number };
+    const taskBefore = getTask(3, db);
+    const racy = racyDb(db, ext.id);
+    assert.deepEqual(decideExtension(3, ext.id, "approved", "suzuki", racy.db), { result: "conflict" });
+    assert.ok(racy.interleaved());
+    assert.deepEqual(getTask(3, db), taskBefore);
+    assert.equal(getExtension(ext.id, db)!.status, "rejected");
+    assert.equal(getExtension(ext.id, db)!.decidedBy, "tanaka");
   });
 });
 
@@ -223,8 +297,8 @@ describe("listPendingExtensions", () => {
     const rejected = createExtension({ ...input, taskId: 6 }, db)!;
     const withdrawn = createExtension({ ...input, taskId: 7 }, db)!;
     if (approved === "conflict" || rejected === "conflict" || withdrawn === "conflict") throw new Error("setup");
-    decideExtension(5, approved.id, "approved", "sato", db);
-    decideExtension(6, rejected.id, "rejected", "sato", db);
+    decideExtension(5, approved.id, "approved", "suzuki", db);
+    decideExtension(6, rejected.id, "rejected", "suzuki", db);
     withdrawExtension(7, withdrawn.id, "sato", db);
 
     const rows = listPendingExtensions(db);

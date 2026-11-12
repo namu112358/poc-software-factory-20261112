@@ -16,6 +16,7 @@ export async function POST(_request: Request, { params }: Context) {
   if (extensionId === undefined) return jsonError(404, "延長申請が見つかりません");
   const outcome = decideExtension(id, extensionId, "approved", user.id);
   if (outcome.result === "not_found") return jsonError(404, "延長申請が見つかりません");
+  if (outcome.result === "forbidden") return jsonError(403, "自分の申請は判断できません");
   if (outcome.result === "conflict") return jsonError(409, "この延長申請はすでに判断されています");
   return NextResponse.json(
     { extension: outcome.extension, task: outcome.task },
