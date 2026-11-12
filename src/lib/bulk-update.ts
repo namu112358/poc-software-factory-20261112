@@ -1,6 +1,6 @@
 // タスクのステータス・担当者をまとめて変える処理（POST /api/tasks/bulk-update）。
 import { getDb, transaction, type Db } from "./db/index.ts";
-import { getTask, isTaskStatus, type Task, type TaskStatus, type ValidationResult } from "./tasks.ts";
+import { COMPLETED_AT_SQL, getTask, isTaskStatus, type Task, type TaskStatus, type ValidationResult } from "./tasks.ts";
 
 /** まとめて変えられるタスクの最大件数（一括完了と同じ）。 */
 export const BULK_UPDATE_MAX = 100;
@@ -65,7 +65,8 @@ export type BulkUpdateResult = { ok: true; tasks: Task[] } | { ok: false; missin
 
 /**
  * 指定したタスクに同じ変更をまとめて入れる。全部か無しか: 存在しない ID が 1 つでもあれば何も変えず、
- * 途中で失敗したらすべて戻す。値が変わらないタスクは、最終更新日時も変えない。結果は ids の順に並べる。
+ * 途中で失敗したらすべて戻す。値が変わらないタスクは、最終更新日時も変えない。完了日時はステータスの変化に合わせて決まる
+ * （完了にしたら記録し、すでに完了なら変えず、完了以外にしたら null）。結果は ids の順に並べる。
  */
 export function updateTasks(ids: readonly number[], changes: BulkUpdateChanges, db: Db = getDb()): BulkUpdateResult {
   return transaction(db, () => {
@@ -73,12 +74,12 @@ export function updateTasks(ids: readonly number[], changes: BulkUpdateChanges, 
     const missingIds = ids.filter((_, i) => found[i] === undefined);
     if (missingIds.length > 0) return { ok: false, missingIds };
     const now = new Date().toISOString();
-    const update = db.prepare("UPDATE tasks SET status = ?, assignee = ?, updated_at = ? WHERE id = ?");
+    const update = db.prepare(`UPDATE tasks SET status = :status, assignee = :assignee, updated_at = :now, ${COMPLETED_AT_SQL} WHERE id = :id`);
     for (const task of found as Task[]) {
       const status = changes.status ?? task.status;
       const assignee = changes.assignee ?? task.assignee;
       if (status === task.status && assignee === task.assignee) continue;
-      update.run(status, assignee, now, task.id);
+      update.run({ status, assignee, now, id: task.id });
     }
     return { ok: true, tasks: ids.map((id) => getTask(id, db)!) };
   });
