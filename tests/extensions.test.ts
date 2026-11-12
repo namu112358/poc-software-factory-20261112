@@ -85,6 +85,15 @@ describe("decideExtension", () => {
     assert.equal(getTask(3, db)!.dueDate, "2026-11-20");
   });
 
+  it("approves: sets the task's updatedAt to the decision time", () => {
+    const db = openDb();
+    const ext = createExtension(input, db) as { id: number };
+    const now = new Date("2026-11-10T00:00:00.000Z");
+    assert.notEqual(getTask(3, db)!.updatedAt, now.toISOString());
+    decideExtension(3, ext.id, "approved", "suzuki", db, now);
+    assert.equal(getTask(3, db)!.updatedAt, now.toISOString());
+  });
+
   it("rejects: records the decision and leaves the due date unchanged", () => {
     const db = openDb();
     const before = getTask(3, db)!.dueDate;
@@ -94,6 +103,14 @@ describe("decideExtension", () => {
     assert.equal(getExtension(ext.id, db)!.status, "rejected");
     assert.equal(getExtension(ext.id, db)!.decidedBy, "tanaka");
     assert.equal(getTask(3, db)!.dueDate, before);
+  });
+
+  it("rejects: leaves the task's updatedAt unchanged", () => {
+    const db = openDb();
+    const before = getTask(3, db)!.updatedAt;
+    const ext = createExtension(input, db) as { id: number };
+    decideExtension(3, ext.id, "rejected", "tanaka", db, new Date("2026-11-10T00:00:00.000Z"));
+    assert.equal(getTask(3, db)!.updatedAt, before);
   });
 
   it("returns not_found for an unknown extension or one of another task", () => {
@@ -109,6 +126,15 @@ describe("decideExtension", () => {
     decideExtension(3, ext.id, "rejected", "sato", db);
     assert.deepEqual(decideExtension(3, ext.id, "approved", "sato", db), { result: "conflict" });
     assert.notEqual(getTask(3, db)!.dueDate, "2026-11-20");
+  });
+
+  it("conflict leaves the task's updatedAt unchanged", () => {
+    const db = openDb();
+    const ext = createExtension(input, db) as { id: number };
+    decideExtension(3, ext.id, "rejected", "sato", db);
+    const before = getTask(3, db)!.updatedAt;
+    decideExtension(3, ext.id, "approved", "sato", db, new Date("2026-11-10T00:00:00.000Z"));
+    assert.equal(getTask(3, db)!.updatedAt, before);
   });
 });
 
