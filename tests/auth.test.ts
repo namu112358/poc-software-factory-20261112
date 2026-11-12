@@ -7,6 +7,7 @@ import {
   createSession,
   deleteSession,
   getSessionUser,
+  logoutAllDevices,
   validatePasswordChangeInput,
 } from "../src/lib/auth.ts";
 import { openDb } from "../src/lib/db/index.ts";
@@ -149,5 +150,55 @@ describe("changePassword", () => {
     changePassword("sato", current, { currentPassword: NEW, newPassword: SEED_PASSWORD }, db);
     changePassword("sato", current, { currentPassword: SEED_PASSWORD, newPassword: NEW }, db);
     assert.notEqual(hashOf(), first);
+  });
+});
+
+describe("logoutAllDevices", () => {
+  const now = new Date("2026-11-12T00:00:00Z");
+  const countSessions = (db: ReturnType<typeof openDb>, userId: string) =>
+    (db.prepare("SELECT COUNT(*) AS n FROM sessions WHERE user_id = ?").get(userId) as { n: number }).n;
+
+  it("deletes every session of the caller, including the calling one and expired ones", () => {
+    const db = openDb();
+    const current = createSession("sato", db, now);
+    const other = createSession("sato", db, now);
+    const expired = createSession("sato", db, new Date(now.getTime() - SESSION_TTL_MS - 1));
+    assert.equal(logoutAllDevices(current, db, now)?.id, "sato");
+    assert.equal(countSessions(db, "sato"), 0);
+    for (const token of [current, other, expired]) assert.equal(getSessionUser(token, db, now), undefined);
+  });
+
+  it("keeps other users' sessions", () => {
+    const db = openDb();
+    const mine = createSession("sato", db, now);
+    const theirs = createSession("suzuki", db, now);
+    const theirs2 = createSession("tanaka", db, now);
+    logoutAllDevices(mine, db, now);
+    assert.equal(getSessionUser(theirs, db, now)?.id, "suzuki");
+    assert.equal(getSessionUser(theirs2, db, now)?.id, "tanaka");
+    assert.equal(countSessions(db, "suzuki"), 1);
+    assert.equal(countSessions(db, "tanaka"), 1);
+  });
+
+  it("deletes nothing when not logged in (no, unknown or expired token)", () => {
+    const db = openDb();
+    const expired = createSession("sato", db, new Date(now.getTime() - SESSION_TTL_MS - 1));
+    const alive = createSession("sato", db, now);
+    const theirs = createSession("suzuki", db, now);
+    for (const token of [undefined, "", "unknown", expired]) {
+      assert.equal(logoutAllDevices(token, db, now), undefined);
+    }
+    assert.equal(countSessions(db, "sato"), 2);
+    assert.equal(getSessionUser(alive, db, now)?.id, "sato");
+    assert.equal(getSessionUser(theirs, db, now)?.id, "suzuki");
+  });
+
+  it("treats a second call with the same token as not logged in", () => {
+    const db = openDb();
+    const token = createSession("sato", db, now);
+    assert.equal(logoutAllDevices(token, db, now)?.id, "sato");
+    const later = createSession("sato", db, now);
+    assert.equal(logoutAllDevices(token, db, now), undefined);
+    assert.equal(getSessionUser(later, db, now)?.id, "sato");
   });
 });
