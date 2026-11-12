@@ -9,6 +9,8 @@ describe("validateTagInput", () => {
     assert.deepEqual(validateTagInput({ name: "  急ぎ " }), { ok: true, value: { name: "急ぎ" } });
     assert.equal(validateTagInput({ name: "a".repeat(20) }).ok, true);
     assert.deepEqual(validateTagInput({ name: "Bug" }), { ok: true, value: { name: "Bug" } });
+    assert.equal(validateTagInput({ name: "🔥".repeat(20) }).ok, true);
+    assert.equal(validateTagInput({ name: "🔥".repeat(21) }).ok, false);
   });
 
   it("rejects empty, too long, forbidden characters, non-string and non-object input", () => {

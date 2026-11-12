@@ -11,7 +11,9 @@ export function validateTagInput(body: unknown): ValidationResult<{ name: string
   const name = (body as Record<string, unknown>).name;
   if (typeof name !== "string") return { ok: false, errors: ["タグの名前を文字列で入力してください"] };
   const trimmed = name.trim();
-  if (trimmed.length < 1 || trimmed.length > TAG_MAX_LENGTH) {
+  // 絵文字なども 1 文字と数えるため、UTF-16 の長さではなくコードポイントの数で数える。
+  const length = [...trimmed].length;
+  if (length < 1 || length > TAG_MAX_LENGTH) {
     return { ok: false, errors: [`タグの名前は 1〜${TAG_MAX_LENGTH} 文字で入力してください`] };
   }
   if (/[\s,/]/.test(trimmed)) {

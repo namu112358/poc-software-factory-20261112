@@ -1,3 +1,4 @@
+import { Fragment } from "react";
 import { requireUser } from "@/lib/session";
 import { listTagsByTask } from "@/lib/tags";
 import { STATUS_LABELS, TASK_STATUSES, formatTaskCount, isTaskStatus, listAssignees, listTasks, parseAssignee, parseTagFilter } from "@/lib/tasks";
@@ -71,10 +72,13 @@ export default async function TasksPage({ searchParams }: Props) {
               <td>{task.assignee}</td>
               <td>{task.dueDate}</td>
               <td>
-                {(tagsByTask.get(task.id) ?? []).map((name) => (
-                  <a key={name} href={`/tasks?tag=${encodeURIComponent(name)}`} data-testid="task-tag">
-                    {name}
-                  </a>
+                {(tagsByTask.get(task.id) ?? []).map((name, i) => (
+                  <Fragment key={name}>
+                    {i > 0 && "、"}
+                    <a href={`/tasks?tag=${encodeURIComponent(name)}`} data-testid="task-tag">
+                      {name}
+                    </a>
+                  </Fragment>
                 ))}
               </td>
             </tr>
