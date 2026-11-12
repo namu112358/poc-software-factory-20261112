@@ -1,6 +1,6 @@
 # 割り当ての手順書
 
-`claude/` で始まるブランチの PR が閉じたとき（マージを含む）に起動します。マージの直後に起きる 2 つの変化と、起動しなかった実装を拾います。どれも、待たされる Issue・PR の側にはイベントが来ないためです。コードは書きません。
+`claude/` で始まるブランチの PR が閉じたとき（マージを含む）に起動します。マージの直後に起きる 2 つの変化と、起動しなかった実装・途中で止まった実装を拾います。どれも、待たされる Issue・PR の側にはイベントが来ないためです。コードは書きません。
 
 ## 1. 衝突した PR を修正に回す
 
@@ -22,6 +22,10 @@ Mergify のキューに入っている PR（チェック「Mergify Merge Queue�
 
 開いている Issue のうち、`ready` か `ready:hard` が付いて 15 分以上たち、その後に実装の役のコメント（`factory:touch`・`factory:queued` など）も `in-progress` も付いていないものは、実装の起動のイベントが捨てられたものとして、付いていたラベルを外して同じラベルを付け直す（実装がもう一度起動する）。時刻は、Issue のイベント（REST の `GET /repos/{owner}/{repo}/issues/{number}/events`）の最後の `labeled` で見る。コメントの先頭に `<!-- factory:dispatch action=relabel-ready -->` を付ける。同じ Issue に、すでに `factory:dispatch action=relabel-ready` か `factory:patrol action=relabel-ready` のコメントがあれば、付け直さない（巡回が 2 回目として `needs-human` にする）。`epic`・`blocked:question`・`needs-human` の付いた Issue には触らない。巡回（1 時間ごと、30 分以上たったものだけ）より早く拾うため（#190。取りこぼされた Issue が 87 分止まった）。
 
-## 5. 終える
+## 5. 途中で止まった実装を片付ける
+
+巡回の表の「実装が途中で止まった」に当たる Issue（`in-progress` が付き、PR が無いか draft のまま、最後の動きから 60 分以上）を、巡回と同じように片付ける: `in-progress` を外し、経過をコメントして（先頭に `<!-- factory:dispatch action=stalled -->`）`needs-human` を付ける。止まった実装が `in-progress` のまま、同時に実装する枠（4 件）を塞ぎ続けないため（#215。利用上限で止まった 3 件が、2 時間近く枠を塞いだ）。
+
+## 6. 終える
 
 何かしたときだけ、した Issue・PR にコメントする。何もしなければ、コメントせずに終える。
