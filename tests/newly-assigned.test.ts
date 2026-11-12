@@ -79,6 +79,23 @@ describe("新しく担当になったタスクの選び方", () => {
     assert.deepEqual(list(db), []);
   });
 
+  it("ログインより前にほかの人の担当に替わり、ログインのあとに自分の担当に戻ったタスクは出ない（一覧はログインの時点で決まる）", () => {
+    const db = setup();
+    const a = add(db, "戻り");
+    change(db, a, "suzuki", "sato", "tanaka", "2026-11-10T01:00:00.000Z");
+    change(db, a, "sato", "tanaka", "suzuki", "2026-11-11T01:00:00.000Z");
+    change(db, a, "tanaka", "sato", "sato", "2026-11-12T01:00:00.000Z");
+    assert.deepEqual(list(db), []);
+  });
+
+  it("ログインのあとにほかの人の担当に替わっても、ログインの時点で自分の担当だったタスクは出たまま", () => {
+    const db = setup();
+    const a = add(db, "替わり", { assignee: "tanaka" });
+    change(db, a, "suzuki", "sato", "tanaka", "2026-11-11T01:00:00.000Z");
+    change(db, a, "sato", "tanaka", "suzuki", "2026-11-12T01:00:00.000Z");
+    assert.deepEqual(list(db).map((r) => r.title), ["替わり"]);
+  });
+
   it("完了したタスク・アーカイブしたタスクは出ない", () => {
     const db = setup();
     const done = add(db, "完了", { status: "done" });

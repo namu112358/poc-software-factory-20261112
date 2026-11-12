@@ -60,8 +60,8 @@ export type NewlyAssignedTask = {
 
 /**
  * 前回のログイン（previousLoginAt の後）から今回のログイン（loginAt まで）の間に、userId の担当に替えられたタスク。
- * 今も userId の担当で、未完了・アーカイブしていないものだけ。自分で自分の担当にしたものは除く。
- * 同じタスクが期間内に何度か自分の担当になっていれば、最後の変更を使う。新しい順。
+ * 担当は今回のログインの時点で判定する: そのタスクの loginAt までで最新の担当の変更が、期間内の userId への変更であるものだけ。
+ * ログインのあとに担当が変わっても、一覧は変わらない。未完了・アーカイブしていないものだけ。自分で自分の担当にしたものは除く。新しい順。
  * 前回のログインまたは今回のログインの日時が分からなければ、空にする。
  */
 export function listNewlyAssignedTasks(
@@ -80,16 +80,16 @@ export function listNewlyAssignedTasks(
          FROM tasks t
          JOIN task_assignee_changes c
            ON c.id = (SELECT c2.id FROM task_assignee_changes c2
-                       WHERE c2.task_id = t.id AND c2.to_assignee = ?
-                         AND c2.changed_at > ? AND c2.changed_at <= ?
+                       WHERE c2.task_id = t.id AND c2.changed_at <= ?
                        ORDER BY c2.changed_at DESC, c2.id DESC LIMIT 1)
          LEFT JOIN users f ON f.id = c.from_assignee
          LEFT JOIN users b ON b.id = c.changed_by
-        WHERE t.assignee = ? AND t.status <> 'done' AND t.archived = 0
+        WHERE c.to_assignee = ? AND c.changed_at > ?
+          AND t.status <> 'done' AND t.archived = 0
           AND (c.changed_by IS NULL OR c.changed_by <> ?)
         ORDER BY c.changed_at DESC, c.id DESC`,
     )
-    .all(userId, previousLoginAt, loginAt, userId, userId) as NewlyAssignedTask[];
+    .all(loginAt, userId, previousLoginAt, userId) as NewlyAssignedTask[];
 }
 
 /** 一覧の 1 行の「前の担当者」「替えた人」の表示。 */
