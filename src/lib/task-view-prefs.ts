@@ -2,7 +2,7 @@ import type { Db } from "./db/index.ts";
 import { getDb } from "./db/index.ts";
 import { parseDueFilter } from "./task-dates.ts";
 import { parseIncludeArchived } from "./task-query.ts";
-import { isTaskStatus, parseAssignee, parseKeyword, parseSort, parseTagFilter } from "./tasks.ts";
+import { isTaskStatus, parseAssignee, parseKeyword, parseSort, parseTagFilters } from "./tasks.ts";
 
 /** タスク一覧の条件を表すクエリのキー。URL にこのうち 1 つでもあれば「URL に条件が付いている」とみなす。 */
 export const TASK_VIEW_KEYS = ["status", "assignee", "tag", "q", "due", "sort", "archived"] as const;
@@ -10,7 +10,7 @@ export const TASK_VIEW_KEYS = ["status", "assignee", "tag", "q", "due", "sort", 
 /** 覚えた条件も消してタスク一覧を開くためのリンク先。 */
 export const RESET_TASK_VIEW_HREF = "/tasks?reset=1";
 
-export type TaskViewQuery = Partial<Record<(typeof TASK_VIEW_KEYS)[number], string>>;
+export type TaskViewQuery = Partial<Record<Exclude<(typeof TASK_VIEW_KEYS)[number], "tag">, string>> & { tag?: string[] };
 
 /** URL のクエリに、タスク一覧の条件のキーが 1 つでもあるか（空の値でもあるとみなす。「すべて」を選んで絞り込んだ場合を含める）。 */
 export function hasTaskViewParams(params: Record<string, unknown>): boolean {
@@ -24,8 +24,8 @@ export function sanitizeTaskViewQuery(raw: Record<string, unknown>, db: Db = get
   if (isTaskStatus(status)) out.status = status;
   const assignee = parseAssignee(raw.assignee, db);
   if (assignee !== undefined) out.assignee = assignee;
-  const tag = parseTagFilter(raw.tag);
-  if (tag !== undefined && tagExists(tag, db)) out.tag = tag;
+  const tags = parseTagFilters(raw.tag, db);
+  if (tags.length > 0) out.tag = tags;
   const q = parseKeyword(raw.q);
   if (q !== undefined) out.q = q;
   const due = parseDueFilter(raw.due);
@@ -33,10 +33,6 @@ export function sanitizeTaskViewQuery(raw: Record<string, unknown>, db: Db = get
   if (typeof raw.sort === "string" && parseSort(raw.sort) === raw.sort) out.sort = raw.sort;
   if (parseIncludeArchived(raw.archived)) out.archived = "include";
   return out;
-}
-
-function tagExists(name: string, db: Db): boolean {
-  return db.prepare("SELECT 1 FROM task_tags WHERE name = ? LIMIT 1").get(name) !== undefined;
 }
 
 /** この利用者の覚えた条件を保存する。条件が空なら行を消す。 */

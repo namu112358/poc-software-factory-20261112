@@ -18,7 +18,7 @@ describe("task view prefs", () => {
     const loaded = loadTaskViewPrefs(a, db);
     assert.equal(loaded.status, "todo");
     assert.equal(loaded.assignee, b);
-    assert.equal(loaded.tag, "急ぎ");
+    assert.deepEqual(loaded.tag, ["急ぎ"]);
     assert.equal(loaded.q, "資料");
     assert.equal(loaded.sort, "due");
     assert.equal(loaded.archived, "include");

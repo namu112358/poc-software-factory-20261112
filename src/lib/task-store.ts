@@ -53,9 +53,9 @@ export function listTasks(filter: TaskFilter = {}, db: Db = getDb()): Task[] {
   const today = filter.today ?? todayInJapan();
   const rows = db
     .prepare(
-      "SELECT id, title, status, assignee, due_date, priority, estimate_minutes, created_at, updated_at, completed_at, memo, archived FROM tasks WHERE deleted_at IS NULL AND (:includeArchived = 1 OR archived = 0) AND (:status IS NULL OR status = :status) AND (:assignee IS NULL OR (:assignee = 'none' AND assignee IS NULL) OR (:assignee <> 'none' AND assignee = :assignee)) AND (:tag IS NULL OR EXISTS (SELECT 1 FROM task_tags g WHERE g.task_id = tasks.id AND g.name = :tag)) AND (:due IS NULL OR (:due = 'none' AND (due_date IS NULL OR due_date = '')) OR (:due = 'overdue' AND due_date IS NOT NULL AND due_date <> '' AND due_date < :today) OR (:due = 'today' AND due_date IS NOT NULL AND due_date <> '' AND due_date <= :today) OR (:due = 'week' AND due_date IS NOT NULL AND due_date <> '' AND due_date <= :weekEnd)) AND (:q IS NULL OR title LIKE :q ESCAPE '\\' OR memo LIKE :q ESCAPE '\\' OR (:qInComments = 1 AND EXISTS (SELECT 1 FROM comments c WHERE c.task_id = tasks.id AND c.body LIKE :q ESCAPE '\\'))) " + orderBy,
+      "SELECT id, title, status, assignee, due_date, priority, estimate_minutes, created_at, updated_at, completed_at, memo, archived FROM tasks WHERE deleted_at IS NULL AND (:includeArchived = 1 OR archived = 0) AND (:status IS NULL OR status = :status) AND (:assignee IS NULL OR (:assignee = 'none' AND assignee IS NULL) OR (:assignee <> 'none' AND assignee = :assignee)) AND (:tagCount = 0 OR (SELECT COUNT(DISTINCT g.name) FROM task_tags g WHERE g.task_id = tasks.id AND g.name IN (:tag0, :tag1, :tag2, :tag3, :tag4)) = :tagCount) AND (:due IS NULL OR (:due = 'none' AND (due_date IS NULL OR due_date = '')) OR (:due = 'overdue' AND due_date IS NOT NULL AND due_date <> '' AND due_date < :today) OR (:due = 'today' AND due_date IS NOT NULL AND due_date <> '' AND due_date <= :today) OR (:due = 'week' AND due_date IS NOT NULL AND due_date <> '' AND due_date <= :weekEnd)) AND (:q IS NULL OR title LIKE :q ESCAPE '\\' OR memo LIKE :q ESCAPE '\\' OR (:qInComments = 1 AND EXISTS (SELECT 1 FROM comments c WHERE c.task_id = tasks.id AND c.body LIKE :q ESCAPE '\\'))) " + orderBy,
     )
-    .all({ status: filter.status ?? null, assignee: filter.assignee ?? null, tag: filter.tag ?? null, q: filter.q === undefined ? null : likePattern(filter.q), qInComments: filter.qInComments ? 1 : 0, includeArchived: filter.includeArchived ? 1 : 0, due: filter.due ?? null, today, weekEnd: addDays(today, 7) }) as TaskRow[];
+    .all({ status: filter.status ?? null, assignee: filter.assignee ?? null, ...tagParams(filter), q: filter.q === undefined ? null : likePattern(filter.q), qInComments: filter.qInComments ? 1 : 0, includeArchived: filter.includeArchived ? 1 : 0, due: filter.due ?? null, today, weekEnd: addDays(today, 7) }) as TaskRow[];
   return rows.map(toTask);
 }
 
@@ -306,4 +306,10 @@ export function restoreTask(id: number, userId: string, db: Db = getDb(), now: D
     const restorable = db.prepare("SELECT 1 FROM tasks WHERE id = ? AND deleted_at IS NOT NULL AND deleted_at > ?").get(id, cutoff);
     return restorable ? "forbidden" : "not_found";
   });
+}
+
+/** 絞り込みのタグ（`tag` と `tags` を合わせ、重複を除いた先頭の 5 つ）を SQL のパラメータにする。付いていることを求めるタグの数が tagCount。 */
+function tagParams(filter: { tag?: string; tags?: readonly string[] }): Record<string, string | number | null> {
+  const names = [...new Set([...(filter.tag === undefined ? [] : [filter.tag]), ...(filter.tags ?? [])])].slice(0, 5);
+  return { tagCount: names.length, tag0: names[0] ?? null, tag1: names[1] ?? null, tag2: names[2] ?? null, tag3: names[3] ?? null, tag4: names[4] ?? null };
 }

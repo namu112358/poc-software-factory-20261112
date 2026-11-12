@@ -62,6 +62,7 @@ export function bulkSelectionKey(filter: {
   status?: string;
   assignee?: string;
   tag?: string;
+  tags?: readonly string[];
   q?: string;
   due?: string;
   sort?: string;
@@ -71,6 +72,7 @@ export function bulkSelectionKey(filter: {
     filter.status ?? "",
     filter.assignee ?? "",
     filter.tag ?? "",
+    filter.tags ?? [],
     filter.q ?? "",
     filter.due ?? "",
     filter.sort ?? "",
