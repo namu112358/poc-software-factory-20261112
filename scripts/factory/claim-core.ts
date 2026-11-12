@@ -13,7 +13,8 @@ export type IssueInfo = {
   blockedBy?: number[]; // GitHub の依存関係（blocked by）に登録された Issue の番号
 };
 
-export type PrInfo = { number: number; headRef: string; files: string[] };
+/** stalled: PR か、その Issue（claude/issue-<番号>）に needs-human・blocked:question が付いて、人を待っている（#255） */
+export type PrInfo = { number: number; headRef: string; files: string[]; stalled?: boolean };
 
 export type Wait = number | "slot";
 
@@ -123,6 +124,36 @@ export function dependencies(issue: IssueInfo): number[] {
   return [...deps].sort((a, b) => a - b);
 }
 
+export const STALLED_LABELS = ["needs-human", "blocked:question"];
+
+/**
+ * 番号（Issue か PR）が人を待って止まっているか、を返す関数を作る（#255）。
+ * labels: 番号ごとのラベル。prIssue: PR の番号 → その PR の Issue（claude/issue-<番号>）の番号。
+ * PR は、PR 自身か、その Issue のどちらかに印があれば止まっているとみなす（止まるときに印を付けるのは Issue のことが多いため）。
+ */
+export function makeIsStalled(labels: Map<number, string[]>, prIssue: Map<number, number>): (n: number) => boolean {
+  const marked = (n: number) => (labels.get(n) ?? []).some((l) => STALLED_LABELS.includes(l));
+  return (n: number) => {
+    if (marked(n)) return true;
+    const issue = prIssue.get(n);
+    return issue !== undefined && marked(issue);
+  };
+}
+
+/**
+ * まだ待つ依存先。blocked by・「#N の後」（人が決めた依存）は、開いていれば待つ。
+ * factory:queued の wait=#N（同じファイルを変える作業を待つもの）は、開いていても、
+ * 待ち先が needs-human・blocked:question で人を待っているなら待たない（無期限に止まらないため。#255）。
+ */
+export function blockingDeps(issue: IssueInfo, isOpen: (n: number) => boolean, isStalled: (n: number) => boolean = () => false): number[] {
+  const hard = new Set<number>([...(issue.blockedBy ?? []), ...bodyDeps(issue.body)]);
+  const out = new Set<number>([...hard].filter((n) => isOpen(n)));
+  const q = latestQueued(issue);
+  if (q && typeof q.value.wait === "number" && !hard.has(q.value.wait) && isOpen(q.value.wait) && !isStalled(q.value.wait)) out.add(q.value.wait);
+  out.delete(issue.number);
+  return [...out].sort((a, b) => a - b);
+}
+
 /** 変えるファイル: 最新の factory:queued の files=、無ければ最新の factory:touch の files= */
 export function plannedFiles(issue: IssueInfo): string[] {
   const q = latestQueued(issue);
@@ -160,10 +191,11 @@ export function precheck(args: {
   queued: IssueInfo[];
   openPrs: PrInfo[];
   isOpen: (n: number) => boolean;
+  isStalled?: (n: number) => boolean;
 }): Decision {
   const { self, files } = args;
   if (args.ownPr) return ownPrGo(args.ownPr);
-  const openDeps = dependencies(self).filter((n) => args.isOpen(n));
+  const openDeps = blockingDeps(self, args.isOpen, args.isStalled);
   if (openDeps.length > 0) {
     return queue("queue", openDeps[0], files, `依存先 #${openDeps.join("・#")} がまだ開いているので待つ。`);
   }
@@ -171,10 +203,16 @@ export function precheck(args: {
   if (others.length >= WIP_LIMIT) {
     return queue("queue", "slot", files, `空き待ち。作業中が ${others.length} 件（#${others.map((i) => i.number).join("・#")}）で、上限の ${WIP_LIMIT} 件に達している。`);
   }
+  const stalledOverlaps: string[] = [];
   for (const pr of args.openPrs) {
     if (pr.headRef === `claude/issue-${self.number}`) continue;
     const o = overlap(files, pr.files);
-    if (o.length > 0) return queue("queue", pr.number, files, `PR #${pr.number} が同じファイル（${o.join("、")}）を変えているので、閉じるまで待つ。`);
+    if (o.length === 0) continue;
+    if (pr.stalled) {
+      stalledOverlaps.push(`PR #${pr.number}（${o.join("、")}）`);
+      continue;
+    }
+    return queue("queue", pr.number, files, `PR #${pr.number} が同じファイル（${o.join("、")}）を変えているので、閉じるまで待つ。`);
   }
   for (const i of others) {
     const o = overlap(files, latestTouch(i)?.value ?? []);
@@ -188,6 +226,12 @@ export function precheck(args: {
   for (const i of olderQueued) {
     const o = overlap(files, plannedFiles(i));
     if (o.length > 0) return queue("queue", i.number, files, `先に待っている #${i.number} が同じファイル（${o.join("、")}）を変える予定なので、追い越さずに待つ。`);
+  }
+  if (stalledOverlaps.length > 0) {
+    return {
+      decision: "go",
+      note: `${stalledOverlaps.join("・")} は同じファイルを変えるが、needs-human・blocked:question で人を待っているので待たずに着手する（#255）。後からマージされるほうで衝突したら、割り当て・修正の役が解消する。このことを着手のコメントに書く。`,
+    };
   }
   return { decision: "go" };
 }
@@ -238,6 +282,7 @@ export function confirm(args: { self: IssueInfo; inProgress: IssueInfo[]; ownPr?
 function blocker(self: IssueInfo, files: string[], openPrs: PrInfo[], inProgress: IssueInfo[]): number | null {
   for (const pr of openPrs) {
     if (pr.headRef === `claude/issue-${self.number}`) continue;
+    if (pr.stalled) continue; // 人を待って止まった PR は待たない（#255）
     if (overlap(files, pr.files).length > 0) return pr.number;
   }
   for (const i of inProgress) {
@@ -256,6 +301,7 @@ export function pick(args: {
   queued: IssueInfo[];
   inProgressCount: number;
   isOpen: (n: number) => boolean;
+  isStalled?: (n: number) => boolean;
   openPrs?: PrInfo[];
   inProgress?: IssueInfo[];
 }): {
@@ -273,7 +319,7 @@ export function pick(args: {
   const skipped: IssueInfo[] = []; // 依存先が開いているので飛ばした、先に待っている Issue（予約として扱う）
   for (const i of [...args.queued].sort(waitOrder)) {
     if (picked.length >= slots) break;
-    if (dependencies(i).some((n) => args.isOpen(n))) {
+    if (blockingDeps(i, args.isOpen, args.isStalled).length > 0) {
       skipped.push(i);
       continue;
     }
