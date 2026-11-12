@@ -98,4 +98,13 @@ export const MIGRATIONS: readonly Migration[] = [
       ALTER TABLE tasks ADD COLUMN estimate_minutes INTEGER CHECK (estimate_minutes IS NULL OR (estimate_minutes BETWEEN 1 AND 10000));
     `,
   },
+  {
+    version: 8,
+    name: "task_timestamps",
+    sql: `
+      ALTER TABLE tasks ADD COLUMN created_at TEXT NOT NULL DEFAULT ''; -- ISO 8601（UTC）
+      ALTER TABLE tasks ADD COLUMN updated_at TEXT NOT NULL DEFAULT ''; -- ISO 8601（UTC）
+      UPDATE tasks SET created_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now');
+    `,
+  },
 ];
