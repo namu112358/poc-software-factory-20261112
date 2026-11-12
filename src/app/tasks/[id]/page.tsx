@@ -2,7 +2,7 @@ import { notFound } from "next/navigation";
 import { listComments } from "@/lib/comments";
 import { requireUser } from "@/lib/session";
 import { listTags } from "@/lib/tags";
-import { PRIORITY_LABELS, STATUS_LABELS, formatEstimate, formatJstDateTime, formatTaskNumber, getTask, isOverdue, parseTaskId, todayInJapan } from "@/lib/tasks";
+import { PRIORITY_LABELS, STATUS_LABELS, formatEstimate, formatJstDateTime, formatTaskNumber, getTask, isDueSoon, isOverdue, parseTaskId, todayInJapan } from "@/lib/tasks";
 import { getUser } from "@/lib/users";
 import { DuplicateButton } from "./duplicate";
 import { CommentForm, DeleteCommentButton } from "./comments";
@@ -48,6 +48,14 @@ export default async function TaskDetailPage({ params }: Props) {
               <strong data-testid="overdue" style={{ color: "#c00" }}>
                 期限切れ
               </strong>
+            </>
+          )}
+          {isDueSoon(task, todayInJapan()) && (
+            <>
+              {" "}
+              <span data-testid="due-soon" style={{ background: "#fff3b0", padding: "0 0.4em", borderRadius: "3px" }}>
+                期限が近い
+              </span>
             </>
           )}
         </dd>
