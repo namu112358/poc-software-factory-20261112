@@ -223,3 +223,25 @@ export function updateTask(id: number, changes: Partial<TaskInput>, db: Db = get
 export function formatEstimate(minutes: number | null): string {
   return minutes === null ? "—" : `${minutes} 分`;
 }
+
+/**
+ * タスクを複製する。タイトル・担当者・期限・優先度・見積もり時間・タグを写し、ステータスは常に todo。
+ * コメントと延長申請は写さない。元のタスクが無ければ undefined。
+ */
+export function duplicateTask(id: number, db: Db = getDb()): Task | undefined {
+  const source = getTask(id, db);
+  if (!source) return undefined;
+  const copy = createTask(
+    {
+      title: source.title,
+      status: "todo",
+      assignee: source.assignee,
+      dueDate: source.dueDate,
+      priority: source.priority,
+      estimateMinutes: source.estimateMinutes,
+    },
+    db,
+  );
+  db.prepare("INSERT INTO task_tags (task_id, name) SELECT ?, name FROM task_tags WHERE task_id = ? ORDER BY id").run(copy.id, id);
+  return copy;
+}

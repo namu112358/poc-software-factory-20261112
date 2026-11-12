@@ -4,6 +4,7 @@ import { requireUser } from "@/lib/session";
 import { listTags } from "@/lib/tags";
 import { PRIORITY_LABELS, STATUS_LABELS, formatEstimate, getTask, parseTaskId } from "@/lib/tasks";
 import { getUser } from "@/lib/users";
+import { DuplicateButton } from "./duplicate";
 import { CommentForm, DeleteCommentButton } from "./comments";
 import { RemoveTagButton, TagForm } from "./tags";
 
@@ -38,6 +39,9 @@ export default async function TaskDetailPage({ params }: Props) {
         <dt>見積もり時間</dt>
         <dd data-testid="task-estimate">{formatEstimate(task.estimateMinutes)}</dd>
       </dl>
+      <p>
+        <DuplicateButton taskId={task.id} />
+      </p>
       <section>
         <h2>タグ</h2>
         {tags.length === 0 ? (

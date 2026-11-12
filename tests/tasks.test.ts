@@ -266,3 +266,33 @@ describe("estimateMinutes", () => {
     assert.equal(formatEstimate(null), "—");
   });
 });
+
+describe("duplicateTask", () => {
+  it("copies title, assignee, due date, priority, estimate and tags, with status todo and no comments", async () => {
+    const { duplicateTask, getTask } = await import("../src/lib/tasks.ts");
+    const { addTag, listTags } = await import("../src/lib/tags.ts");
+    const db = openDb();
+    db.prepare("UPDATE tasks SET status = 'done', priority = 'high', estimate_minutes = 90 WHERE id = 1").run();
+    addTag(1, "急ぎ", db);
+    addTag(1, "週次", db);
+    db.prepare("INSERT INTO comments (task_id, author, body, created_at) VALUES (1, 'sato', 'メモ', '2026-01-01 00:00:00')").run();
+    const source = getTask(1, db)!;
+    const copy = duplicateTask(1, db)!;
+    assert.notEqual(copy.id, 1);
+    assert.equal(copy.status, "todo");
+    assert.equal(copy.title, source.title);
+    assert.equal(copy.assignee, source.assignee);
+    assert.equal(copy.dueDate, source.dueDate);
+    assert.equal(copy.priority, "high");
+    assert.equal(copy.estimateMinutes, 90);
+    assert.deepEqual(listTags(copy.id, db), ["急ぎ", "週次"]);
+    const n = db.prepare("SELECT COUNT(*) AS n FROM comments WHERE task_id = ?").get(copy.id) as { n: number };
+    assert.equal(n.n, 0);
+    assert.equal(getTask(1, db)!.status, "done");
+  });
+
+  it("returns undefined for a missing task", async () => {
+    const { duplicateTask } = await import("../src/lib/tasks.ts");
+    assert.equal(duplicateTask(9999, openDb()), undefined);
+  });
+});
