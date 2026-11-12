@@ -4,6 +4,7 @@ import { requireUser } from "@/lib/session";
 import { listTags } from "@/lib/tags";
 import { PRIORITY_LABELS, STATUS_LABELS, formatEstimate, formatJstDateTime, getTask, parseTaskId } from "@/lib/tasks";
 import { getUser } from "@/lib/users";
+import { DuplicateButton } from "./duplicate";
 import { CommentForm, DeleteCommentButton } from "./comments";
 import { RemoveTagButton, TagForm } from "./tags";
 
@@ -42,6 +43,9 @@ export default async function TaskDetailPage({ params }: Props) {
         <dt>更新</dt>
         <dd data-testid="updated-at">{formatJstDateTime(task.updatedAt)}</dd>
       </dl>
+      <p>
+        <DuplicateButton taskId={task.id} />
+      </p>
       <section>
         <h2>メモ</h2>
         {task.memo === "" ? (
