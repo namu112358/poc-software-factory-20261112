@@ -1,9 +1,23 @@
 "use client";
 // タスクの「編集」ボタンとフォーム。保存はフォームを開いたときの更新日時を付けて送り、
-// ほかの人が先に更新していたら（409）上書きせずに知らせ、最新の内容でフォームを入れ直す。
+// ほかの人が先に更新していたら（409）上書きせずに知らせ、入力は残したまま、相手が変えた項目を並べる。
+// 「今の値で編集し直す」を押すまでは保存できない（自分の入力のまま、確かめずに上書きしないため）。
 import { useRouter } from "next/navigation";
-import { useState, type FormEvent } from "react";
-import { newerTask, saveTaskEdit, taskToEditValues, type TaskEditValues } from "@/lib/task-edit";
+import { useMemo, useState, type FormEvent } from "react";
+import {
+  TASK_EDIT_CONFLICT_MESSAGE,
+  TASK_EDIT_NO_CHANGED_FIELDS_MESSAGE,
+  canSaveTaskEdit,
+  conflictRows,
+  newerTask,
+  rebaseOnCurrent,
+  recordConflict,
+  saveTaskEdit,
+  startTaskEdit,
+  taskToEditValues,
+  type TaskEditState,
+  type TaskEditValues,
+} from "@/lib/task-edit";
 import { MEMO_MAX_LENGTH, PRIORITY_LABELS, STATUS_LABELS, TASK_PRIORITIES, TASK_STATUSES, isTaskPriority, isTaskStatus, type Task } from "@/lib/task-types";
 
 type Props = { task: Task; users: { id: string; name: string; label?: string }[] };
@@ -11,39 +25,41 @@ type Props = { task: Task; users: { id: string; name: string; label?: string }[]
 export function EditTaskForm({ task, users }: Props) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
-  const [values, setValues] = useState<TaskEditValues>(() => taskToEditValues(task));
-  const [expectedUpdatedAt, setExpectedUpdatedAt] = useState(task.updatedAt);
+  const [edit, setEdit] = useState<TaskEditState>(() => startTaskEdit(task));
   const [received, setReceived] = useState<Task>();
   const [errors, setErrors] = useState<string[]>([]);
-  const [notice, setNotice] = useState<string>();
   const [pending, setPending] = useState(false);
+  const values = edit.values;
+  const userNames = useMemo(() => new Map(users.map((u) => [u.id, u.name])), [users]);
+  const rows = edit.conflict ? conflictRows(edit.base, taskToEditValues(edit.conflict), values, userNames) : [];
+  const canSave = canSaveTaskEdit(edit);
 
   function startEditing() {
-    const base = newerTask(task, received);
-    setValues(taskToEditValues(base));
-    setExpectedUpdatedAt(base.updatedAt);
+    setEdit(startTaskEdit(newerTask(task, received)));
     setErrors([]);
-    setNotice(undefined);
     setOpen(true);
   }
 
   function close() {
     setOpen(false);
     setErrors([]);
-    setNotice(undefined);
+  }
+
+  function rebase() {
+    setEdit(rebaseOnCurrent);
+    setErrors([]);
   }
 
   function set<K extends keyof TaskEditValues>(key: K, value: TaskEditValues[K]) {
-    setValues((v) => ({ ...v, [key]: value }));
+    setEdit((e) => ({ ...e, values: { ...e.values, [key]: value } }));
   }
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (pending) return;
+    if (pending || !canSave) return;
     setPending(true);
     setErrors([]);
-    setNotice(undefined);
-    const result = await saveTaskEdit(task.id, values, expectedUpdatedAt, { fetch: (url, init) => fetch(url, init) });
+    const result = await saveTaskEdit(task.id, values, edit.expectedUpdatedAt, { fetch: (url, init) => fetch(url, init) });
     setPending(false);
     switch (result.status) {
       case "saved":
@@ -53,9 +69,7 @@ export function EditTaskForm({ task, users }: Props) {
         return;
       case "conflict":
         setReceived(result.task);
-        setValues(taskToEditValues(result.task));
-        setExpectedUpdatedAt(result.task.updatedAt);
-        setNotice(result.message);
+        setEdit((e) => recordConflict(e, result.task));
         router.refresh();
         return;
       case "invalid":
@@ -80,9 +94,9 @@ export function EditTaskForm({ task, users }: Props) {
 
   return (
     <form aria-label="タスクの編集" onSubmit={onSubmit} noValidate>
-      {notice && (
+      {edit.conflict && (
         <p role="alert" data-testid="edit-conflict">
-          {notice}
+          {TASK_EDIT_CONFLICT_MESSAGE}
         </p>
       )}
       {errors.length > 0 && (
@@ -159,12 +173,45 @@ export function EditTaskForm({ task, users }: Props) {
           />
         </label>
       </p>
-      <button type="submit" disabled={pending}>
+      <button type="submit" disabled={pending || !canSave}>
         保存
       </button>{" "}
       <button type="button" onClick={close} disabled={pending}>
         やめる
       </button>
+      {edit.conflict && (
+        <section aria-labelledby="edit-conflict-heading" data-testid="edit-conflict-diff">
+          <h3 id="edit-conflict-heading">相手が変えた項目</h3>
+          {rows.length === 0 ? (
+            <p>{TASK_EDIT_NO_CHANGED_FIELDS_MESSAGE}</p>
+          ) : (
+            <table>
+              <thead>
+                <tr>
+                  <th scope="col">項目</th>
+                  <th scope="col">編集を始めたときの値</th>
+                  <th scope="col">今の値</th>
+                  <th scope="col">あなたの入力</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((r) => (
+                  <tr key={r.field} data-field={r.field}>
+                    <th scope="row">{r.label}</th>
+                    <td style={{ whiteSpace: "pre-wrap" }}>{r.base}</td>
+                    <td style={{ whiteSpace: "pre-wrap" }}>{r.current}</td>
+                    <td style={{ whiteSpace: "pre-wrap" }}>{r.mine}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+          <p>保存するには、今の値でフォームを入れ直してから、もう一度入力してください。</p>
+          <button type="button" onClick={rebase} disabled={pending}>
+            今の値で編集し直す
+          </button>
+        </section>
+      )}
     </form>
   );
 }

@@ -122,11 +122,11 @@ describe("saveTaskEdit", () => {
     const result = await saveTaskEdit(3, { ...taskToEditValues(opened), title: "自分の変更" }, opened.updatedAt, { fetch });
     assert.equal(result.status, "conflict");
     assert.ok(result.status === "conflict" && result.message.includes("ほかの人が先に更新しました"));
-    assert.equal(TASK_EDIT_CONFLICT_MESSAGE, "ほかの人が先に更新しました。最新の内容を読み込みます");
+    assert.equal(TASK_EDIT_CONFLICT_MESSAGE, "ほかの人が先に更新しました。相手が変えた項目を下に並べます。");
     assert.ok(result.status === "conflict");
     assert.deepEqual(result.task, latest);
     assert.deepEqual(getTask(3, db), latest);
-    // フォームに入れ直す値は最新のもの
+    // 「今の値で編集し直す」で入れる値は最新のもの
     assert.equal(taskToEditValues(result.task).dueDate, "2031-01-31");
   });
 
