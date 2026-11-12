@@ -6,6 +6,7 @@ import { listAssigneeOptions } from "@/lib/members";
 import { BulkBar, BulkCheckbox, BulkSelection } from "./BulkActions";
 import { exportHref } from "@/lib/export";
 import { parseIncludeArchived } from "@/lib/task-query";
+import { RESET_TASK_VIEW_HREF, resolveTaskViewQuery } from "@/lib/task-view-prefs";
 import { getCurrentLoginWindow, requireUser } from "@/lib/session";
 import { NEWLY_ASSIGNED_HEADING, listNewlyAssignedTasks, newlyAssignedNames } from "@/lib/assignee-history";
 import { formatJstDateTime } from "@/lib/task-format";
@@ -13,12 +14,13 @@ import { listTagsByTask } from "@/lib/tags";
 import { DUE_FILTER_LABELS, TASK_DUE_FILTERS, parseDueFilter, assigneeName, PRIORITY_LABELS, STATUS_LABELS, SORT_LABELS, TASK_LIST_HELP, TASK_SORTS, TASK_STATUSES, formatCurrentUser, clearFilterHref, formatEstimate, formatJstDate, formatDaysLeft, formatEstimateTotal, countUnestimated, formatUnestimatedCount, formatMemoPreview, formatTaskCount, formatDoneCount, priorityFontWeight, formatOverdueCount, countOverdue, memoTooltip, isOverdue, isTaskStatus, listAssignees, listTasks, parseAssignee, parseKeyword, parseSort, parseTagFilter, sumEstimateMinutes, taskRowDoneAttr, todayInJapan } from "@/lib/tasks";
 
 type Props = {
-  searchParams: Promise<{ status?: string; assignee?: string; tag?: string; q?: string; due?: string; sort?: string; archived?: string }>;
+  searchParams: Promise<{ status?: string; assignee?: string; tag?: string; q?: string; due?: string; sort?: string; archived?: string; reset?: string }>;
 };
 
 export default async function TasksPage({ searchParams }: Props) {
   const user = await requireUser();
-  const params = await searchParams;
+  const rawParams = await searchParams;
+  const params = resolveTaskViewQuery(user.id, rawParams, rawParams.reset === "1") as typeof rawParams;
   const status = isTaskStatus(params.status) ? params.status : undefined;
   const assignee = parseAssignee(params.assignee);
   const tag = parseTagFilter(params.tag);
@@ -96,7 +98,7 @@ export default async function TasksPage({ searchParams }: Props) {
       </p>
       {tag !== undefined && (
         <p>
-          <span data-testid="tag-filter">タグ「{tag}」のタスク</span> <a href="/tasks">すべてのタスク</a>
+          <span data-testid="tag-filter">タグ「{tag}」のタスク</span> <a href={RESET_TASK_VIEW_HREF}>すべてのタスク</a>
         </p>
       )}
       <form method="get" aria-label="絞り込み">
@@ -152,7 +154,10 @@ export default async function TasksPage({ searchParams }: Props) {
           <input type="checkbox" name="archived" value="include" defaultChecked={includeArchived} data-testid="include-archived" /> アーカイブ済みも表示
         </label>{" "}
         {tag !== undefined && <input type="hidden" name="tag" value={tag} />}
-        <button type="submit">絞り込む</button>
+        <button type="submit">絞り込む</button>{" "}
+        <a href={RESET_TASK_VIEW_HREF} data-testid="reset-view">
+          条件をすべて解除
+        </a>
       </form>
       <p data-testid="task-count">{formatTaskCount(tasks.length)}</p>
       <p>
