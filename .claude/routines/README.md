@@ -35,6 +35,8 @@ flowchart LR
 
 止まるときは、`ready` と `in-progress` を外してから `blocked:question` か `needs-human` を付ける。`ready` が付いたまま止まると、付け直しても「ラベルが付いた」というイベントが起きず、実装が起動しないため。
 
+人が Ready の PR に中身を足すときは、先に draft にしてから push し、Ready に戻す（Ready のまま push しても、レビューは起動しない。#195）。
+
 人が答えた後の再開のしかたは、どこで止まったかで変わる。
 
 - **実装で止まった（PR が無い）:** `blocked:question`・`needs-human` を外し、Issue に `ready` を付け直す。
@@ -96,6 +98,7 @@ flowchart LR
 - `ready` を最初に付けるのは人だけ。役が `ready` を付けてよいのは、人が一度付けた Issue を、キューから取り出すとき（「キュー」）と、巡回が取りこぼしを付け直すとき（`patrol.md`）だけ。
 - `.github/`・`.claude/`・`AGENTS.md`・`CLAUDE.md`・`docs/rulesets/` は変えない。例外は、振り返りの役が `AGENTS.md` の「このプロジェクトの罠」に足す案と、`.claude/routines/` の手順書を直す案を、draft の PR として出すことだけ（マージは人が判断する）。
 - push するのは `claude/` で始まるブランチだけ。force push はしない。
+- **取り込みだけのコミット**は、`main` を取り込んだマージのコミットで、衝突の解消などの手の入っていないもの（`git show <コミット>` の差分が空）を指す。割り当ての役と Mergify が、レビューの後に PR へ足す。中身は変わらないので、レビュー済みかを判定するときは数えない（`commit=` が最新でなくても、レビュー済みとして扱う。#195）。
 - PR の draft と Ready の切り替えは、GitHub MCP の `update_pull_request`（`draft: true` / `false`）で行う。
 - 権限で拒まれた操作は、言い換えて通そうとせず、拒まれたコマンドをコメントに書いて `needs-human` を付けて止まる。
 - 役の最後に、Issue か PR に「何をしたか・次に誰が何をするか」を 1〜3 行でコメントする。コメントの先頭には `<!-- factory:<役> -->` を付ける（巡回と集計が数える）。コメントの最後に、そのセッションの URL を 1 行書く（`セッション: https://claude.ai/code/session_<ID>`。コミットの `Claude-Session:` の行と同じもの。無ければ、環境変数 `CLAUDE_CODE_REMOTE_SDK_URL` の末尾の `cse_<ID>` の `<ID>` を使う）。Routine のセッションは名前を変えられないので、Issue・PR からセッションをたどれるようにするため（#144）。
