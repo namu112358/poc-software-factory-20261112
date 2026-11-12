@@ -1,0 +1,49 @@
+// タスクの担当者の変更の履歴。記録は task-store.ts のタスクの更新が行い、ここでは読み出しと表示の形を扱う。
+import { getDb, type Db } from "./db/index.ts";
+import { formatJstDateTime } from "./task-format.ts";
+
+export type AssigneeChange = {
+  id: number;
+  taskId: number;
+  fromAssignee: string;
+  fromName: string | null;
+  toAssignee: string;
+  toName: string | null;
+  changedBy: string | null;
+  changedByName: string | null;
+  changedAt: string; // ISO 8601（UTC）
+};
+
+/** タスクの担当者の変更の履歴を、新しい順（同じ時刻なら後から記録した順）に返す。 */
+export function listAssigneeChanges(taskId: number, db: Db = getDb()): AssigneeChange[] {
+  return db
+    .prepare(
+      `SELECT c.id AS id, c.task_id AS taskId,
+              c.from_assignee AS fromAssignee, f.name AS fromName,
+              c.to_assignee AS toAssignee, t.name AS toName,
+              c.changed_by AS changedBy, b.name AS changedByName,
+              c.changed_at AS changedAt
+         FROM task_assignee_changes c
+         LEFT JOIN users f ON f.id = c.from_assignee
+         LEFT JOIN users t ON t.id = c.to_assignee
+         LEFT JOIN users b ON b.id = c.changed_by
+        WHERE c.task_id = ?
+        ORDER BY c.changed_at DESC, c.id DESC`,
+    )
+    .all(taskId) as AssigneeChange[];
+}
+
+/** 利用者の表示名。名前が分かれば名前、無ければ ID、ID も空なら「（なし）」。 */
+function displayName(id: string | null, name: string | null, empty: string): string {
+  if (name !== null) return name;
+  if (id === null || id === "") return empty;
+  return id;
+}
+
+/** 履歴 1 件の表示。例: 「2026/11/12 18:05 佐藤 が 鈴木 → 田中 に変更」（日時は日本時間）。 */
+export function formatAssigneeChange(change: AssigneeChange): string {
+  const by = displayName(change.changedBy, change.changedByName, "（不明）");
+  const from = displayName(change.fromAssignee, change.fromName, "（なし）");
+  const to = displayName(change.toAssignee, change.toName, "（なし）");
+  return `${formatJstDateTime(change.changedAt)} ${by} が ${from} → ${to} に変更`;
+}

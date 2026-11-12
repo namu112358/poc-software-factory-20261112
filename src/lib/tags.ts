@@ -1,4 +1,4 @@
-import { getDb, type Db } from "./db/index.ts";
+import { getDb, transaction, type Db } from "./db/index.ts";
 import type { ValidationResult } from "./tasks.ts";
 
 export const TAG_MAX_LENGTH = 20;
@@ -58,10 +58,10 @@ export function removeTag(taskId: number, name: string, db: Db = getDb()): "remo
 
 export type TagCount = { name: string; count: number };
 
-/** 使われているタグと、付いているタスクの件数を返す。件数の多い順、同じ件数なら名前の昇順。 */
+/** 使われているタグと、付いているタスク（アーカイブしたものを除く）の件数を返す。件数の多い順、同じ件数なら名前の昇順。 */
 export function listTagCounts(db: Db = getDb()): TagCount[] {
   const rows = db
-    .prepare("SELECT name, COUNT(*) AS count FROM task_tags GROUP BY name ORDER BY count DESC, name ASC")
+    .prepare("SELECT g.name AS name, COUNT(*) AS count FROM task_tags g JOIN tasks t ON t.id = g.task_id WHERE t.archived = 0 GROUP BY g.name ORDER BY count DESC, g.name ASC")
     .all() as { name: string; count: number }[];
   return rows.map((r) => ({ name: r.name, count: Number(r.count) }));
 }
@@ -72,4 +72,47 @@ export function listTagSuggestions(taskId: number, db: Db = getDb()): string[] {
   return listTagCounts(db)
     .map((t) => t.name)
     .filter((name) => !attached.has(name));
+}
+
+export type TagRenameInput = { from: string; to: string };
+
+/**
+ * タグの付け替え（POST /api/tags/rename）の本文を検証する。`from`・`to` はどちらも、タグを付けるときと同じ規則
+ * （`validateTagInput`）で確かめ、前後の空白を除いた値を使う。除いた後で `from` と `to` が同じなら誤り。
+ */
+export function validateTagRenameInput(body: unknown): ValidationResult<TagRenameInput> {
+  if (typeof body !== "object" || body === null || Array.isArray(body)) {
+    return { ok: false, errors: ["リクエストの形式が正しくありません"] };
+  }
+  const errors: string[] = [];
+  const names: Partial<TagRenameInput> = {};
+  for (const key of ["from", "to"] as const) {
+    const r = validateTagInput({ name: (body as Record<string, unknown>)[key] });
+    if (r.ok) names[key] = r.value.name;
+    else errors.push(...r.errors.map((e) => `${key}: ${e}`));
+  }
+  if (errors.length > 0) return { ok: false, errors };
+  if (names.from === names.to) return { ok: false, errors: ["from と to に同じタグの名前は指定できません"] };
+  return { ok: true, value: { from: names.from!, to: names.to! } };
+}
+
+export type TagRenameResult = { ok: true; count: number } | { ok: false; reason: "not_found" };
+
+/**
+ * タグ `from` を、付いているすべてのタスク（アーカイブしたものを含む）で `to` に付け替え、付け替えたタスクの件数を返す。
+ * すでに `to` も付いているタスクでは `from` を外すだけにする。付け替えたタグは、そのタスクの中で元の位置に残る。
+ * 全部か無しか: 1 つのトランザクションで行い、途中で失敗したらすべて戻す。`from` の付いたタスクが無ければ何も変えない。
+ * タグを付ける・外すときと同じく、タスクの最終更新日時は変えない。
+ */
+export function renameTag(from: string, to: string, db: Db = getDb()): TagRenameResult {
+  return transaction(db, (): TagRenameResult => {
+    const { n } = db.prepare("SELECT COUNT(*) AS n FROM task_tags WHERE name = ?").get(from) as { n: number };
+    const count = Number(n);
+    if (count === 0) return { ok: false, reason: "not_found" };
+    db.prepare(
+      "DELETE FROM task_tags WHERE name = :from AND task_id IN (SELECT task_id FROM task_tags WHERE name = :to)",
+    ).run({ from, to });
+    db.prepare("UPDATE task_tags SET name = :to WHERE name = :from").run({ from, to });
+    return { ok: true, count };
+  });
 }
