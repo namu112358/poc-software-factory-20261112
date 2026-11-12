@@ -137,6 +137,11 @@ export function formatTaskCount(count: number): string {
   return `${count} 件`;
 }
 
+/** 一覧の見出しの下に出す、ログイン中のユーザーの表示。ログイン ID ではなく表示名を使う。 */
+export function formatCurrentUser(name: string): string {
+  return `ログイン中: ${name}`;
+}
+
 export function getTask(id: number, db: Db = getDb()): Task | undefined {
   const row = db.prepare("SELECT id, title, status, assignee, due_date, priority, estimate_minutes, created_at, updated_at, memo FROM tasks WHERE id = ?").get(id) as
     | TaskRow
@@ -285,6 +290,11 @@ export function taskRowDoneAttr(status: TaskStatus): { "data-done"?: "true" } {
   return status === "done" ? { "data-done": "true" } : {};
 }
 
+/** 優先度の欄の文字の太さ。「高」だけ太字にする。 */
+export function priorityFontWeight(priority: TaskPriority): "bold" | undefined {
+  return priority === "high" ? "bold" : undefined;
+}
+
 /** 見積もり時間の表示用の文字列。未設定は「—」。 */
 export function formatEstimate(minutes: number | null): string {
   return minutes === null ? "—" : `${minutes} 分`;
@@ -327,6 +337,13 @@ export function formatJstDateTime(iso: string): string {
   if (Number.isNaN(t)) return "—";
   const jst = new Date(t + 9 * 60 * 60 * 1000).toISOString();
   return `${jst.slice(0, 10).replaceAll("-", "/")} ${jst.slice(11, 16)}`;
+}
+
+/** ISO 8601（UTC）の日時を、日本時間の日付「YYYY-MM-DD」にする。解釈できなければ「—」。 */
+export function formatJstDate(iso: string): string {
+  const t = Date.parse(iso);
+  if (Number.isNaN(t)) return "—";
+  return new Date(t + 9 * 60 * 60 * 1000).toISOString().slice(0, 10);
 }
 
 /**

@@ -7,6 +7,7 @@ import {
   createTask,
   isOverdue,
   taskRowDoneAttr,
+  priorityFontWeight,
   todayInJapan,
   formatEstimate,
   formatEstimateTotal,
@@ -503,5 +504,13 @@ describe("taskRowDoneAttr", () => {
     assert.deepEqual(taskRowDoneAttr("done"), { "data-done": "true" });
     assert.deepEqual(taskRowDoneAttr("todo"), {});
     assert.deepEqual(taskRowDoneAttr("in_progress"), {});
+  });
+});
+
+describe("priorityFontWeight", () => {
+  it("優先度が「高」のときだけ太字にする", () => {
+    assert.equal(priorityFontWeight("high"), "bold");
+    assert.equal(priorityFontWeight("medium"), undefined);
+    assert.equal(priorityFontWeight("low"), undefined);
   });
 });
