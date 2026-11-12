@@ -24,11 +24,82 @@ export function authenticate(userId: string, password: string, db: Db = getDb())
   return { id: row.id, name: row.name };
 }
 
-export function createSession(userId: string, db: Db = getDb(), now: Date = new Date()): string {
+export type LoginResult =
+  | { ok: true; user: User; token: string }
+  | { ok: false; reason: "invalid" }
+  | { ok: false; reason: "locked"; retryAfterMinutes: number };
+
+/**
+ * ログインする（POST /api/login の判定）。ロック中なら照合しない。ID・パスワードが誤りなら失敗を数える。
+ * 成功したら失敗の回数を消し、セッションを作り、最終ログイン日時を now にする。
+ * 成功のときだけ最終ログイン日時を変える。それまでの最終ログイン日時は、作ったセッションに「前回のログイン」として残す。
+ */
+export function login(userId: unknown, password: unknown, db: Db = getDb(), now: Date = new Date()): LoginResult {
+  const lock = typeof userId === "string" ? getLockState(userId, db, now) : { locked: false as const };
+  if (lock.locked) return { ok: false, reason: "locked", retryAfterMinutes: lock.retryAfterMinutes };
+  const user =
+    typeof userId === "string" && typeof password === "string" ? authenticate(userId, password, db) : undefined;
+  if (!user) {
+    if (typeof userId === "string") recordFailure(userId, db, now);
+    return { ok: false, reason: "invalid" };
+  }
+  const token = transaction(db, () => {
+    clearFailures(user.id, db);
+    const row = db.prepare("SELECT last_login_at FROM users WHERE id = ?").get(user.id) as
+      | { last_login_at: string | null }
+      | undefined;
+    db.prepare("UPDATE users SET last_login_at = ? WHERE id = ?").run(now.toISOString(), user.id);
+    return createSession(user.id, db, now, row?.last_login_at ?? null);
+  });
+  return { ok: true, user, token };
+}
+
+export function createSession(
+  userId: string,
+  db: Db = getDb(),
+  now: Date = new Date(),
+  previousLoginAt: string | null = null,
+): string {
   const token = randomBytes(32).toString("hex");
   const expiresAt = new Date(now.getTime() + SESSION_TTL_MS).toISOString();
-  db.prepare("INSERT INTO sessions (token, user_id, expires_at) VALUES (?, ?, ?)").run(token, userId, expiresAt);
+  db.prepare("INSERT INTO sessions (token, user_id, expires_at, previous_login_at) VALUES (?, ?, ?, ?)").run(
+    token,
+    userId,
+    expiresAt,
+    previousLoginAt,
+  );
   return token;
+}
+
+/**
+ * 有効なセッションの「前回のログイン」（このセッションでログインする 1 つ前のログイン日時。ISO 8601・UTC）を返す。
+ * 前回が無ければ null。期限切れ・不明なトークンは undefined。本人のセッションからだけ読む。
+ */
+export function getPreviousLogin(token: string | undefined, db: Db = getDb(), now: Date = new Date()): string | null | undefined {
+  if (!token) return undefined;
+  const row = db
+    .prepare("SELECT previous_login_at FROM sessions WHERE token = ? AND expires_at > ?")
+    .get(token, now.toISOString()) as { previous_login_at: string | null } | undefined;
+  return row ? row.previous_login_at : undefined;
+}
+
+/** 前回のログインのヘッダーの表示。日時は日本時間の「YYYY/MM/DD HH:mm」、前回が無ければ「なし」。 */
+export function formatPreviousLogin(previousLoginAt: string | null): string {
+  if (!previousLoginAt) return "前回のログイン: なし";
+  const parts = Object.fromEntries(
+    new Intl.DateTimeFormat("en-US", {
+      timeZone: "Asia/Tokyo",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      hourCycle: "h23",
+    })
+      .formatToParts(new Date(previousLoginAt))
+      .map((p) => [p.type, p.value]),
+  );
+  return `前回のログイン: ${parts.year}/${parts.month}/${parts.day} ${parts.hour}:${parts.minute}`;
 }
 
 /** 有効なセッションのユーザーを返す。期限切れ・不明なトークンは undefined。 */

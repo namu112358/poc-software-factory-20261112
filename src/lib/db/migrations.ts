@@ -149,4 +149,14 @@ export const MIGRATIONS: readonly Migration[] = [
       ALTER TABLE comments ADD COLUMN edited_at TEXT;
     `,
   },
+  {
+    version: 14,
+    name: "last_login",
+    sql: `
+      -- 最後にログインに成功した日時。ISO 8601（UTC）。一度もログインしていなければ NULL（既存の利用者も NULL から始まる）。
+      ALTER TABLE users ADD COLUMN last_login_at TEXT;
+      -- このセッションでログインする 1 つ前のログイン日時。ISO 8601（UTC）。前回が無ければ NULL。
+      ALTER TABLE sessions ADD COLUMN previous_login_at TEXT;
+    `,
+  },
 ];
