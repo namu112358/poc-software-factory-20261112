@@ -9,6 +9,7 @@ import {
   todayInJapan,
   formatEstimate,
   formatJstDateTime,
+  formatMemoPreview,
   formatTaskCount,
   getTask,
   isTaskStatus,
@@ -475,5 +476,19 @@ describe("completeTasks", () => {
     const result = completeTasks([1, 9999], db);
     assert.deepEqual(result, { ok: false, missing: [9999] });
     assert.equal(getTask(1, db)?.status, before);
+  });
+});
+
+describe("formatMemoPreview", () => {
+  it("空のメモは表示しない", () => {
+    assert.equal(formatMemoPreview(""), null);
+  });
+  it("30 文字以内はそのまま、超えたら 30 文字の後に「…」を付ける", () => {
+    const m30 = "あ".repeat(30);
+    assert.equal(formatMemoPreview(m30), m30);
+    assert.equal(formatMemoPreview(m30 + "い"), m30 + "…");
+  });
+  it("改行は空白 1 つに置き換える", () => {
+    assert.equal(formatMemoPreview("a\nb\r\nc"), "a b c");
   });
 });
