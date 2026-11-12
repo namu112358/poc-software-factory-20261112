@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { openDb } from "../src/lib/db/index.ts";
 import { createTask } from "../src/lib/tasks.ts";
 import { addTag } from "../src/lib/tags.ts";
-import { CSV_BOM, escapeCsvField, exportFilename, exportHref, exportTasksCsv, parseTaskFilter } from "../src/lib/export.ts";
+import { CSV_BOM, escapeCsvField, exportFilename, exportHref, exportTasksCsv, neutralizeFormula, parseTaskFilter } from "../src/lib/export.ts";
 
 /** RFC 4180 の CSV を読む（テスト用の最小の実装）。 */
 function parseCsv(text: string): string[][] {
@@ -46,6 +46,20 @@ describe("escapeCsvField", () => {
   });
 });
 
+describe("neutralizeFormula", () => {
+  it("prefixes a quote when the value starts with = + - @ tab or CR", () => {
+    for (const c of ["=", "+", "-", "@", "\t", "\r"]) {
+      assert.equal(neutralizeFormula(`${c}x`), `'${c}x`);
+    }
+  });
+
+  it("leaves other values unchanged", () => {
+    assert.equal(neutralizeFormula("請求書 -2 件"), "請求書 -2 件");
+    assert.equal(neutralizeFormula("a=b"), "a=b");
+    assert.equal(neutralizeFormula(""), "");
+  });
+});
+
 describe("exportTasksCsv", () => {
   it("starts with a BOM, then a header row, then one row per task", () => {
     const db = openDb();
@@ -72,6 +86,32 @@ describe("exportTasksCsv", () => {
     const row = parseCsv(body(exportTasksCsv({}, db))).find((r) => r[0] === String(task.id))!;
     assert.equal(row[1], title);
     assert.equal(row.length, 7);
+  });
+
+  it("neutralizes a formula in the title and keeps RFC 4180 escaping", () => {
+    const db = openDb();
+    const title = '=HYPERLINK("http://example.com","x")';
+    const task = createTask({ title, status: "todo", assignee: "sato", dueDate: "2026-12-01" }, db);
+    const csv = exportTasksCsv({}, db);
+    assert.ok(csv.includes(`"'=HYPERLINK(""http://example.com"",""x"")"`));
+    const row = parseCsv(body(csv)).find((r) => r[0] === String(task.id))!;
+    assert.equal(row[1], `'${title}`);
+  });
+
+  it("leaves a title that does not start with a trigger character, and app-made fields, unchanged", () => {
+    const db = openDb();
+    const task = createTask({ title: "請求書 -2 件", status: "todo", assignee: "sato", dueDate: "2026-12-01" }, db);
+    const row = parseCsv(body(exportTasksCsv({}, db))).find((r) => r[0] === String(task.id))!;
+    assert.deepEqual(row, [String(task.id), "請求書 -2 件", "未着手", "中", "佐藤", "2026-12-01", ""]);
+  });
+
+  it("neutralizes a formula in the tags column", () => {
+    const db = openDb();
+    const task = createTask({ title: "t", status: "todo", assignee: "sato", dueDate: "2026-12-01" }, db);
+    addTag(task.id, "=cmd", db);
+    addTag(task.id, "ok", db);
+    const row = parseCsv(body(exportTasksCsv({}, db))).find((r) => r[0] === String(task.id))!;
+    assert.equal(row[6], "'=cmd、ok");
   });
 
   it("joins several tags with 、", () => {
