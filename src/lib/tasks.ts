@@ -270,6 +270,16 @@ export function isOverdue(task: Pick<Task, "status" | "dueDate">, today: string 
   return task.status !== "done" && task.dueDate < today;
 }
 
+/** 表示中のタスクのうち、期限切れ（`isOverdue`）の数。 */
+export function countOverdue(tasks: Pick<Task, "status" | "dueDate">[], today: string = todayInJapan()): number {
+  return tasks.filter((t) => isOverdue(t, today)).length;
+}
+
+/** 期限切れの件数の表示。0 件のときは null（表示しない）。 */
+export function formatOverdueCount(count: number): string | null {
+  return count > 0 ? `期限切れ ${count} 件` : null;
+}
+
 /** 一覧の行に付ける属性。完了したタスクだけ `data-done="true"` を付ける。 */
 export function taskRowDoneAttr(status: TaskStatus): { "data-done"?: "true" } {
   return status === "done" ? { "data-done": "true" } : {};
