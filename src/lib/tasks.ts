@@ -255,6 +255,11 @@ export function isOverdue(task: Pick<Task, "status" | "dueDate">, today: string 
   return task.status !== "done" && task.dueDate < today;
 }
 
+/** 一覧の行に付ける属性。完了したタスクだけ `data-done="true"` を付ける。 */
+export function taskRowDoneAttr(status: TaskStatus): { "data-done"?: "true" } {
+  return status === "done" ? { "data-done": "true" } : {};
+}
+
 /** 見積もり時間の表示用の文字列。未設定は「—」。 */
 export function formatEstimate(minutes: number | null): string {
   return minutes === null ? "—" : `${minutes} 分`;
