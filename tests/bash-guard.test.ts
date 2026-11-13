@@ -84,9 +84,34 @@ describe("Bash のフック（承認の画面で止まりやすい形を断る�
     for (const c of ["echo a 2>&1", "echo a >&2", "npm test 2>&1 | tail -5", "npm test &> /tmp/x.log", 'echo "a & b"']) assert.equal(denied(c), false, c);
   });
 
-  it("シェル変数の代入・展開（$NAME・${...}・$(...)・バッククォート）は断る。環境変数の前置きだけは通す", () => {
+  it("コマンドの前の環境変数の前置き（NAME=value）は、npm・git の設定を変えられるので断る", () => {
+    for (const c of [
+      "FOO=bar npm test",
+      "NODE_ENV=test node /tmp/x/check.mjs",
+      "npm_config_script_shell=sh npm run x",
+      "NODE_OPTIONS=--require=/tmp/x.js npm test",
+      "GIT_EXTERNAL_DIFF=/tmp/x git diff",
+      "GIT_DIR=/x git status",
+      "ls | FOO=1 cat",
+      "env FOO=bar npm test",
+      "env -i FOO=bar npm test",
+    ]) assert.equal(denied(c), true, c);
+    for (const c of ["git -c core.pager=cat log", "npm run build -- --foo=bar", 'git commit -m "a=b"', "echo a=b"]) assert.equal(denied(c), false, c);
+  });
+
+  it("`>|` と、`>` の直後の `|` で切れない引数の検査（git diff --output を `>|` の後ろに隠せない）", () => {
+    for (const c of ["echo a >| /tmp/x", "git diff >| /tmp/x --output=/tmp/y", "git diff > /tmp/o --output=y", "npm test >| /tmp/x"]) assert.equal(denied(c), true, c);
+    for (const c of ["git diff --stat | head -5", "git log --oneline |& head -5", "npm test 2>&1 | tail -3"]) assert.equal(denied(c), false, c);
+  });
+
+  it("git diff・log・show で `--o` で始まる省略したオプション（--outp=x・--o=x）は断る。--oneline は通す", () => {
+    for (const c of ["git diff --outp=/tmp/x", "git diff --o=/tmp/x", "git log --out /tmp/x", "git show --output-indicator-new=+", "git diff --output-indicator-new=+"]) assert.equal(denied(c), true, c);
+    for (const c of ["git log --oneline", "git log --oneline -5", "git diff --stat"]) assert.equal(denied(c), false, c);
+  });
+
+  it("シェル変数の代入・展開（$NAME・${...}・$(...)・バッククォート）は断る", () => {
     for (const c of ["echo $HOME", "ls ${TMPDIR}/x", "cat $(ls)", "echo `date`", 'echo "$S/check.js"', "cat > $S/check.js <<'EOF'\nconsole.log(1)\nEOF", "S=/tmp/x\nnode $S/a.mjs", "S=/tmp/x\nls /tmp"]) assert.equal(denied(c), true, c);
-    for (const c of ["FOO=bar npm test", "NODE_ENV=test node /tmp/x/check.mjs", "echo '$HOME'", 'echo "cost \\$5"', 'git commit -m "直す: 値は $5 ではない"']) assert.equal(denied(c), false, c);
+    for (const c of ["echo '$HOME'", 'echo "cost \\$5"', 'git commit -m "直す: 値は $5 ではない"']) assert.equal(denied(c), false, c);
   });
 
   it("断るときの文言に、分け方（1 回に 1 コマンド・Write でスクリプト・run_in_background）を書く", () => {
@@ -117,7 +142,6 @@ describe("Bash のフック（承認の画面で止まりやすい形を断る�
       "git status",
       "git -C /x log --oneline",
       "git log --oneline | grep -o x",
-      "git diff --output-indicator-new=+",
       "npm test",
       "npm run build -- --foo",
       "npm run build -- --foo=bar",

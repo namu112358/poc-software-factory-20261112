@@ -106,23 +106,28 @@ export function check(command) {
 
   // シェル変数の展開（`$NAME`・`${...}`・`$(...)`・バッククォート）と、変数だけを代入する行（`NAME=...`）
   const expandable = mask(hasHeredoc ? firstLine : cmd, true);
-  const lines = head.split("\n").filter((l) => l.trim() !== "");
-  if (/\$[A-Za-z_]|\$\{|\$\(|`/.test(expandable) || (lines.length > 1 && lines.some((l) => /^\s*(?:[A-Za-z_]\w*=\S*\s*)+$/.test(l)))) {
-    return { deny: true, reason: `シェル変数の代入・展開（\`NAME=...\`・\`$NAME\`・\`\${...}\`・\`$(...)\`・バッククォート）は、承認の画面で止まりやすいので実行しません。値はコマンドに直接書いてください。${SPLIT}` };
+  // コマンドの前の `NAME=value` の前置き（`npm_config_script_shell=sh npm run x`・`NODE_OPTIONS=... npm test`・`GIT_*=... git ...`・`env NAME=... cmd`）は、すべて断る
+  if (/\$[A-Za-z_]|\$\{|\$\(|`/.test(expandable) || /(?:^|[|(\n])\s*(?:env\s+(?:-\S+\s+)*)?[A-Za-z_]\w*=/.test(head)) {
+    return { deny: true, reason: `シェル変数の代入・展開と、コマンドの前の環境変数の前置き（\`NAME=...\`・\`$NAME\`・\`\${...}\`・\`$(...)\`・バッククォート）は、設定を変えられるので実行しません。値はコマンドに直接書いてください。${SPLIT}` };
+  }
+
+  // `>|`（上書きのリダイレクト）は、引数の切り出しがずれるので断る
+  if (/>\|/.test(head)) {
+    return { deny: true, reason: `\`>|\` は実行しません。\`>\` を使うか、出力は画面に出してください。${SPLIT}` };
   }
 
   // 出力先を指定する git のオプション（`git diff|log|show` の `--output`・`-o`）
   // 引数は、引用符・バックスラッシュが 1 つでもあれば断る（`"--output=x"`・`--out\put=x` で検査をすり抜けさせない）。リダイレクトは取り除いてから単語に分ける
   const src = hasHeredoc ? firstLine : cmd;
   const words = (s) => s.replace(/\d*[<>]+&?\s*[^\s<>|]*/g, " ").split(/\s+/).filter(Boolean);
-  for (const m of src.matchAll(/(?:^|[\s(])git(?:\s+(?:-C\s+\S+|-c\s+\S+|--[\w-]+(?:=\S+)?|-[a-zA-Z]+))*\s+(diff|log|show|checkout)(?:\s([^|\n]*))?/g)) {
+  for (const m of src.matchAll(/(?:^|[\s(])git(?:\s+(?:-C\s+\S+|-c\s+\S+|--[\w-]+(?:=\S+)?|-[a-zA-Z]+))*\s+(diff|log|show|checkout)(?:\s((?:[^|\n]|(?<=>)\|)*))?/g)) {
     const args = m[2] ?? "";
     const w = words(args);
     if (/['"\\]/.test(args)) {
       return { deny: true, reason: `\`git ${m[1]}\` の引数に引用符・バックスラッシュを含む形は、オプションを確かめられないので実行しません。引用符なしで書いてください。${SPLIT}` };
     }
-    if (m[1] !== "checkout" && w.some((a) => a === "--output" || a.startsWith("--output=") || /^-o/.test(a))) {
-      return { deny: true, reason: `\`git diff\`・\`git log\`・\`git show\` の \`--output\`・\`-o\` はファイルに書き出すので実行しません。出力は画面に出してください。${SPLIT}` };
+    if (m[1] !== "checkout" && w.some((a) => (a.startsWith("--o") && a !== "--oneline") || /^-o/.test(a))) {
+      return { deny: true, reason: `\`git diff\`・\`git log\`・\`git show\` の \`--output\`（\`--outp=x\`・\`--o=x\` など省略した書き方も）・\`-o\` はファイルに書き出すので実行しません。出力は画面に出してください。${SPLIT}` };
     }
     if (m[1] === "checkout" && w[0]?.startsWith("claude/") && w.length > 1) {
       return { deny: true, reason: `\`git checkout claude/<ブランチ>\` の後ろに引数（パス）を付けた形は、ファイルを書き換えるので実行しません。ブランチの切り替えだけにしてください。${SPLIT}` };
@@ -131,7 +136,7 @@ export function check(command) {
 
   // npm の設定を変える引数（`npm test|run` で `--` より前の `--script-shell`・`--node-options`・`--<名前>=<値>`）
   // `npm test|run`（`t`・`run-script` を含む）は、引用符・バックスラッシュを含む形と、`--` より前の `-` で始まる引数をすべて断る（`npm run <名前>` と `npm run <名前> -- <引数>` だけ通す）
-  for (const m of src.matchAll(/(?:^|[\s(])npm(?:\s([^|\n]*))?/g)) {
+  for (const m of src.matchAll(/(?:^|[\s(])npm(?:\s((?:[^|\n]|(?<=>)\|)*))?/g)) {
     const args = m[1] ?? "";
     const w = words(args);
     if (!w.some((a) => ["test", "t", "run", "run-script"].includes(a))) continue;
