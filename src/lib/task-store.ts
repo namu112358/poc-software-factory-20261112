@@ -1,5 +1,5 @@
 import { getDb, savepoint, transaction, type Db } from "./db/index.ts";
-import { addDays, RESTORE_DAYS, todayInJapan } from "./task-dates.ts";
+import { addDays, DUE_SOON_DAYS, RESTORE_DAYS, todayInJapan } from "./task-dates.ts";
 import type { Assignee, Task, TaskFilter, TaskInput, TaskPriority, TaskStatus } from "./task-types.ts";
 
 /** タスクに登場する担当者（重複なし）。 */
@@ -53,9 +53,9 @@ export function listTasks(filter: TaskFilter = {}, db: Db = getDb()): Task[] {
   const today = filter.today ?? todayInJapan();
   const rows = db
     .prepare(
-      "SELECT id, title, status, assignee, due_date, priority, estimate_minutes, created_at, updated_at, completed_at, memo, archived FROM tasks WHERE deleted_at IS NULL AND (:includeArchived = 1 OR archived = 0) AND (:status IS NULL OR status = :status) AND (:assigneeCount = 0 OR (:assigneeNone = 1 AND assignee IS NULL) OR assignee IN (SELECT value FROM json_each(:assigneeIds))) AND (:tagCount = 0 OR (SELECT COUNT(DISTINCT g.name) FROM task_tags g WHERE g.task_id = tasks.id AND g.name IN (:tag0, :tag1, :tag2, :tag3, :tag4)) = :tagCount) AND (:due IS NULL OR (:due = 'none' AND (due_date IS NULL OR due_date = '')) OR (:due = 'overdue' AND due_date IS NOT NULL AND due_date <> '' AND due_date < :today) OR (:due = 'today' AND due_date IS NOT NULL AND due_date <> '' AND due_date <= :today) OR (:due = 'week' AND due_date IS NOT NULL AND due_date <> '' AND due_date <= :weekEnd)) AND (:q IS NULL OR title LIKE :q ESCAPE '\\' OR memo LIKE :q ESCAPE '\\' OR (:qInComments = 1 AND EXISTS (SELECT 1 FROM comments c WHERE c.task_id = tasks.id AND c.deleted_at IS NULL AND c.body LIKE :q ESCAPE '\\'))) " + orderBy,
+      "SELECT id, title, status, assignee, due_date, priority, estimate_minutes, created_at, updated_at, completed_at, memo, archived FROM tasks WHERE deleted_at IS NULL AND (:includeArchived = 1 OR archived = 0) AND (:status IS NULL OR status = :status) AND (:assigneeCount = 0 OR (:assigneeNone = 1 AND assignee IS NULL) OR assignee IN (SELECT value FROM json_each(:assigneeIds))) AND (:tagCount = 0 OR (SELECT COUNT(DISTINCT g.name) FROM task_tags g WHERE g.task_id = tasks.id AND g.name IN (:tag0, :tag1, :tag2, :tag3, :tag4)) = :tagCount) AND (:due IS NULL OR (:due = 'none' AND (due_date IS NULL OR due_date = '')) OR (:due = 'overdue' AND due_date IS NOT NULL AND due_date <> '' AND due_date < :today) OR (:due = 'today' AND due_date IS NOT NULL AND due_date <> '' AND due_date <= :today) OR (:due = 'soon' AND due_date IS NOT NULL AND due_date <> '' AND due_date <= :soonEnd) OR (:due = 'week' AND due_date IS NOT NULL AND due_date <> '' AND due_date <= :weekEnd)) AND (:q IS NULL OR title LIKE :q ESCAPE '\\' OR memo LIKE :q ESCAPE '\\' OR (:qInComments = 1 AND EXISTS (SELECT 1 FROM comments c WHERE c.task_id = tasks.id AND c.deleted_at IS NULL AND c.body LIKE :q ESCAPE '\\'))) " + orderBy,
     )
-    .all({ status: filter.status ?? null, ...assigneeParams(filter), ...tagParams(filter), q: filter.q === undefined ? null : likePattern(filter.q), qInComments: filter.qInComments ? 1 : 0, includeArchived: filter.includeArchived ? 1 : 0, due: filter.due ?? null, today, weekEnd: addDays(today, 7) }) as TaskRow[];
+    .all({ status: filter.status ?? null, ...assigneeParams(filter), ...tagParams(filter), q: filter.q === undefined ? null : likePattern(filter.q), qInComments: filter.qInComments ? 1 : 0, includeArchived: filter.includeArchived ? 1 : 0, due: filter.due ?? null, today, weekEnd: addDays(today, 7), soonEnd: addDays(today, DUE_SOON_DAYS) }) as TaskRow[];
   return rows.map(toTask);
 }
 

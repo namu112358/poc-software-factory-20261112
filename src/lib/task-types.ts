@@ -51,13 +51,14 @@ export const SORT_LABELS: Record<TaskSort, string> = {
   due: "期限の近い順",
 };
 
-/** 期限の絞り込み。期限切れ・今日まで・7 日以内（どれも期限切れを含む）・期限なし。 */
-export const TASK_DUE_FILTERS = ["overdue", "today", "week", "none"] as const;
+/** 期限の絞り込み。期限切れ・今日まで・3 日以内・7 日以内（どれも期限切れを含む）・期限なし。3 日以内は、タスク一覧の上の「対応が必要なもの」の範囲（`DUE_SOON_DAYS`）と同じ。 */
+export const TASK_DUE_FILTERS = ["overdue", "today", "soon", "week", "none"] as const;
 export type TaskDueFilter = (typeof TASK_DUE_FILTERS)[number];
 
 export const DUE_FILTER_LABELS: Record<TaskDueFilter, string> = {
   overdue: "期限切れ",
   today: "今日まで",
+  soon: "3 日以内",
   week: "7 日以内",
   none: "期限なし",
 };
