@@ -238,9 +238,9 @@ describe("役割が、メンバーの一覧・GET /api/users・GET /api/me に�
     const db = openDb();
     promote(db, "sato");
     assert.deepEqual(listUserSummaries(db), [
-      { id: "sato", name: "佐藤", suspended: false, role: "coordinator" },
-      { id: "suzuki", name: "鈴木", suspended: false, role: "member" },
-      { id: "tanaka", name: "田中", suspended: false, role: "coordinator" },
+      { id: "sato", name: "佐藤", suspended: false, role: "coordinator", mustChangePassword: false },
+      { id: "suzuki", name: "鈴木", suspended: false, role: "member", mustChangePassword: false },
+      { id: "tanaka", name: "田中", suspended: false, role: "coordinator", mustChangePassword: false },
     ]);
   });
 

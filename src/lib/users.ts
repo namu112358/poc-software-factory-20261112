@@ -31,17 +31,25 @@ export function listUserOptions(db: Db = getDb()): User[] {
 
 export type UserSummary = User & { suspended: boolean };
 
-export type UserListItem = UserSummary & { role: UserRole };
+/** mustChangePassword: 仮のパスワードのままか（#566）。 */
+export type UserListItem = UserSummary & { role: UserRole; mustChangePassword: boolean };
 
-/** 利用者の全員と、ログインを停止しているか・役割（GET /api/users。役割は #524）。並びは ID 順。 */
+/** 利用者の全員と、ログインを停止しているか・役割・仮のパスワードのままか（GET /api/users。役割は #524、仮のパスワードは #566）。並びは ID 順。 */
 export function listUserSummaries(db: Db = getDb()): UserListItem[] {
-  const rows = db.prepare("SELECT id, name, suspended_at, role FROM users ORDER BY id").all() as {
+  const rows = db.prepare("SELECT id, name, suspended_at, role, must_change_password FROM users ORDER BY id").all() as {
     id: string;
     name: string;
     suspended_at: string | null;
     role: string;
+    must_change_password: number;
   }[];
-  return rows.map((r) => ({ id: r.id, name: r.name, suspended: r.suspended_at !== null, role: toRole(r.role) }));
+  return rows.map((r) => ({
+    id: r.id,
+    name: r.name,
+    suspended: r.suspended_at !== null,
+    role: toRole(r.role),
+    mustChangePassword: r.must_change_password === 1,
+  }));
 }
 
 function toRole(value: string | undefined): UserRole {
@@ -299,3 +307,85 @@ export function mustChangePassword(userId: string, db: Db = getDb()): boolean {
 /** 仮のパスワードの間に、ほかの画面・API を断るときの文言。 */
 export const PASSWORD_CHANGE_REQUIRED_MESSAGE = "仮のパスワードでログインしています。パスワードを変更するまで、ほかの画面と操作は使えません";
 export const PASSWORD_CHANGE_REQUIRED_DETAIL = "パスワード変更の画面（/settings/password）か POST /api/password で、自分のパスワードに変えてください";
+
+// ---- 仮のパスワードの出し直し（#566） ----
+
+/** 出し直しを断った理由。forbidden は 403、invalid と self は 400、not_found は 404、suspended は 409 にする。 */
+export type ReissueRefusal = "forbidden" | "invalid" | "not_found" | "self" | "suspended";
+
+export const REISSUE_REFUSAL_MESSAGES: Record<ReissueRefusal, string> = {
+  forbidden: "仮のパスワードを出し直せるのは、取りまとめる人だけです",
+  invalid: "入力内容に誤りがあります",
+  not_found: "利用者が見つかりません",
+  self: "自分自身には仮のパスワードを出し直せません。自分のパスワードは、パスワード変更の画面で変えてください",
+  suspended: "ログインを停止しているメンバーには、仮のパスワードを出し直せません。先にログインを再開してください",
+};
+
+/** 出し直しの本文を検証する。本文は受け付けない（無い・`{}` だけを通し、項目があれば 400。#527 の決まり）。 */
+export function validateReissueInput(body: unknown): ValidationResult<null> {
+  if (body === undefined) return { ok: true, value: null };
+  if (typeof body !== "object" || body === null || Array.isArray(body)) {
+    return { ok: false, errors: ["本文は送らないでください（送るなら空の {} にしてください）"] };
+  }
+  const errors = Object.keys(body).map((key) => `${key} は受け付けない項目です（この操作は本文の項目を受け付けません）`);
+  if (errors.length > 0) return { ok: false, errors };
+  return { ok: true, value: null };
+}
+
+export type ReissueResult =
+  | { ok: true; user: User; temporaryPassword: string }
+  | { ok: false; reason: Exclude<ReissueRefusal, "invalid"> }
+  | { ok: false; reason: "invalid"; errors: string[] };
+
+/**
+ * 取りまとめる人（actorId）が、利用者（targetId）に仮のパスワードを出し直す（POST /api/users/:id/temporary-password の判定。#566）。
+ * 判定の順: 操作する人が停止していない取りまとめる人でなければ forbidden（入力によらない）、本文の誤りは invalid、
+ * 相手がいなければ not_found、自分自身なら self、相手が停止中なら suspended。断ったときは何も変えない。
+ * パスワードの更新（ハッシュだけを保存）・仮のパスワードの止め（must_change_password を 1）・相手のセッション（期限切れを含む）の削除・
+ * 出し直しの記録（だれが・いつ）は、1 つのトランザクションで行う。平文は戻り値でだけ返す（あとから取り出せない）。
+ * ログインの失敗によるロックは解かない。
+ */
+export function reissueTemporaryPassword(
+  actorId: string,
+  targetId: string,
+  body: unknown,
+  db: Db = getDb(),
+  now: Date = new Date(),
+): ReissueResult {
+  return transaction(db, (): ReissueResult => {
+    if (!canManage(actorId, db)) return { ok: false, reason: "forbidden" };
+    const input = validateReissueInput(body);
+    if (!input.ok) return { ok: false, reason: "invalid", errors: input.errors };
+    const target = getUser(targetId, db);
+    if (!target) return { ok: false, reason: "not_found" };
+    if (targetId === actorId) return { ok: false, reason: "self" };
+    if (isSuspended(targetId, db)) return { ok: false, reason: "suspended" };
+    const temporaryPassword = generateTemporaryPassword();
+    db.prepare("UPDATE users SET password_hash = ?, must_change_password = 1 WHERE id = ?").run(hashPassword(temporaryPassword), targetId);
+    db.prepare("DELETE FROM sessions WHERE user_id = ?").run(targetId);
+    db.prepare("INSERT INTO temporary_password_reissues (user_id, issued_by, issued_at) VALUES (?, ?, ?)").run(
+      targetId,
+      actorId,
+      now.toISOString(),
+    );
+    return { ok: true, user: { id: target.id, name: target.name }, temporaryPassword };
+  });
+}
+
+/** 出し直しの記録（だれが・いつ）。issuedAt は ISO 8601（UTC）。 */
+export type TemporaryPasswordReissue = { issuedBy: User; issuedAt: string };
+
+/**
+ * 仮のパスワードのままの利用者に、いちばん新しい出し直しの記録を返す（パスワード変更の画面の知らせ。#566）。
+ * 仮のパスワードのままでない人・出し直されていない人（作ったばかりの人）は undefined。
+ */
+export function latestPendingReissue(userId: string, db: Db = getDb()): TemporaryPasswordReissue | undefined {
+  if (!mustChangePassword(userId, db)) return undefined;
+  const row = db
+    .prepare(
+      `SELECT r.issued_by, u.name, r.issued_at FROM temporary_password_reissues r JOIN users u ON u.id = r.issued_by
+       WHERE r.user_id = ? ORDER BY r.id DESC LIMIT 1`,
+    )
+    .get(userId) as { issued_by: string; name: string; issued_at: string } | undefined;
+  return row ? { issuedBy: { id: row.issued_by, name: row.name }, issuedAt: row.issued_at } : undefined;
+}

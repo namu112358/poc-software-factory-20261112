@@ -411,4 +411,19 @@ export const MIGRATIONS: readonly Migration[] = [
       CREATE INDEX idempotency_keys_created_at ON idempotency_keys(created_at);
     `,
   },
+  {
+    version: 32,
+    name: "temporary_password_reissues",
+    sql: `
+      -- 取りまとめる人が、利用者に仮のパスワードを出し直した記録（#566）。だれの（user_id）・だれが（issued_by）・いつ（issued_at。ISO 8601（UTC））。
+      -- 出し直された本人が仮のパスワードのままの間、パスワード変更の画面で、いちばん新しい記録を知らせる。行は消さない。
+      CREATE TABLE temporary_password_reissues (
+        id        INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id   TEXT NOT NULL REFERENCES users(id),
+        issued_by TEXT NOT NULL REFERENCES users(id),
+        issued_at TEXT NOT NULL
+      );
+      CREATE INDEX temporary_password_reissues_user ON temporary_password_reissues(user_id, id);
+    `,
+  },
 ];

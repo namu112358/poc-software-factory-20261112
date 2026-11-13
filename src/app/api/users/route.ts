@@ -1,4 +1,5 @@
-// GET /api/users — 利用者の全員（ID・名前・ログインを停止しているか `suspended`・役割 `role`（#524））を返す。ログインが必要。
+// GET /api/users — 利用者の全員（ID・名前・ログインを停止しているか `suspended`・役割 `role`（#524）・仮のパスワードのままか `mustChangePassword`（#566））を返す。ログインが必要。
+// 仮のパスワードの出し直しは POST /api/users/:id/temporary-password（#566）。
 // 役割の付け替えは PUT /api/users/:id/role（#524）。
 // 担当者の候補（ログインを停止した人を除く）は GET /api/assignees（#522）。
 // POST /api/users — 取りまとめる人が、メンバーのアカウントを作る（{ userId, name }。#523）。
