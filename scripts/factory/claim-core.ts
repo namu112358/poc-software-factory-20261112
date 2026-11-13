@@ -824,29 +824,32 @@ export function stalledActions(input: {
 
 /** 高リスクの変更ファイル（レビューで risk:high の目印にする） */
 export const RISK_FILES: readonly string[] = ["src/lib/db/migrations.ts", "src/lib/auth.ts", "src/lib/session.ts", "src/lib/api.ts"];
-const WRITE_PERMISSIONS = ["write", "maintain", "admin"];
 const FIX_ROUND_LIMIT = 3;
 
 export type GateReview = { verdict: string; commit: string }; // 書き込み権限のある人の factory:review（古い順）
-type GatePr = { open: boolean; draft: boolean; headRef: string; headSha: string; labels: string[] };
+/** headRepo: PR の head のリポジトリ（head.repo.full_name。フォークの PR は別の名前。消えていれば null） */
+type GatePr = { open: boolean; draft: boolean; headRef: string; headSha: string; labels: string[]; headRepo: string | null };
 
 export type GateInput =
   | {
       role: "implement";
       number: number;
       sessionUrl: string | null;
+      repo: string; // このリポジトリ（owner/name）。フォークの PR を対象にしないために使う
       issueOpen: boolean;
       labels: string[]; // 今の名前に直したラベル
       /** 起動のラベルの最後の labeled。イベントが読めなければ null */
-      lastStart: { at: string; actor: string | null; permission: string | null } | null;
+      lastStartAt: string | null; // 起動のラベルの最後の labeled の時刻。イベントが読めなければ null
+      labeler: string | null; // 起動のラベルを付けた人（その labeled の actor の login）。読めなければ null
       comments: Comment[]; // 書き込み権限のある人のコメント
-      closingPrs: { number: number; headRef: string; draft: boolean; reviewed: boolean }[]; // Closes #N で参照する開いている PR
+      closingPrs: { number: number; headRef: string; headRepo: string | null; draft: boolean; reviewed: boolean }[]; // Closes #N で参照する開いている PR
       branchExists: boolean; // claude/issue-<N> がある
     }
   | {
       role: "review";
       number: number;
       sessionUrl: string | null;
+      repo: string; // このリポジトリ（owner/name）。フォークの PR を対象にしないために使う
       pr: GatePr;
       reviews: GateReview[];
       /** 最新の verdict=ok のコミットより後のコミット。履歴に無ければ null。ok が無ければ null */
@@ -857,6 +860,7 @@ export type GateInput =
       role: "fix";
       number: number;
       sessionUrl: string | null;
+      repo: string; // このリポジトリ（owner/name）。フォークの PR を対象にしないために使う
       pr: GatePr;
       reviews: GateReview[];
       mergeable: boolean; // null は読み直した後に false（衝突）にしてから渡す
@@ -869,6 +873,7 @@ export type GateResult = {
   reason: string;
   pr: number | null;
   branch: string | null;
+  labeler?: string | null; // implement のとき: 起動のラベルを付けた人。役が書き込み権限を確かめる
   ops: { removeLabels: string[]; addLabels: string[]; comment: string | null } | null;
   light?: boolean;
   riskFiles?: string[];
@@ -891,46 +896,35 @@ export async function settleMergeable(read: () => Promise<boolean | null>, wait:
  */
 export function gateDecision(input: GateInput): GateResult {
   const base = { role: input.role, number: input.number };
-  const stop = (reason: string): GateResult => ({ ...base, decision: "stop", reason, pr: null, branch: null, ops: null, ...(input.role === "fix" ? { fix: null } : {}) });
+  const stopBase = (reason: string): GateResult => ({ ...base, decision: "stop", reason, pr: null, branch: null, ops: null, ...(input.role === "fix" ? { fix: null } : {}) });
+  const stop = stopBase;
   const note = (text: string, action: string) => stalledComment(input.role, action, text, input.sessionUrl);
 
   if (input.role === "implement") {
+    const withLabeler = (r: GateResult): GateResult => ({ ...r, labeler: input.labeler });
+    const stop = (reason: string) => withLabeler(stopBase(reason));
     const branch = `claude/issue-${input.number}`;
     const hasStart = input.labels.some((l) => START_LABELS.includes(l));
     if (!input.issueOpen) return stop("Issue が閉じている。");
     if (!hasStart) return stop("起動のラベルが付いていない。");
     const blocker = [LABEL.epic, LABEL.blockedQuestion, LABEL.needsHuman].find((l) => input.labels.includes(l));
     if (blocker) return stop(`${blocker} が付いている。`);
-    const starter = input.lastStart;
-    if (!starter || !starter.permission || !WRITE_PERMISSIONS.includes(starter.permission)) {
-      const who = starter?.actor ? `（\`${starter.actor}\`）` : "";
-      const text = starter?.permission
-        ? `起動のラベルを付けた人${who}に書き込みの権限が無い（${starter.permission}）ので、人に回す。`
-        : "起動のラベルを付けた人の権限を確かめられなかったので、人に回す。";
-      return {
-        ...base,
-        decision: "needs-human",
-        reason: starter?.permission ? "起動のラベルを付けた人に書き込みの権限が無い。" : "起動のラベルを付けた人の権限を確かめられない。",
-        pr: null,
-        branch: null,
-        ops: { removeLabels: START_LABELS.filter((l) => input.labels.includes(l)), addLabels: [LABEL.needsHuman], comment: note(text, "needs-human") },
-      };
-    }
-    if (input.comments.some((c) => START_MARK_RE.test(c.body) && c.createdAt > starter.at))
+    if (input.comments.some((c) => START_MARK_RE.test(c.body) && c.createdAt > (input.lastStartAt ?? "")))
       return stop("起動のラベルが付いた後に、着手のコメントがもうある。");
     if (input.closingPrs.length > 0) {
-      const own = input.closingPrs.find((p) => p.headRef === branch && p.draft && !p.reviewed);
-      if (own) return { ...base, decision: "takeover", reason: `残った draft の PR #${own.number} がある（レビュー前）。引き継ぐ。`, pr: own.number, branch, ops: null };
+      const own = input.closingPrs.find((p) => p.headRef === branch && p.headRepo === input.repo && p.draft && !p.reviewed);
+      if (own) return withLabeler({ ...base, decision: "takeover", reason: `残った draft の PR #${own.number} がある（レビュー前）。引き継ぐ。`, pr: own.number, branch, ops: null });
       return stop(`この Issue を Closes で参照する開いている PR（#${input.closingPrs[0].number}）がある。`);
     }
-    if (input.branchExists) return { ...base, decision: "takeover", reason: `ブランチ ${branch} が残っている（PR は無い）。取り出して続ける。`, pr: null, branch, ops: null };
-    return { ...base, decision: "lock", reason: `着手の鍵（ブランチ ${branch}）を作ってよい。`, pr: null, branch, ops: null };
+    if (input.branchExists) return withLabeler({ ...base, decision: "takeover", reason: `ブランチ ${branch} が残っている（PR は無い）。取り出して続ける。`, pr: null, branch, ops: null });
+    return withLabeler({ ...base, decision: "lock", reason: `着手の鍵（ブランチ ${branch}）を作ってよい。`, pr: null, branch, ops: null });
   }
 
   const pr = input.pr;
   if (input.role === "review") {
     if (!pr.open) return stop("PR が閉じている。");
     if (pr.draft) return stop("PR が draft。");
+    if (pr.headRepo !== input.repo) return stop("PR の head がこのリポジトリのブランチでない（フォークの PR）。");
     if (!pr.headRef.startsWith("claude/")) return stop("head のブランチが claude/ で始まらない。");
     if (pr.labels.includes(LABEL.needsHuman)) return stop("status:needs-human が付いている。");
     if (input.reviews.some((r) => sameCommit(r.commit, pr.headSha))) return stop("最新のコミットへのレビューがもうある。");
@@ -953,6 +947,7 @@ export function gateDecision(input: GateInput): GateResult {
   // fix
   if (!pr.open) return stop("PR が閉じている。");
   if (!pr.draft) return stop("PR が draft でない。");
+  if (pr.headRepo !== input.repo) return stop("PR の head がこのリポジトリのブランチでない（フォークの PR）。");
   if (!pr.headRef.startsWith("claude/issue-")) return stop("head のブランチが claude/issue- で始まらない。");
   if (pr.labels.includes(LABEL.needsHuman)) return stop("status:needs-human が付いている。");
   const latest = input.reviews.at(-1);

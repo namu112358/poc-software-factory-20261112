@@ -749,13 +749,14 @@ describe("stalled: 止まった実装・PR の片付け", () => {
 });
 
 describe("gate: 各役の起動の判定", () => {
+  const REPO = "namu112358/poc-software-factory-20261112";
   const T0 = "2026-11-13T10:00:00Z";
   const T1 = "2026-11-13T10:05:00Z";
   const startMark = { body: "<!-- factory:implement action=start -->\n着手します。", createdAt: T1 };
   type Impl = Extract<GateInput, { role: "implement" }>;
   const impl = (o: Partial<Impl> = {}): GateInput => ({
-    role: "implement", number: 7, sessionUrl: "https://claude.ai/code/session_X", issueOpen: true, labels: ["status:in-progress"],
-    lastStart: { at: T0, actor: "alice", permission: "write" }, comments: [], closingPrs: [], branchExists: false, ...o,
+    role: "implement", number: 7, sessionUrl: "https://claude.ai/code/session_X", repo: REPO, issueOpen: true, labels: ["status:in-progress"],
+    lastStartAt: T0, labeler: "alice", comments: [], closingPrs: [], branchExists: false, ...o,
   });
 
   describe("implement", () => {
@@ -766,23 +767,18 @@ describe("gate: 各役の起動の判定", () => {
         assert.equal(r.ops, null);
       }
     });
-    it("2: 起動のラベルを付けた人に書き込みの権限が無い・読めない・イベントが無いときは needs-human（起動のラベルを外す）", () => {
-      for (const lastStart of [{ at: T0, actor: "bob", permission: "read" }, { at: T0, actor: "bob", permission: null }, { at: T0, actor: null, permission: null }, null]) {
-        const r = gateDecision(impl({ labels: ["status:in-progress-hard", "status:ready"], lastStart }));
-        assert.equal(r.decision, "needs-human");
-        assert.deepEqual(r.ops?.removeLabels, ["status:in-progress-hard"]);
-        assert.deepEqual(r.ops?.addLabels, ["status:needs-human"]);
-        assert.match(r.ops!.comment!, /^<!-- factory:implement action=needs-human -->\n.*人に回す。\nセッション: https:\/\/claude\.ai\/code\/session_X$/s);
-      }
-      assert.match(gateDecision(impl({ lastStart: { at: T0, actor: "bob", permission: null } })).ops!.comment!, /権限を確かめられなかったので、人に回す/);
-      for (const permission of ["write", "maintain", "admin"]) assert.equal(gateDecision(impl({ lastStart: { at: T0, actor: "a", permission } })).decision, "lock");
+    it("起動のラベルを付けた人（labeler）を、どの判定でも出す。読めなければ null（権限は gate では確かめない。役が確かめる）", () => {
+      assert.equal(gateDecision(impl()).labeler, "alice");
+      assert.equal(gateDecision(impl({ labeler: null, lastStartAt: null })).labeler, null);
+      assert.equal(gateDecision(impl({ labeler: null, lastStartAt: null })).decision, "lock");
+      assert.equal(gateDecision(impl({ issueOpen: false })).labeler, "alice");
     });
-    it("3: 最後の起動の後に着手のコメントがあれば stop。起動の前のものは数えない", () => {
+    it("2: 最後の起動の後に着手のコメントがあれば stop。起動の前のものは数えない", () => {
       assert.equal(gateDecision(impl({ comments: [startMark] })).decision, "stop");
       assert.equal(gateDecision(impl({ comments: [{ ...startMark, createdAt: "2026-11-13T09:00:00Z" }] })).decision, "lock");
     });
-    it("4: Closes で参照する開いている PR があれば stop。claude/issue-N の draft でレビュー前なら takeover", () => {
-      const pr = (o = {}) => ({ number: 90, headRef: "claude/issue-7", draft: true, reviewed: false, ...o });
+    it("3: Closes で参照する開いている PR があれば stop。claude/issue-N の draft でレビュー前なら takeover", () => {
+      const pr = (o = {}) => ({ number: 90, headRef: "claude/issue-7", headRepo: REPO, draft: true, reviewed: false, ...o });
       const t = gateDecision(impl({ closingPrs: [pr()] }));
       assert.equal(t.decision, "takeover");
       assert.equal(t.pr, 90);
@@ -791,36 +787,46 @@ describe("gate: 各役の起動の判定", () => {
       // 着手のコメントがあれば、PR より先（3）に stop
       assert.equal(gateDecision(impl({ comments: [startMark], closingPrs: [pr()] })).decision, "stop");
     });
-    it("5: PR が無くブランチだけがあれば takeover（pr は null）。読み直して着手のコメントが現れたら stop", () => {
+    it("4: PR が無くブランチだけがあれば takeover（pr は null）。読み直して着手のコメントが現れたら stop", () => {
       const r = gateDecision(impl({ branchExists: true }));
       assert.equal(r.decision, "takeover");
       assert.equal(r.pr, null);
       assert.equal(r.branch, "claude/issue-7");
       assert.equal(gateDecision(impl({ branchExists: true, comments: [startMark] })).decision, "stop");
     });
-    it("6: どれでもなければ lock（ブランチ名を返す）", () => {
+    it("5: どれでもなければ lock（ブランチ名を返す）", () => {
       const r = gateDecision(impl());
       assert.equal(r.decision, "lock");
       assert.equal(r.branch, "claude/issue-7");
       assert.equal(r.pr, null);
       assert.equal(r.ops, null);
     });
-    it("最初に当たった 1 つだけ: 権限が無ければ、ブランチや PR があっても needs-human", () => {
-      const r = gateDecision(impl({ lastStart: { at: T0, actor: "bob", permission: "read" }, branchExists: true, closingPrs: [{ number: 90, headRef: "claude/issue-7", draft: true, reviewed: false }] }));
-      assert.equal(r.decision, "needs-human");
+    it("最初に当たった 1 つだけ: 着手のコメントがあれば、ブランチや PR があっても stop", () => {
+      const r = gateDecision(impl({ comments: [startMark], branchExists: true, closingPrs: [{ number: 90, headRef: "claude/issue-7", headRepo: REPO, draft: true, reviewed: false }] }));
+      assert.equal(r.decision, "stop");
+    });
+    it("フォークの PR（head のリポジトリが違う・null）は引き継がず stop", () => {
+      for (const headRepo of ["someone/poc-software-factory-20261112", null]) {
+        const r = gateDecision(impl({ closingPrs: [{ number: 90, headRef: "claude/issue-7", headRepo, draft: true, reviewed: false }] }));
+        assert.equal(r.decision, "stop", String(headRepo));
+        assert.equal(r.pr, null);
+      }
     });
   });
 
   const HEAD = "aaaaaaa1111111";
   type Rev = Extract<GateInput, { role: "review" }>;
   type Fix = Extract<GateInput, { role: "fix" }>;
-  const pr = (o = {}) => ({ open: true, draft: false, headRef: "claude/issue-7", headSha: HEAD, labels: [] as string[], ...o });
-  const review = (o: Partial<Rev> = {}): GateInput => ({ role: "review", number: 20, sessionUrl: null, pr: pr(), reviews: [], afterOk: null, files: [], ...o });
+  const pr = (o = {}) => ({ open: true, draft: false, headRef: "claude/issue-7", headSha: HEAD, labels: [] as string[], headRepo: REPO as string | null, ...o });
+  const review = (o: Partial<Rev> = {}): GateInput => ({ role: "review", number: 20, sessionUrl: null, repo: REPO, pr: pr(), reviews: [], afterOk: null, files: [], ...o });
 
   describe("review", () => {
     it("1: 閉じている・draft・claude/ 以外・needs-human は stop", () => {
       for (const p of [pr({ open: false }), pr({ draft: true }), pr({ headRef: "feature/x" }), pr({ labels: ["status:needs-human"] })]) assert.equal(gateDecision(review({ pr: p })).decision, "stop", JSON.stringify(p));
       assert.equal(gateDecision(review({ pr: pr({ headRef: "claude/hand-made" }) })).decision, "go"); // claude/issue- でなくてもレビューする
+    });
+    it("フォークの PR（head のリポジトリが違う・null）は stop", () => {
+      for (const headRepo of ["someone/poc-software-factory-20261112", null]) assert.equal(gateDecision(review({ pr: pr({ headRepo }) })).decision, "stop", String(headRepo));
     });
     it("2: 最新のコミットへのレビューがもうあれば stop（ok でも changes でも）", () => {
       for (const verdict of ["ok", "changes"]) assert.equal(gateDecision(review({ reviews: [{ verdict, commit: "aaaaaaa" }] })).decision, "stop");
@@ -854,7 +860,7 @@ describe("gate: 各役の起動の判定", () => {
   });
 
   const fix = (o: Partial<Fix> = {}): GateInput => ({
-    role: "fix", number: 20, sessionUrl: "https://claude.ai/code/session_X", pr: pr({ draft: true }), reviews: [{ verdict: "changes", commit: "aaaaaaa" }], mergeable: true, ...o,
+    role: "fix", number: 20, sessionUrl: "https://claude.ai/code/session_X", repo: REPO, pr: pr({ draft: true }), reviews: [{ verdict: "changes", commit: "aaaaaaa" }], mergeable: true, ...o,
   });
   describe("fix", () => {
     it("1: 閉じている・draft でない・claude/issue- 以外・needs-human は stop", () => {
@@ -863,6 +869,9 @@ describe("gate: 各役の起動の判定", () => {
         assert.equal(r.decision, "stop", JSON.stringify(p));
         assert.equal(r.fix, null);
       }
+    });
+    it("フォークの PR（head のリポジトリが違う・null）は、指摘や衝突があっても stop", () => {
+      for (const headRepo of ["someone/poc-software-factory-20261112", null]) assert.equal(gateDecision(fix({ pr: pr({ draft: true, headRepo }), mergeable: false })).decision, "stop", String(headRepo));
     });
     it("2: 直すものが無ければ stop（指摘が古い版へのもの・指摘が無い）。衝突が無くても、指摘があれば go", () => {
       assert.equal(gateDecision(fix({ reviews: [{ verdict: "changes", commit: "ccccccc" }] })).decision, "stop");

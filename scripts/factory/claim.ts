@@ -56,8 +56,8 @@ if ((process.env.HTTPS_PROXY || process.env.https_proxy) && process.env.NODE_USE
 type RawIssue = { number: number; body: string | null; state: string; pull_request?: unknown; labels?: { name: string }[] };
 type RawComment = { body: string | null; created_at: string; issue_url: string; user?: { login: string } };
 
-async function get<T>(path: string, headers: Record<string, string> = {}): Promise<{ status: number; data: T }> {
-  const res = await fetch(`${API}${path}`, { headers: { Accept: "application/vnd.github+json", ...headers } });
+async function get<T>(path: string): Promise<{ status: number; data: T }> {
+  const res = await fetch(`${API}${path}`, { headers: { Accept: "application/vnd.github+json" } });
   if (res.status === 404) return { status: 404, data: [] as T };
   if (!res.ok) throw new Error(`GET ${path} → ${res.status} ${await res.text()}`);
   return { status: res.status, data: (await res.json()) as T };
@@ -214,7 +214,7 @@ function commitsAfter(n: number, last: string, headSha: string): StalledCommit[]
 }
 
 const COMMIT_MARK_RE = /<!--\s*factory:review\s+verdict=(\w+)[^>]*?commit=([0-9a-f]+)/;
-type RawPull = { number: number; draft: boolean; mergeable?: boolean | null; created_at: string; updated_at: string; head: { ref: string; sha: string }; labels?: { name: string }[] };
+type RawPull = { number: number; draft: boolean; mergeable?: boolean | null; created_at: string; updated_at: string; head: { ref: string; sha: string; repo?: { full_name: string } | null }; labels?: { name: string }[] };
 type RawTrustedComment = { body: string | null; updated_at: string; author_association: string; user?: { login: string } };
 
 /** 止まった実装・PR の判定の入力を GitHub と git から集める（読むだけ） */
@@ -315,35 +315,22 @@ async function loadImplementGate(n: number): Promise<GateInput> {
   const labels = status === 404 ? [] : (issue.labels ?? []).map((l) => normalizeLabel(l.name));
   const events = await getAll<{ event: string; created_at: string; label?: { name: string }; actor?: { login: string } }>(`/repos/${REPO}/issues/${n}/events`);
   const last = events.filter((e) => e.event === "labeled" && START_LABELS.includes(normalizeLabel(e.label?.name ?? ""))).at(-1);
-  let permission: string | null = null;
-  const actor = last?.actor?.login ?? null;
-  if (actor) {
-    try {
-      // 権限の API はトークンが要るので、あれば付ける（無効なトークンで 401 になったら、付けずに読み直す）
-      const token = process.env.GITHUB_TOKEN || process.env.GH_TOKEN;
-      const path = `/repos/${REPO}/collaborators/${encodeURIComponent(actor)}/permission`;
-      const r = await get<{ permission?: string; role_name?: string }>(path, token ? { Authorization: `Bearer ${token}` } : {}).catch(() => get<{ permission?: string; role_name?: string }>(path));
-      if (r.status === 200) permission = r.data.role_name === "maintain" ? "maintain" : (r.data.permission ?? null);
-    } catch {
-      permission = null; // 読めないときは、権限が無いものとして人に回す
-    }
-  }
   const comments = (await getAll<RawTrustedComment & { created_at: string }>(`/repos/${REPO}/issues/${n}/comments`))
     .filter((c) => TRUSTED_ASSOCIATIONS.includes(c.author_association))
     .map((c): Comment => ({ body: c.body ?? "", createdAt: c.created_at, author: c.user?.login }));
   const closes = new RegExp(`\\bcloses\\s+#${n}\\b`, "i");
-  const prs = (await getAll<{ number: number; body: string | null; draft: boolean; head: { ref: string } }>(`/repos/${REPO}/pulls?state=open`)).filter((p) => closes.test(p.body ?? ""));
+  const prs = (await getAll<{ number: number; body: string | null; draft: boolean; head: { ref: string; repo: { full_name: string } | null } }>(`/repos/${REPO}/pulls?state=open`)).filter((p) => closes.test(p.body ?? ""));
   const closingPrs = await Promise.all(
     prs.map(async (p) => {
       const issueComments = await getAll<RawTrustedComment>(`/repos/${REPO}/issues/${p.number}/comments`);
       const reviewed = (await loadReviewMarks(p.number)).length > 0 || issueComments.some((c) => TRUSTED_ASSOCIATIONS.includes(c.author_association) && /<!--\s*factory:review\b/.test(c.body ?? ""));
-      return { number: p.number, headRef: p.head.ref, draft: p.draft, reviewed };
+      return { number: p.number, headRef: p.head.ref, headRepo: p.head.repo?.full_name ?? null, draft: p.draft, reviewed };
     }),
   );
   const branchExists = (await get<unknown>(`/repos/${REPO}/branches/${encodeURIComponent(`claude/issue-${n}`)}`)).status !== 404;
   return {
-    role: "implement", number: n, sessionUrl: sessionUrl(), issueOpen: status !== 404 && issue.state === "open", labels,
-    lastStart: last ? { at: last.created_at, actor, permission } : null, comments, closingPrs, branchExists,
+    role: "implement", number: n, sessionUrl: sessionUrl(), repo: REPO, issueOpen: status !== 404 && issue.state === "open", labels,
+    lastStartAt: last?.created_at ?? null, labeler: last?.actor?.login ?? null, comments, closingPrs, branchExists,
   };
 }
 
@@ -355,6 +342,7 @@ async function loadPrGate(role: "review" | "fix", n: number): Promise<GateInput>
     draft: full.draft,
     headRef: full.head?.ref ?? "",
     headSha: full.head?.sha ?? "",
+    headRepo: full.head?.repo?.full_name ?? null,
     labels: (full.labels ?? []).map((l) => normalizeLabel(l.name)),
   };
   if (role === "fix") {
@@ -362,13 +350,13 @@ async function loadPrGate(role: "review" | "fix", n: number): Promise<GateInput>
     const eligible = pr.open && pr.draft && pr.headRef.startsWith("claude/issue-") && !pr.labels.includes(LABEL.needsHuman);
     const firstRead: (boolean | null)[] = [full.mergeable ?? null]; // 最初の読み取りは、取得済みの値を使う
     const mergeable = eligible ? await settleMergeable(async () => (firstRead.length > 0 ? firstRead.shift()! : ((await read()).mergeable ?? null)), () => sleep(GATE_WAIT_MS)) : true;
-    return { role, number: n, sessionUrl: sessionUrl(), pr, reviews: await loadReviewMarks(n), mergeable };
+    return { role, number: n, sessionUrl: sessionUrl(), repo: REPO, pr, reviews: await loadReviewMarks(n), mergeable };
   }
   const reviews = await loadReviewMarks(n);
   const ok = reviews.filter((r) => r.verdict === "ok").at(-1);
   const afterOk = ok && !pr.headSha.startsWith(ok.commit) ? commitsAfter(n, ok.commit, pr.headSha) : null;
   const files = (await getAll<{ filename: string }>(`/repos/${REPO}/pulls/${n}/files`)).map((f) => f.filename);
-  return { role, number: n, sessionUrl: sessionUrl(), pr, reviews, afterOk, files };
+  return { role, number: n, sessionUrl: sessionUrl(), repo: REPO, pr, reviews, afterOk, files };
 }
 
 async function runGate(role: string | undefined, n: number) {

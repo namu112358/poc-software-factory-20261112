@@ -7,7 +7,7 @@ Issue に `status:in-progress` か `status:in-progress-hard` が付いたとき�
 `node scripts/factory/claim.ts gate --role implement --number <番号>` を実行し、`decision` のとおりにする。
 
 - `stop`: 何もせず終える（コメントもしない）。
-- `needs-human`: `ops` のとおりにラベルとコメントを書いて終える。
+- `takeover`・`lock` の前に、`labeler` が GitHub MCP の `list_repository_collaborators` で `write`・`maintain`・`admin` を持つかを確かめる。持たない・調べられない（`labeler` が null を含む）なら、起動のラベルを外して `status:needs-human` を付け、理由をコメントして終える。
 - `takeover`: 「残った PR を引き継ぐ」へ。
 - `lock`: GitHub MCP の `create_branch` で、`main` から `branch` を作る。作れなければ（もうある）何もせずに終える（同じ起動で重ねて着手した別のセッションが先に作った）。作れたら「2.」へ。
 
