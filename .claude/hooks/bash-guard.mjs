@@ -5,7 +5,7 @@
 // 作り方: コマンドは解析しない。次の 2 つだけを見る。
 //   1. 文字の許可リスト: `;` `&` `<` `>` `$` バッククォート `\` `(` `)` `{` `}` 改行 が 1 つでもあれば断る（引用符の中かどうかは区別しない。区別すると解析のずれが生まれるため）。
 //   2. `|` は、`head`・`tail`・`grep`・`wc`・`sort` に渡す形だけ通す。
-//   文字では捕まらないものだけは単語で見る: 先頭の `NAME=value` の前置き、git の `-c`・`--config-env`・`--exec-path`・`--git-dir`・`--work-tree`、手元の変更を捨てる git（`checkout ... --`・`checkout .`・`restore`・`reset --hard`・`clean -f`・`checkout claude/<ブランチ>` に続く引数）。
+//   文字では捕まらないものだけは単語で見る: `rm` の再帰（`-r`・`-R`・`--recursive`。settings.json の `ask` で止まるため）、先頭の `NAME=value` の前置き、git の `-c`・`--config-env`・`--exec-path`・`--git-dir`・`--work-tree`、手元の変更を捨てる git（`checkout ... --`・`checkout .`・`restore`・`reset --hard`・`clean -f`・`checkout claude/<ブランチ>` に続く引数）。
 //   `--output`・npm の設定の引数などは見ない。settings.json の許可を正確な形にして守る。
 // 断った理由は permissionDecisionReason でエージェントに返る（Claude Code のフックの仕様: 終了コード 0 と JSON の出力）。
 // 判定は check() に置き、tests/bash-guard.test.ts で確かめる。
@@ -60,6 +60,7 @@ export function check(command) {
     if (words.length === 0) return deny("空のコマンドをつなぐ `|`（`||` を含む）");
     if (i > 0 && !PIPE_SINKS.has(words[0])) return deny("`head`・`tail`・`grep`・`wc`・`sort` 以外へのパイプ");
     if (/^[A-Za-z_]\w*=/.test(words[0])) return deny("コマンドの前の `NAME=value` の前置き");
+    if (words[0].split("/").pop() === "rm" && words.slice(1).some((a) => /^-[a-zA-Z]*[rR]/.test(a) || a.startsWith("--rec"))) return deny("`rm` の再帰（`-r`・`-R`・`--recursive`。`rm -rf` を含む）");
     if (isGitDiscard(words)) return deny("手元の変更を捨てる git（`checkout ... --`・`checkout .`・`restore`・`reset --hard`・`clean -f`、`checkout claude/<ブランチ>` に続く引数）");
     if (hasBannedGitOption(words)) return deny("git の `-c`・`--config-env`・`--exec-path`・`--git-dir`・`--work-tree`");
   }

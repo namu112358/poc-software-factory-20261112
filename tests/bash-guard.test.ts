@@ -84,6 +84,11 @@ describe("Bash のフック（文字の許可リスト。承認の画面で止�
     ]) assert.equal(denied(c), false, c);
   });
 
+  it("rm の再帰（-r・-R・--recursive・-rf・-fr・-Rf）は断る。-f だけ・単独のファイルは通す", () => {
+    for (const c of ["rm -rf node_modules", "rm -fr /tmp/x", "rm -r dist", "rm -R dist", "rm --recursive x", "rm --rec --force x", "ls | rm -rf x", "/bin/rm -rf x"]) assert.equal(denied(c), true, c);
+    for (const c of ["rm tmp.txt", "rm -f tmp.txt", "sleep 30"]) assert.equal(denied(c), false, c);
+  });
+
   it("通す例（1 つのコマンド）", () => {
     for (const c of [
       "npm test",

@@ -12,7 +12,7 @@
 
 `node scripts/factory/claim.ts pick` を実行する（`error` なら、出力を終えるコメントに書いて 2 へ）。`rewait` の Issue には、その `comment` をそのままコメントする。
 
-`pick` の Issue ごとに、順に次を行う。2 件目からは、前の 1 件にラベルを付けてから 30 秒あける（`node -e "setTimeout(() => {}, 30000)"`）。
+`pick` の Issue ごとに、順に次を行う。2 件目からは、前の 1 件にラベルを付けてから 30 秒あける（単独の `sleep 30` を実行する）。
 
 1. ラベルを読み直し、`status:ready` が無いか、`status:in-progress`・`status:blocked-question`・`status:needs-human`・`kind:epic`・`kind:kaizen` が付いていれば、次へ。
 2. `status:ready` を付けた人が書き込み権限を持つかを確かめる（Issue のイベントの最後の `labeled status:ready` の人を、GitHub MCP の `list_repository_collaborators` で見る）。持たなければ `status:ready` を外して `status:needs-human` を付け、理由をコメントして次へ。
