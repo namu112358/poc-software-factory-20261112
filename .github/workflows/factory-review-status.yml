@@ -4,7 +4,7 @@
 # - 判定は scripts/factory/claim.ts の review-status（merge-check と同じ判定）。最新のレビューの印 <!-- factory:review verdict=ok ... commit=<SHA> -->
 #   が書き込み権限のある人のもので、SHA が最新のコミット（または、その後が main の取り込みだけのコミット）なら success、
 #   最新のコミットへのレビューが ok でなければ failure、それ以外は付けない。
-# - このワークフローは、必ず main の定義で動くきっかけ（pull_request_target・workflow_run）だけで起動する。PR の側でワークフローや
+# - このワークフローは、必ず main の定義で動くきっかけ（pull_request_target・workflow_run・schedule）だけで起動する。PR の側でワークフローや
 #   判定のスクリプトを書き換えても、status は付けられない。PR のコードは実行しない（main を取り出し、PR は git で差分を読むだけ）。
 # - レビューが書かれたときは factory-review-trigger.yml（権限なし）が終わったのをきっかけに動く。
 # - キューが main を取り込むと最新のコミットが変わるので、PR に push があったときも判定し直して引き継ぐ。
@@ -78,8 +78,8 @@ jobs:
             sha=$(node -e 'const r=JSON.parse(process.argv[1]); process.stdout.write(r.sha ?? "")' "$out")
             desc=$(node -e 'const r=JSON.parse(process.argv[1]); process.stdout.write(String(r.description ?? "").slice(0, 140))' "$out")
             if [ -z "$state" ]; then echo "PR $PR: status は付けない"; continue; fi
-            current=$(gh api "repos/$REPO/commits/$sha/statuses" --jq '[.[] | select(.context == "factory-review")][0].state // ""')
+            current=$(gh api "repos/$REPO/commits/$sha/statuses" --jq '[.[] | select(.context == "factory-review")][0].state // ""') || { echo "PR $PR: 今の status を読めなかった（付けずに次へ）"; continue; }
             if [ "$current" = "$state" ]; then echo "PR $PR: factory-review は $state のまま"; continue; fi
-            gh api -X POST "repos/$REPO/statuses/$sha" -f state="$state" -f context=factory-review -f description="$desc" >/dev/null
+            gh api -X POST "repos/$REPO/statuses/$sha" -f state="$state" -f context=factory-review -f description="$desc" >/dev/null || { echo "PR $PR: status を付けられなかった（次の回にやり直す）"; continue; }
             echo "PR $PR: factory-review=$state を $sha に付けた"
           done
