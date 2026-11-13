@@ -1,12 +1,16 @@
 "use client";
 // タグの追加フォームと外すボタン。操作のあと、サーバー側の一覧を読み直す。
+// 追加でログインが切れていたら（401）、入力を残したまま、ログインし直す案内を出す（#491）。
 import { useRouter } from "next/navigation";
 import { useState, type FormEvent } from "react";
+import { readFormFailure } from "@/lib/session-expired";
 import { TAG_MAX_LENGTH, formatTagLimitHint } from "@/lib/tag-limits";
+import { SessionExpiredNotice } from "../../session-expired";
 
 export function TagForm({ taskId, suggestions = [] }: { taskId: number; suggestions?: string[] }) {
   const router = useRouter();
   const [error, setError] = useState<string>();
+  const [expired, setExpired] = useState(false);
   const [pending, setPending] = useState(false);
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
@@ -15,6 +19,7 @@ export function TagForm({ taskId, suggestions = [] }: { taskId: number; suggesti
     const name = new FormData(form).get("name");
     setPending(true);
     setError(undefined);
+    setExpired(false);
     try {
       const res = await fetch(`/api/tasks/${taskId}/tags`, {
         method: "POST",
@@ -22,8 +27,9 @@ export function TagForm({ taskId, suggestions = [] }: { taskId: number; suggesti
         body: JSON.stringify({ name }),
       });
       if (!res.ok) {
-        const data = (await res.json().catch(() => ({}))) as { error?: string; details?: string[] };
-        setError(data.details?.join(" ") ?? data.error ?? "タグを追加できませんでした。");
+        const failure = readFormFailure(res.status, await res.json().catch(() => undefined), "タグを追加できませんでした。");
+        if (failure.expired) setExpired(true);
+        else setError(failure.messages.join(" "));
         return;
       }
       form.reset();
@@ -47,6 +53,11 @@ export function TagForm({ taskId, suggestions = [] }: { taskId: number; suggesti
         </datalist>
       </p>
       {error && <p role="alert">{error}</p>}
+      {expired && (
+        <p role="alert" data-testid="tag-session-expired">
+          <SessionExpiredNotice />
+        </p>
+      )}
       <button type="submit" disabled={pending}>
         追加する
       </button>

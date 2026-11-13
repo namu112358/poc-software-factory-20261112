@@ -3,6 +3,7 @@
 // ほかの人が先に更新していたら（409）上書きせずに知らせ、入力は残したまま、相手が変えた項目を並べる。
 // 「今の値で編集し直す」を押すまでは保存できない（自分の入力のまま、確かめずに上書きしないため）。
 // 編集し直すと、相手が変えた項目だけが今の値になり、ほかの項目は自分の入力が残る。
+// ログインが切れていたら（401）、フォームを閉じず入力を残したまま、誤りの一覧にログインし直す案内を出す（#491）。
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import {
@@ -19,6 +20,7 @@ import {
   type TaskEditState,
   type TaskEditValues,
 } from "@/lib/task-edit";
+import { SessionExpiredNotice } from "../../session-expired";
 import { fieldErrorId, fieldErrorProps, fieldErrorText, toFormErrorItems, type FormErrorItem, type TaskFormField } from "@/lib/form-errors";
 import { MEMO_MAX_LENGTH, PRIORITY_LABELS, STATUS_LABELS, TASK_PRIORITIES, TASK_STATUSES, isTaskPriority, isTaskStatus, type Task } from "@/lib/task-types";
 
@@ -39,6 +41,7 @@ export function EditTaskForm({ task, users }: Props) {
   const [edit, setEdit] = useState<TaskEditState>(() => startTaskEdit(task));
   const [received, setReceived] = useState<Task>();
   const [errors, setErrors] = useState<FormErrorItem[]>([]);
+  const [expired, setExpired] = useState(false);
   const titleRef = useRef<HTMLInputElement>(null);
   const errorListRef = useRef<HTMLUListElement>(null);
   const [pending, setPending] = useState(false);
@@ -52,25 +55,28 @@ export function EditTaskForm({ task, users }: Props) {
     if (open) titleRef.current?.focus();
   }, [open]);
 
-  // 誤りで断られたら、誤りの一覧にフォーカスを移す。
+  // 誤りやログイン切れで断られたら、誤りの一覧にフォーカスを移す。
   useEffect(() => {
-    if (errors.length > 0) errorListRef.current?.focus();
-  }, [errors]);
+    if (errors.length > 0 || expired) errorListRef.current?.focus();
+  }, [errors, expired]);
 
   function startEditing() {
     setEdit(startTaskEdit(newerTask(task, received)));
     setErrors([]);
+    setExpired(false);
     setOpen(true);
   }
 
   function close() {
     setOpen(false);
     setErrors([]);
+    setExpired(false);
   }
 
   function rebase() {
     setEdit(rebaseOnCurrent);
     setErrors([]);
+    setExpired(false);
   }
 
   function set<K extends keyof TaskEditValues>(key: K, value: TaskEditValues[K]) {
@@ -82,6 +88,7 @@ export function EditTaskForm({ task, users }: Props) {
     if (pending || !canSave) return;
     setPending(true);
     setErrors([]);
+    setExpired(false);
     const result = await saveTaskEdit(task.id, values, edit.expectedUpdatedAt, { fetch: (url, init) => fetch(url, init) });
     setPending(false);
     switch (result.status) {
@@ -99,7 +106,7 @@ export function EditTaskForm({ task, users }: Props) {
         setErrors(toFormErrorItems(result.messages, { dueDate: values.dueDate }));
         return;
       case "unauthorized":
-        window.location.href = "/login";
+        setExpired(true);
         return;
       case "error":
         setErrors([{ message: result.message }]);
@@ -122,8 +129,13 @@ export function EditTaskForm({ task, users }: Props) {
           {TASK_EDIT_CONFLICT_MESSAGE}
         </p>
       )}
-      {errors.length > 0 && (
+      {(errors.length > 0 || expired) && (
         <ul role="alert" data-testid="edit-errors" ref={errorListRef} tabIndex={-1}>
+          {expired && (
+            <li data-testid="edit-session-expired">
+              <SessionExpiredNotice />
+            </li>
+          )}
           {errors.map((e) => (
             <li key={e.message}>{e.message}</li>
           ))}

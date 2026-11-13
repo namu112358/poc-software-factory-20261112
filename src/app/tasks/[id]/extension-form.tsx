@@ -1,12 +1,15 @@
 "use client";
 // 延長の申請フォーム。送ったあと、サーバー側の表示を読み直す。
+// ログインが切れていたら（401）、入力を残したまま、ログインし直す案内を出す（#491）。
 import { useRouter } from "next/navigation";
 import { useState, type FormEvent } from "react";
 import { submitExtensionRequest } from "@/lib/task-extension-panel";
+import { SessionExpiredNotice } from "../../session-expired";
 
 export function ExtensionRequestForm({ taskId, currentDueDate }: { taskId: number; currentDueDate: string }) {
   const router = useRouter();
   const [error, setError] = useState<string>();
+  const [expired, setExpired] = useState(false);
   const [pending, setPending] = useState(false);
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
@@ -15,6 +18,7 @@ export function ExtensionRequestForm({ taskId, currentDueDate }: { taskId: numbe
     const data = new FormData(form);
     setPending(true);
     setError(undefined);
+    setExpired(false);
     const result = await submitExtensionRequest(
       taskId,
       { newDueDate: String(data.get("newDueDate") ?? ""), reason: String(data.get("reason") ?? "") },
@@ -24,6 +28,10 @@ export function ExtensionRequestForm({ taskId, currentDueDate }: { taskId: numbe
     setPending(false);
     if (result.status === "error") {
       setError(result.message);
+      return;
+    }
+    if (result.status === "expired") {
+      setExpired(true);
       return;
     }
     form.reset();
@@ -43,6 +51,11 @@ export function ExtensionRequestForm({ taskId, currentDueDate }: { taskId: numbe
         </label>
       </p>
       {error && <p role="alert">{error}</p>}
+      {expired && (
+        <p role="alert" data-testid="extension-session-expired">
+          <SessionExpiredNotice />
+        </p>
+      )}
       <button type="submit" disabled={pending}>
         延長を申請する
       </button>

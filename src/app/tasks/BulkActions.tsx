@@ -1,6 +1,7 @@
 "use client";
 // タスク一覧で複数のタスクを選び、担当者・ステータスをまとめて変える部品。
 // 選択の状態は BulkSelection が持つ。絞り込みが変わったら、一覧の画面が key を変えて作り直す（選択が外れる）。
+// ログインが切れていたら（401）、選択と選んだ値を残し、画面を読み直さずに（読み直すとログイン画面へ移る）、ログインし直す案内を出す（#491）。
 import { useRouter } from "next/navigation";
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
 import {
@@ -14,6 +15,7 @@ import {
   type BulkChoice,
 } from "@/lib/bulk-select";
 import { STATUS_LABELS, TASK_STATUSES } from "@/lib/task-types";
+import { SessionExpiredNotice } from "../session-expired";
 
 type User = { id: string; name: string; label?: string };
 
@@ -68,7 +70,7 @@ export function BulkBar({ users }: { users: User[] }) {
   const { selected, clear } = useSelection();
   const [choice, setChoice] = useState<BulkChoice>({ assignee: "", status: "" });
   const [pending, setPending] = useState(false);
-  const [result, setResult] = useState<{ kind: "done" | "error"; message: string }>();
+  const [result, setResult] = useState<{ kind: "done" | "error" | "expired"; message: string }>();
   const [undoId, setUndoId] = useState<number>();
 
   useEffect(() => {
@@ -82,6 +84,11 @@ export function BulkBar({ users }: { users: User[] }) {
     setPending(true);
     const r = await requestBulkUndo(undoId, { fetch: (url, init) => fetch(url, init) });
     setPending(false);
+    if (r.status === "expired") {
+      // 元に戻すボタンは残す（ログインし直した後に押せるように）。
+      setResult({ kind: "expired", message: r.message });
+      return;
+    }
     setUndoId(undefined);
     setResult({ kind: r.status === "undone" ? "done" : "error", message: r.message });
     router.refresh();
@@ -97,6 +104,10 @@ export function BulkBar({ users }: { users: User[] }) {
     });
     setPending(false);
     if (r.status === "cancelled") return;
+    if (r.status === "expired") {
+      setResult({ kind: "expired", message: r.message });
+      return;
+    }
     if (r.status === "updated") {
       clear();
       setChoice({ assignee: "", status: "" });
@@ -143,8 +154,14 @@ export function BulkBar({ users }: { users: User[] }) {
         </div>
       )}
       {result && (
-        <p role={result.kind === "error" ? "alert" : "status"} data-testid="bulk-result">
-          {result.message}
+        <p role={result.kind === "done" ? "status" : "alert"} data-testid="bulk-result">
+          {result.kind === "expired" ? (
+            <>
+              {result.message} <SessionExpiredNotice />
+            </>
+          ) : (
+            result.message
+          )}
           {undoId !== undefined && (
             <>
               {" "}

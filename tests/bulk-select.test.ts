@@ -120,11 +120,12 @@ describe("まとめて変更（画面の処理）", () => {
   });
 
   it("未ログイン・通信の失敗でも、成功とは扱わず日本語で理由を出す", async () => {
+    // ログインが切れていたら（401）、ほかの誤りとは分けて expired にする（画面は選択を残し、ログインし直す案内を出す。#491）。
     const unauthorized = await confirmAndBulkUpdate([1], { assignee: "sato", status: "" }, USERS, {
       confirm: ok,
       fetch: async () => ({ ok: false, status: 401, json: async () => ({ error: "ログインが必要です" }) }),
     });
-    assert.deepEqual(unauthorized, { status: "error", message: "ログインし直してください。1 件も変更していません。" });
+    assert.deepEqual(unauthorized, { status: "expired", message: "1 件も変更していません。" });
     const offline = await confirmAndBulkUpdate([1], { assignee: "sato", status: "" }, USERS, {
       confirm: ok,
       fetch: async () => {
