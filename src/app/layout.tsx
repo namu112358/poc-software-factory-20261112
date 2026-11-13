@@ -10,6 +10,7 @@ import {
   getCurrentPreviousLogin,
   getCurrentUser,
 } from "@/lib/session";
+import { TOUCH_CSS } from "@/lib/touch-css";
 import { LoginNoticeBanner } from "./login-notice";
 
 export const metadata = { title: `PoC ${APP_TITLE}` };
@@ -36,6 +37,7 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
   return (
     <html lang="ja">
       <body style={{ fontFamily: "system-ui, sans-serif", margin: 24 }}>
+        <style>{TOUCH_CSS}</style>
         {user && (
           <>
             <style>{SKIP_LINK_CSS}</style>
