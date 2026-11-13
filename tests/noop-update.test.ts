@@ -35,11 +35,11 @@ describe("何も変えない更新では、更新日時が進まない", () => {
     assert.deepEqual(getTask(1, db), before);
   });
 
-  it("知らない項目だけの本文（{ foo: 1 }）も、200 で updatedAt は変わらない", () => {
+  it("知らない項目だけの本文（{ foo: 1 }）は 400 で、タスクも updatedAt も変わらない（#527）", () => {
     const db = openDb();
     const before = getTask(1, db)!;
     const res = patch(db, 1, { foo: 1 });
-    assert.equal(res.status, 200);
+    assert.equal(res.status, 400);
     assert.deepEqual(getTask(1, db), before);
   });
 

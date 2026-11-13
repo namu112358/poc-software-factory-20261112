@@ -4,6 +4,7 @@ import { getDb, transaction, type Db } from "./db/index.ts";
 import { clearFailures, getLockState, recordFailure } from "./login-throttle.ts";
 import { hashPassword, verifyPassword } from "./password.ts";
 import type { ValidationResult } from "./tasks.ts";
+import { unknownFieldErrors } from "./body-fields.ts";
 import type { User } from "./users.ts";
 
 export const SESSION_COOKIE = "poc_session";
@@ -300,13 +301,13 @@ export const MIN_PASSWORD_LENGTH = 8;
 
 export type PasswordChangeInput = { currentPassword: string; newPassword: string };
 
-/** パスワード変更の本文を検証する。文字数は見た目の文字（コードポイント）で数える。 */
+/** パスワード変更の本文を検証する。文字数は見た目の文字（コードポイント）で数える。`currentPassword`・`newPassword` のほかの項目があれば誤り（#527）。 */
 export function validatePasswordChangeInput(body: unknown): ValidationResult<PasswordChangeInput> {
   if (typeof body !== "object" || body === null || Array.isArray(body)) {
     return { ok: false, errors: ["リクエストの形式が正しくありません"] };
   }
   const { currentPassword, newPassword } = body as Record<string, unknown>;
-  const errors: string[] = [];
+  const errors: string[] = unknownFieldErrors(body as Record<string, unknown>, ["currentPassword", "newPassword"]);
   if (typeof currentPassword !== "string" || currentPassword === "") errors.push("今のパスワードを入力してください");
   if (typeof newPassword !== "string" || [...newPassword].length < MIN_PASSWORD_LENGTH) {
     errors.push(`新しいパスワードは ${MIN_PASSWORD_LENGTH} 文字以上で入力してください`);

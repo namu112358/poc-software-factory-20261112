@@ -2,6 +2,7 @@
 import { BULK_SELECT_MAX } from "./bulk-select.ts";
 import { isAssignableUser } from "./users.ts";
 import { SUSPENDED_ASSIGNEE_ERROR } from "./task-validation.ts";
+import { unknownFieldErrors } from "./body-fields.ts";
 import { getDb, transaction, type Db } from "./db/index.ts";
 import { COMPLETED_AT_SQL, getTask, isTaskStatus, nextUpdatedAt, type Task, type TaskStatus, type ValidationResult } from "./tasks.ts";
 
@@ -22,11 +23,11 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 /**
  * まとめて変える API の本文を検証する。`ids` は重複のない 1〜100 件の正の整数の配列。
  * `changes` は `status` と `assignee` のうち 1 つ以上だけを持つオブジェクト。担当者が存在するかは DB で確認する。
- * ログインを停止した利用者は担当者にできない（#522）。
+ * ログインを停止した利用者は担当者にできない（#522）。本文に `ids`・`changes` のほかの項目があれば誤り（#527）。
  */
 export function validateBulkUpdateInput(body: unknown, db: Db = getDb()): ValidationResult<BulkUpdateInput> {
   if (!isPlainObject(body)) return { ok: false, errors: ["リクエストの形式が正しくありません"] };
-  const errors: string[] = [];
+  const errors: string[] = unknownFieldErrors(body, ["ids", "changes"]);
 
   const ids = body.ids;
   if (ids === undefined) errors.push("ids を指定してください");
