@@ -17,8 +17,10 @@ function isRecursiveForceRm(head) {
   for (const m of head.matchAll(/(?:^|[\s;&|(])rm((?:\s+-{1,2}[a-zA-Z-]+)+)/g)) {
     const flags = m[1].trim().split(/\s+/);
     const short = flags.filter((f) => /^-[a-zA-Z]+$/.test(f)).join("");
-    const recursive = /[rR]/.test(short) || flags.includes("--recursive");
-    const force = /f/.test(short) || flags.includes("--force");
+    const long = flags.filter((f) => f.startsWith("--")).map((f) => f.split("=")[0]);
+    const abbrev = (full, min) => long.some((f) => f.length >= min && full.startsWith(f)); // rm は長い名前の省略（--rec・--forc）も受け付ける
+    const recursive = /[rR]/.test(short) || abbrev("--recursive", 3);
+    const force = /f/.test(short) || abbrev("--force", 3);
     if (recursive && force) return true;
   }
   return false;
@@ -41,8 +43,8 @@ export function check(command) {
   }
 
   // `bash -c '...'`・`sh -c "..."` の中身も、同じ決まりで見る（引用符を消す前に取り出す）
-  for (const m of (hasHeredoc ? firstLine : cmd).matchAll(/(?:^|[\s;&|(])(?:bash|sh|zsh)\s+(?:-[a-zA-Z]*\s+)*-[a-zA-Z]*c\s+(?:'([^']*)'|"((?:\\.|[^"\\])*)")/g)) {
-    const inner = check(m[1] ?? m[2] ?? "");
+  for (const m of (hasHeredoc ? firstLine : cmd).matchAll(/(?:^|[\s;&|(])(?:\S*\/)?(?:ba|da|k|z)?sh\s+(?:(?:-[a-zA-Z]+|--[\w-]+)\s+)*-[a-zA-Z]*c\s+(?:\$?'([^']*)'|"((?:\\.|[^"\\])*)"|(\S+))/g)) {
+    const inner = check(m[1] ?? m[2] ?? m[3] ?? "");
     if (inner.deny) return inner;
   }
 
@@ -54,7 +56,7 @@ export function check(command) {
   }
 
   // 手元の変更を捨てる形（`git checkout ... -- <パス>`・`git checkout .`・`git restore`・`git reset --hard`・`git clean -f`）。許可の `git checkout claude/*` に紛れないように
-  if (/(^|[\s;&|(])git\s+(checkout\s+(.*\s)?(--(\s|$)|\.(\s|$))|restore(\s|$)|reset\s+(.*\s)?--hard\b|clean\s+(.*\s)?(-[a-zA-Z]*f[a-zA-Z]*|--force)(\s|$))/.test(head)) {
+  if (/(^|[\s;&|(])git(\s+(-C\s+\S+|-c\s+\S+|--[\w-]+(=\S+)?|-[a-zA-Z]+))*\s+(checkout\s+(.*\s)?(--(\s|$)|\.(\s|$))|restore(\s|$)|reset\s+(.*\s)?--hard\b|clean\s+(.*\s)?(-[a-zA-Z]*f[a-zA-Z]*|--force)(\s|$))/.test(head)) {
     return { deny: true, reason: `手元の変更を捨てる形（\`git checkout -- <パス>\`・\`git checkout .\`・\`git restore\`・\`git reset --hard\`・\`git clean -f\`）は実行しません。捨ててよいか確かめてから、人に頼んでください。${HINT}` };
   }
 

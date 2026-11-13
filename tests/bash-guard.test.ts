@@ -37,6 +37,19 @@ describe("Bash のフック（承認の画面で止まりやすい形を断る�
     for (const c of ["git reset HEAD~1", "git clean -n", "git clean -nd"]) assert.equal(denied(c), false, c);
   });
 
+  it("git の全体のオプション（-C・-c）の後でも、手元の変更を捨てる形は断る", () => {
+    for (const c of ["git -C x reset --hard", "git -C /repo clean -f", "git -c core.x=1 checkout -- .", "git --no-pager -C x restore a.ts"]) assert.equal(denied(c), true, c);
+    for (const c of ["git -C x status", "git -C x reset HEAD~1"]) assert.equal(denied(c), false, c);
+  });
+
+  it("rm の長い名前の省略（--rec・--forc・--force=）も断る", () => {
+    for (const c of ["rm --rec --forc x", "rm --recursive -f x", "rm -R --for x"]) assert.equal(denied(c), true, c);
+  });
+
+  it("シェルのパス・長いオプション・$'...' の -c も中身を見る", () => {
+    for (const c of ['/bin/bash -c "cd x && git status"', 'bash --norc -c "cd x && git log"', "bash -c $'cd x && git status'", "dash -c 'rm -rf x'"]) assert.equal(denied(c), true, c);
+  });
+
   it("bash -c・sh -c の中身も同じ決まりで見る", () => {
     for (const c of ['bash -c "cd x && git status"', "sh -c 'git add . ; git commit -m x'", 'bash -lc "cd x && git log"', "bash -c 'rm -rf x'"]) assert.equal(denied(c), true, c);
     for (const c of ['bash -c "npm test"', "sh -c 'git status'"]) assert.equal(denied(c), false, c);
