@@ -10,6 +10,9 @@
 //   node scripts/factory/claim.ts gate --role implement|review|fix --number <N>   実装・レビュー・修正が起動してよいか（decision と、役が行う ops）
 //   node scripts/factory/claim.ts ci-wait --pr <N> [--minutes 15] [--role implement|fix]   PR の CI（app-check）が終わるまで待つ（result のとおりに動く。1 回に 16 分ほどかかるのでバックグラウンドで実行する）
 //   node scripts/factory/claim.ts budget                                直近 60 分に status:in-progress を付けた回数と、あと何回付けてよいか
+//   node scripts/factory/claim.ts wait <秒>                              指定の秒数（1〜600）だけ待つ（GitHub は読まない。単独の sleep は Claude Code に断られるため）
+//   node scripts/factory/claim.ts session-id                            このセッションの ID（session_...）と URL（コメントの最後の行・コミットの Claude-Session: に書く）
+//   node scripts/factory/claim.ts rest-get /repos/<repo>/<パス>          このリポジトリの REST を GET で読む（一覧は全ページ。gh api・curl は許可に当たらないため）
 // Node 22.18 以上（型を外して .ts をそのまま動かす）。クラウドのプロキシを通すため、NODE_USE_ENV_PROXY=1 で自分を起動し直す。
 import { spawnSync } from "node:child_process";
 import {
@@ -52,6 +55,9 @@ import {
   type Comment,
   type IssueInfo,
   type PrInfo,
+  sessionIdFromUrl,
+  parseWaitSeconds,
+  parseRestPath,
 } from "./claim-core.ts";
 
 const REPO = process.env.FACTORY_REPO ?? "namu112358/poc-software-factory-20261112";
@@ -200,8 +206,7 @@ function arg(name: string): string | undefined {
 }
 
 function mySession(): string | null {
-  const m = /cse_([A-Za-z0-9]+)/.exec(process.env.CLAUDE_CODE_REMOTE_SDK_URL ?? "");
-  return m ? `session_${m[1]}` : null;
+  return sessionIdFromUrl(process.env.CLAUDE_CODE_REMOTE_SDK_URL);
 }
 
 const git = (...a: string[]) => spawnSync("git", a, { encoding: "utf-8" });
@@ -521,8 +526,27 @@ async function main(): Promise<unknown> {
       const comments = raw.map((c) => ({ issue: Number(c.issue_url.split("/").pop()), body: c.body ?? "", createdAt: c.created_at }));
       return { since, mySession: mySession(), handled: handledByOthers({ comments, since, mySession: mySession() }) };
     }
+    case "wait": {
+      const seconds = parseWaitSeconds(num);
+      await sleep(seconds * 1000);
+      return { waited: seconds };
+    }
+    case "rest-get": {
+      const path = parseRestPath(num, REPO);
+      const sep = path.includes("?") ? "&" : "?";
+      const first = await get<unknown>(`${path}${sep}per_page=100`);
+      // 一覧（配列）なら、続きのページも読む（10 ページまで）
+      if (first.status === 404) return { path, status: 404, data: null };
+      if (Array.isArray(first.data)) return { path, status: first.status, data: await getAll<unknown>(path) };
+      return { path, status: first.status, data: first.data };
+    }
+    case "session-id": {
+      const id = mySession();
+      if (!id) throw new Error("環境変数 CLAUDE_CODE_REMOTE_SDK_URL が無いか、cse_ を含まない。セッションの ID は手で書かず、取れなかったことをコメントに書く");
+      return { sessionId: id, url: `https://claude.ai/code/${id}` };
+    }
     default:
-      throw new Error("pick / precheck / relabel / stalled / gate / ci-wait / handled / budget / merge-check / review-status のどれかを指定する");
+      throw new Error("pick / precheck / relabel / stalled / gate / ci-wait / handled / budget / merge-check / review-status / wait / session-id / rest-get のどれかを指定する");
   }
 }
 

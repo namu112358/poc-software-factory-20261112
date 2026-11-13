@@ -12,7 +12,7 @@ PR が draft に戻されたときに起動します。直前のレビューの�
 2. PR の head のブランチを取り出し、`main` を取り込む。衝突があれば、両方の変更の意図が残るように解消する。
 3. 最新の `verdict=changes` のレビューの「必須」の指摘を 1 つずつ直す。指摘が誤っていると判断したものは直さず、理由を書く。「任意」は、変更が小さく受入条件に関わるものだけ直す。
 4. 指摘が受入条件の解釈の違いで、Issue だけでは決められないときは、Issue に `status:blocked-question` を付けて、決めてほしいことをコメントし、終える（PR は draft のまま）。
-5. `npm run typecheck`・`npm test`・`npm run build` を通して push する（`design-system/` を変えた PR は、`design-system/` でも `npm run typecheck`・`npm run lint`・`npm test`・`npm run build`）。CI は `node scripts/factory/claim.ts ci-wait --pr <PR> --role fix` をバックグラウンドで実行して待ち、`failure` なら直す（同じ失敗は 3 回まで。超えたら `status:needs-human`）。ほかの `result` は実装の手順書の「4.」の 2 と同じ。
+5. `npm run typecheck`・`npm test`・`npm run build` を通して push する（`design-system/` を変えた PR は、`npm --prefix design-system run typecheck`・`npm --prefix design-system run lint`・`npm --prefix design-system test`・`npm --prefix design-system run build` も）。CI は `node scripts/factory/claim.ts ci-wait --pr <PR> --role fix` をバックグラウンドで実行して待ち、`failure` なら直す（同じ失敗は 3 回まで。超えたら `status:needs-human`）。ほかの `result` は実装の手順書の「4.」の 2 と同じ。
 
 ## 3. 終える
 
