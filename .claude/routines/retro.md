@@ -21,7 +21,7 @@
 
 マージされずに閉じた PR のうち、閉じたときのコメントに、止まりではなく意図して閉じた理由（比べるための試行・重複・方針の変更など）が書かれているものは、止まりに数えない。
 
-時刻は次の道具で取る（GitHub MCP の `issue_read` では、ラベルが付いた時刻が取れない）。
+時刻は次の道具で取る（GitHub MCP の `issue_read` では、ラベルが付いた時刻が取れない）。REST は `node scripts/factory/claim.ts rest-get /repos/namu112358/poc-software-factory-20261112/<パス>` で読む（一覧は全ページを読む。`gh api`・`curl` は許可に当たらず承認の画面に回る）。
 
 - ラベルが付いた・外れた時刻: REST の `GET /repos/{owner}/{repo}/issues/{number}/events`（`labeled`・`unlabeled`）
 - PR が Ready になった・draft に戻った時刻: REST の `GET /repos/{owner}/{repo}/issues/{number}/timeline`（`ready_for_review`・`convert_to_draft`）

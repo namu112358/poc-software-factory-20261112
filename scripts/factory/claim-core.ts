@@ -1113,3 +1113,40 @@ export function isOwnClaudePr(p: { head: HeadRef }, repo: string): boolean {
 export function isOwnHead(headRepo: string | null, repo: string): boolean {
   return headRepo !== null && headRepo === repo;
 }
+
+/**
+ * クラウドのセッションの URL（環境変数 CLAUDE_CODE_REMOTE_SDK_URL）から、コメントに書くセッションの ID（session_...）を取り出す。
+ * URL の `cse_<ID>` を `session_<ID>` に読み替える。無い・形が違うときは null（ID を手で書かせないため。#156）。
+ */
+export function sessionIdFromUrl(url: string | undefined): string | null {
+  const m = /cse_([A-Za-z0-9]+)/.exec(url ?? "");
+  return m ? `session_${m[1]}` : null;
+}
+
+/**
+ * `claim.ts rest-get <パス>` のパスを確かめる。このリポジトリの REST（`/repos/<repo>/...`）だけを読ませる。
+ * `..`・空白・`per_page`・`page` を含むもの、`?` より前に `%`・`\`・`#` を含むものは断る（ページは claim.ts が読む。`&` はフックに断られるため）。
+ */
+export function parseRestPath(value: string | undefined, repo: string): string {
+  const p = value ?? "";
+  // `?` より前に `%`（%2e%2e など符号化した `..`）・`\`・`#` があれば、許可したパスの外に出られるので断る
+  const pathPart = p.split("?")[0];
+  const ok = p.startsWith(`/repos/${repo}/`) && !p.includes("..") && !/[%\\#]/.test(pathPart) && !/\s/.test(p) && !/[?&](per_page|page)=/.test(p);
+  if (!ok) throw new Error(`/repos/${repo}/ で始まるパスを、per_page・page を付けずに指定する（例: node scripts/factory/claim.ts rest-get /repos/${repo}/issues/123/events）`);
+  return p;
+}
+
+/** 待つ秒数の上限。割り当ての間隔（30 秒）・unknown の読み直し（60 秒）に足りる長さにとどめる */
+export const WAIT_MAX_SECONDS = 600;
+
+/**
+ * `claim.ts wait <秒>` の秒数を読む。1〜WAIT_MAX_SECONDS の整数だけを受け付け、それ以外は例外。
+ * 単独の `sleep` は Claude Code に断られ、`node -e "setTimeout(...)"` はフックに断られるため、待つのはこのサブコマンドで行う。
+ */
+export function parseWaitSeconds(value: string | undefined): number {
+  const s = Number(value);
+  if (value === undefined || !/^\d+$/.test(value) || !Number.isInteger(s) || s < 1 || s > WAIT_MAX_SECONDS) {
+    throw new Error(`待つ秒数を 1〜${WAIT_MAX_SECONDS} の整数で指定する（例: node scripts/factory/claim.ts wait 30）`);
+  }
+  return s;
+}

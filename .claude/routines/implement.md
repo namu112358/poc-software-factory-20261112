@@ -28,7 +28,7 @@ Issue に `<!-- factory:implement action=start -->` で始まるコメントを�
   - 元に戻しにくい・外部の利用者がいる・テストの無い理由不明の分岐がある・まとめて処理する／同時に更新される・認証／権限／お金が絡む
 - 計画にない DB のスキーマの変更、外部の利用者に影響する変更、`AGENTS.md` の「罠」に当たる変更が要るなら、`status:in-progress` を外して `status:blocked-question` を付け、決めてほしいことを選択肢つきでコメントして終える。
 - `npm run typecheck`・`npm test`・`npm run build` がすべて通るまで直す。
-- `design-system/` を変える Issue は、`AGENTS.md` の「design-system/」の節の規約に従う（上の `tests/` への単体テストの代わりに、受入条件ごとに Story の play で確かめる。axe は全 Story に自動でかかる）。`design-system/` で `npm ci` の後、`npx playwright install chromium`（入っていなければ）、`npm run typecheck`・`npm run lint`・`npm test`・`npm run build` がすべて通るまで直す。リポジトリの直下のコマンドも、上のとおり通す。
+- `design-system/` を変える Issue は、`AGENTS.md` の「design-system/」の節の規約に従う（上の `tests/` への単体テストの代わりに、受入条件ごとに Story の play で確かめる。axe は全 Story に自動でかかる）。リポジトリの直下から `npm --prefix design-system ci` の後、`npm --prefix design-system exec playwright install chromium`（入っていなければ）、`npm --prefix design-system run typecheck`・`npm --prefix design-system run lint`・`npm --prefix design-system test`・`npm --prefix design-system run build` がすべて通るまで直す（cd しない）。リポジトリの直下のコマンドも、上のとおり通す。
 
 ## 4. PR を出す
 

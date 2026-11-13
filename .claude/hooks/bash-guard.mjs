@@ -1,18 +1,48 @@
 #!/usr/bin/env node
-// PreToolUse（Bash）のフック: 承認の画面で止まりやすい形のコマンドを、実行させずに断り、分け方を返す。
-// - git をほかのコマンドと `&&`・`;`・`||` でつなぐ（`cd ... && git ...` を含む）
-// - `rm -rf`（`rm -fr`・`rm -r -f` も）
-// - ヒアドキュメントで python・node にスクリプトを流す
-// 読むだけのパイプ（`| head`・`| grep` など）は止めない。
+// PreToolUse（Bash）のフック。
+// 役目: Routine が承認の画面で止まらないように、止まりやすい形を実行前に断り、分け方を返すこと。
+// 守りの境界ではない。何を実行してよいかの境界は `.claude/settings.json` の許可（`permissions.allow`）で決める。
+// 作り方: コマンドは解析しない。次の 2 つだけを見る。
+//   1. 文字の許可リスト: `;` `&` `<` `>` `$` バッククォート `\` `(` `)` `{` `}` 改行 が 1 つでもあれば断る（引用符の中かどうかは区別しない。区別すると解析のずれが生まれるため）。
+//   2. `|` は、`head`・`tail`・`grep`・`wc`・`sort` に渡す形だけ通す。
+//   文字では捕まらないものだけは単語で見る: `rm` の再帰（`-r`・`-R`・`--recursive`。settings.json の `ask` で止まるため）、先頭の `NAME=value` の前置き、git の `-c`・`--config-env`・`--exec-path`・`--git-dir`・`--work-tree`、手元の変更を捨てる git（`checkout ... --`・`checkout .`・`restore`・`reset --hard`・`clean -f`・`checkout claude/<ブランチ>` に続く引数）。
+//   `--output`・npm の設定の引数などは見ない。settings.json の許可を正確な形にして守る。
 // 断った理由は permissionDecisionReason でエージェントに返る（Claude Code のフックの仕様: 終了コード 0 と JSON の出力）。
 // 判定は check() に置き、tests/bash-guard.test.ts で確かめる。
 
-/** 引用符の中を消す（`git commit -m "a; b"` の `;` で断らないため） */
-function stripQuotes(s) {
-  return s.replace(/'[^']*'/g, "''").replace(/"(?:\\.|[^"\\])*"/g, '""');
+const BANNED = /[;&<>$`\\(){}\n\r]/;
+const PIPE_SINKS = new Set(["head", "tail", "grep", "wc", "sort"]);
+const GIT_BANNED_OPTS = ["--config-env", "--exec-path", "--git-dir", "--work-tree"];
+
+const SPLIT =
+  "1 回に 1 コマンドにしてください。複数の手順の確かめは、Write でスクラッチパッドにスクリプト（.mjs など）を書き、`node <ファイル>` で 1 コマンドで実行します。サーバーは Bash の run_in_background で 1 コマンドで起動します。`git commit -m` で書けない本文は、Write でファイルに書いて `git commit -F <ファイル>` で渡します。一時のフォルダーは消さずに新しい名前で作ります。cd せず、リポジトリの直下で `git <サブコマンド>` をそのまま実行します。`git -C` は使いません（許可に当たらず承認の画面に回るため）。";
+
+const deny = (what) => ({ deny: true, reason: `${what}は、承認の画面で止まりやすいので実行しません。${SPLIT}` });
+
+/** git の全体のオプション（サブコマンドの前）に、設定やパスを差し替えるものがあるか */
+function hasBannedGitOption(words) {
+  if (words[0]?.split("/").pop() !== "git") return false;
+  for (let i = 1; i < words.length && words[i].startsWith("-"); i++) {
+    const w = words[i];
+    if (w === "-c" || GIT_BANNED_OPTS.some((o) => w === o || w.startsWith(`${o}=`))) return true;
+    if (w === "-C") i++; // -C の値は読み飛ばす
+  }
+  return false;
 }
 
-const HINT = "1 コマンドずつに分けて実行してください。git は `git -C <ディレクトリ>` かフルパスで実行し、`cd` とつながないでください。";
+/** 手元の変更を捨てる git か（`checkout ... --`・`checkout .`・`restore`・`reset --hard`・`clean -f`・`checkout claude/<ブランチ>` に続く引数） */
+function isGitDiscard(words) {
+  if (words[0]?.split("/").pop() !== "git") return false;
+  let i = 1;
+  while (i < words.length && words[i].startsWith("-")) i += words[i] === "-C" ? 2 : 1;
+  const sub = words[i];
+  const args = words.slice(i + 1);
+  if (sub === "restore") return true;
+  if (sub === "checkout") return args.includes("--") || args.includes(".") || (args[0]?.startsWith("claude/") && args.length > 1);
+  if (sub === "reset") return args.some((a) => a.startsWith("--ha"));
+  if (sub === "clean") return args.some((a) => /^-[a-zA-Z]*f/.test(a) || a.startsWith("--f"));
+  return false;
+}
 
 /**
  * @param {string} command
@@ -20,31 +50,19 @@ const HINT = "1 コマンドずつに分けて実行してください。git は
  */
 export function check(command) {
   const cmd = String(command ?? "");
-  const firstLine = cmd.split("\n")[0];
-  const hasHeredoc = /<<-?\s*['"]?\w+['"]?/.test(firstLine);
 
-  // ヒアドキュメントで python・node に流す（`python3 - <<'EOF'`・`node <<EOF`・`cat <<EOF | python3`）
-  if (hasHeredoc && /(^|[\s|;&(])(python3?|node)(\s|$)/.test(stripQuotes(firstLine))) {
-    return { deny: true, reason: `ヒアドキュメントで python・node にスクリプトを流す形は、承認の画面で止まりやすいので実行しません。スクリプトをファイルに書いてから \`python3 <ファイル>\` で実行してください。${HINT}` };
+  if (BANNED.test(cmd)) {
+    return deny("`;` `&` `<` `>` `$` バッククォート `\\` `(` `)` `{` `}` 改行のどれかを含む形（つなぎ・裏での実行・リダイレクト・変数の展開・ヒアドキュメントなど）");
   }
 
-  // ヒアドキュメントの本文は判定しない（本文の ; などで断らない）。それ以外は全体を見る
-  const head = stripQuotes(hasHeredoc ? firstLine : cmd);
-
-  if (/(^|[\s;&|(])rm\s+(-[a-zA-Z]*r[a-zA-Z]*f|-[a-zA-Z]*f[a-zA-Z]*r|-r\s+-f|-f\s+-r)\b/.test(head)) {
-    return { deny: true, reason: `\`rm -rf\` は実行しません。消すファイルを 1 つずつ確かめてから \`rm <ファイル>\` で消すか、人に頼んでください。${HINT}` };
-  }
-
-  // 手元の変更を捨てる形（`git checkout ... -- <パス>`・`git checkout .`・`git restore`）。許可の `git checkout claude/*` に紛れないように
-  if (/(^|[\s;&|(])git\s+(checkout\s+(.*\s)?(--(\s|$)|\.(\s|$))|restore(\s|$))/.test(head)) {
-    return { deny: true, reason: `手元の変更を捨てる形（\`git checkout -- <パス>\`・\`git checkout .\`・\`git restore\`）は実行しません。捨ててよいか確かめてから、人に頼んでください。${HINT}` };
-  }
-
-  // git を含み、`&&`・`||`・`;`・改行でほかのコマンドとつないでいる
-  const usesGit = /(^|[\s;&|(])git(\s|$)/.test(head);
-  const chained = /&&|\|\||;|\n/.test(head);
-  if (usesGit && chained) {
-    return { deny: true, reason: `git をほかのコマンドとつないだ形（\`&&\`・\`;\`・\`||\`、\`cd ... && git ...\`）は、承認の画面で止まりやすいので実行しません。${HINT}` };
+  const segments = cmd.split("|").map((s) => s.trim().split(/\s+/).filter(Boolean));
+  for (const [i, words] of segments.entries()) {
+    if (words.length === 0) return deny("空のコマンドをつなぐ `|`（`||` を含む）");
+    if (i > 0 && !PIPE_SINKS.has(words[0])) return deny("`head`・`tail`・`grep`・`wc`・`sort` 以外へのパイプ");
+    if (/^[A-Za-z_]\w*=/.test(words[0])) return deny("コマンドの前の `NAME=value` の前置き");
+    if (words[0].split("/").pop() === "rm" && words.slice(1).some((a) => /^-[a-zA-Z]*[rR]/.test(a) || a.startsWith("--rec"))) return deny("`rm` の再帰（`-r`・`-R`・`--recursive`。`rm -rf` を含む）");
+    if (isGitDiscard(words)) return deny("手元の変更を捨てる git（`checkout ... --`・`checkout .`・`restore`・`reset --hard`・`clean -f`、`checkout claude/<ブランチ>` に続く引数）");
+    if (hasBannedGitOption(words)) return deny("git の `-c`・`--config-env`・`--exec-path`・`--git-dir`・`--work-tree`");
   }
   return { deny: false, reason: "" };
 }

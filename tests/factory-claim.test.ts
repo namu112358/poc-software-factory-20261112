@@ -34,7 +34,64 @@ import {
   START_LABELS,
   isOwnClaudePr,
   stalledLoadPlan,
+  sessionIdFromUrl,
+  parseWaitSeconds,
+  WAIT_MAX_SECONDS,
+  parseRestPath,
 } from "../scripts/factory/claim-core.ts";
+import { spawnSync } from "node:child_process";
+
+const CLAIM = new URL("../scripts/factory/claim.ts", import.meta.url).pathname;
+const runClaim = (args: string[], env: Record<string, string | undefined> = {}) =>
+  spawnSync(process.execPath, [CLAIM, ...args], { encoding: "utf-8", env: { ...process.env, ...env } });
+
+describe("待つ（wait）とセッションの ID（session-id）", () => {
+  it("待つ秒数は 1〜600 の整数だけを受け付ける", () => {
+    assert.equal(parseWaitSeconds("30"), 30);
+    assert.equal(parseWaitSeconds("1"), 1);
+    assert.equal(parseWaitSeconds(String(WAIT_MAX_SECONDS)), WAIT_MAX_SECONDS);
+    for (const bad of [undefined, "", "0", "-5", "1.5", "30s", "abc", "601"]) {
+      assert.throws(() => parseWaitSeconds(bad), /1〜600 の整数/, String(bad));
+    }
+  });
+  it("wait は指定の秒数だけ待って、待った秒数を JSON で出す", () => {
+    const start = Date.now();
+    const r = runClaim(["wait", "1"]);
+    assert.equal(r.status, 0, r.stdout + r.stderr);
+    assert.ok(Date.now() - start >= 1000);
+    assert.deepEqual(JSON.parse(r.stdout), { waited: 1 });
+  });
+  it("wait の秒数が不正なら、待たずに終了コード 2 と理由を出す", () => {
+    const r = runClaim(["wait", "30s"]);
+    assert.equal(r.status, 2);
+    assert.equal(JSON.parse(r.stdout).decision, "error");
+  });
+  it("rest-get は、このリポジトリの REST のパスだけを受け付ける", () => {
+    const repo = "o/r";
+    assert.equal(parseRestPath("/repos/o/r/issues/1/events", repo), "/repos/o/r/issues/1/events");
+    assert.equal(parseRestPath("/repos/o/r/issues/1/comments?since=2026-11-13T00:00:00Z", repo), "/repos/o/r/issues/1/comments?since=2026-11-13T00:00:00Z");
+    // `?` より後の符号化（ラベル名の `:` など）は受け付ける
+    assert.equal(parseRestPath("/repos/o/r/issues?labels=status%3Aready", repo), "/repos/o/r/issues?labels=status%3Aready");
+    for (const bad of [undefined, "", "/repos/o/other/issues", "/repos/o/r2/issues", "/user", "/repos/o/r/../x/issues", "/repos/o/r/issues?per_page=5", "/repos/o/r/issues?state=all&page=2", "/repos/o/r/issues x",
+      // 符号化した `..`・バックスラッシュ・`#` で、許可したパスの外に出る形
+      "/repos/o/r/%2e%2e/%2e%2e/user", "/repos/o/r/%2E%2E/other/issues", "/repos/o/r/%2fx", "/repos/o/r/\\..\\x", "/repos/o/r/\\x", "/repos/o/r/#/../../user", "/repos/o/r/issues#x"]) {
+      assert.throws(() => parseRestPath(bad, repo), /\/repos\/o\/r\//, String(bad));
+    }
+  });
+  it("URL の cse_ を session_ に読み替える。無い・形が違えば null", () => {
+    assert.equal(sessionIdFromUrl("https://api.example/v1/sessions/cse_01AbC/sdk"), "session_01AbC");
+    assert.equal(sessionIdFromUrl(undefined), null);
+    assert.equal(sessionIdFromUrl("https://api.example/v1/sessions/x"), null);
+  });
+  it("session-id は環境変数から ID と URL を出し、無ければ分かるエラーにする", () => {
+    const ok = runClaim(["session-id"], { CLAUDE_CODE_REMOTE_SDK_URL: "https://api.example/v1/sessions/cse_01AbC" });
+    assert.equal(ok.status, 0, ok.stdout + ok.stderr);
+    assert.deepEqual(JSON.parse(ok.stdout), { sessionId: "session_01AbC", url: "https://claude.ai/code/session_01AbC" });
+    const ng = runClaim(["session-id"], { CLAUDE_CODE_REMOTE_SDK_URL: undefined });
+    assert.equal(ng.status, 2);
+    assert.match(JSON.parse(ng.stdout).reason, /CLAUDE_CODE_REMOTE_SDK_URL/);
+  });
+});
 
 const touch = (files: string, at: string) => ({ body: `<!-- factory:touch files=${files} -->\n着手します。`, createdAt: at });
 const queued = (attrs: string, at: string) => ({ body: `<!-- factory:queued ${attrs} -->\n待ちます。`, createdAt: at });
