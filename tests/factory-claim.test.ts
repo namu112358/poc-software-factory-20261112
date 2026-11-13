@@ -17,6 +17,9 @@ import {
   waitsOn,
   blockingDeps,
   makeIsStalled,
+  stalledActions,
+  type StalledPr,
+  type StalledIssue,
   type IssueInfo,
   normalizeLabel,
   START_LABELS,
@@ -526,5 +529,180 @@ describe("main の CI を壊している不具合の直しを先に着手させ�
 
   it("pick: main の CI が壊れていなければ、ふだんどおり（同じファイルの PR を待つ）", () => {
     assert.deepEqual(pick({ queued: [feat, fix], inProgressCount: 3, isOpen: () => false, openPrs: [pr355], mainBroken: false }).pick, []);
+  });
+});
+
+describe("stalled: 止まった実装・PR の片付け", () => {
+  const NOW = "2026-11-13T12:00:00.000Z";
+  const ago = (min: number) => new Date(new Date(NOW).getTime() - min * 60000).toISOString();
+  const HEAD = "aaaaaaa1111111";
+  const pr = (o: Partial<StalledPr> = {}): StalledPr => ({
+    number: 10, headRef: "claude/issue-5", headSha: HEAD, draft: true, mergeable: true, labels: [], updatedAt: ago(0), readyAt: null,
+    appCheck: "none", reviews: [], after: {}, rereviewCommits: [], mergifyTimeout: null, ...o,
+  });
+  const iss = (o: Partial<StalledIssue> = {}): StalledIssue => ({ number: 5, labels: ["status:in-progress"], updatedAt: ago(0), ...o });
+  const run = (prs: StalledPr[], issues: StalledIssue[] = [iss()], closedStarted: { number: number; labels: string[] }[] = [], sessionUrl: string | null = "https://claude.ai/code/session_X") =>
+    stalledActions({ role: "dispatch", now: NOW, sessionUrl, prs, issues, closedStarted });
+  const only = (r: ReturnType<typeof run>) => {
+    assert.equal(r.actions.length, 1, JSON.stringify(r.actions));
+    return r.actions[0];
+  };
+
+  it("1: Ready で衝突している PR は draft に戻す（claude/issue- 以外でも）", () => {
+    const a = only(run([pr({ draft: false, mergeable: false, readyAt: ago(1) })]));
+    assert.equal(a.action, "conflict");
+    assert.equal(a.target, "pr");
+    assert.equal(a.draft, "to-draft");
+    assert.match(a.comment!, /^<!-- factory:dispatch action=conflict -->\n.*\nセッション: https:\/\/claude\.ai\/code\/session_X$/s);
+    assert.equal(only(run([pr({ number: 11, headRef: "claude/other", draft: false, mergeable: false })], [])).action, "conflict");
+  });
+
+  it("2: 衝突した draft は 30 分たつまで待ち、たったら修正の役を起こし直す", () => {
+    assert.equal(run([pr({ mergeable: false, updatedAt: ago(29) })], [iss({ updatedAt: ago(29) })]).actions.length, 0);
+    assert.equal(only(run([pr({ mergeable: false, updatedAt: ago(31) })], [iss({ updatedAt: ago(31) })])).draft, "ready-then-draft");
+    // 最後の動きは、PR と Issue の新しいほう
+    assert.equal(run([pr({ mergeable: false, updatedAt: ago(31) })], [iss({ updatedAt: ago(5) })]).actions.length, 0);
+    // claude/issue- 以外の draft は触らない
+    assert.equal(run([pr({ headRef: "claude/other", mergeable: false, updatedAt: ago(99) })], []).actions.length, 0);
+  });
+
+  it("mergeable が null の PR は unknown に入れ、ほかの行は判定しない", () => {
+    const r = run([pr({ mergeable: null, appCheck: "success", updatedAt: ago(99) })]);
+    assert.deepEqual(r.actions, []);
+    assert.deepEqual(r.unknown, [{ pr: 10, reason: "mergeable が null" }]);
+  });
+
+  it("3: Ready でレビューが無いまま 10 分たったら起こし直す（commit 付き）。9 分なら待つ", () => {
+    const base = { draft: false, readyAt: ago(11) };
+    const a = only(run([pr(base)], []));
+    assert.equal(a.action, "rereview");
+    assert.equal(a.draft, "draft-then-ready");
+    assert.match(a.comment!, /^<!-- factory:dispatch action=rereview commit=aaaaaaa -->/);
+    assert.equal(run([pr({ ...base, readyAt: ago(9) })], []).actions.length, 0);
+    // 最新のコミットにレビューがあれば対象外
+    assert.equal(run([pr({ ...base, reviews: [{ verdict: "ok", commit: "aaaaaaa" }] })], []).actions.length, 0);
+    // 古い ok の後が取り込みだけなら対象外。中身の変わるコミットがあれば対象
+    const old = { reviews: [{ verdict: "ok", commit: "bbbbbbb" }] };
+    assert.equal(run([pr({ ...base, ...old, after: { bbbbbbb: [{ sha: "c1", mergeOnly: true }] } })], []).actions.length, 0);
+    assert.equal(only(run([pr({ ...base, ...old, after: { bbbbbbb: [{ sha: "c1", mergeOnly: false }] } })], [])).action, "rereview");
+  });
+
+  it("3: 同じコミットへの 2 回目は、人に回す", () => {
+    const a = only(run([pr({ draft: false, readyAt: ago(30), rereviewCommits: ["aaaaaaa"] })], []));
+    assert.equal(a.action, "rereview");
+    assert.equal(a.draft, null);
+    assert.deepEqual(a.addLabels, ["status:needs-human"]);
+    // 別のコミットへの起こし直しは数えない
+    assert.equal(only(run([pr({ draft: false, readyAt: ago(30), rereviewCommits: ["ccccccc"] })], [])).draft, "draft-then-ready");
+  });
+
+  it("4: 最新のレビューが changes で、そのコミットが最新のまま 30 分動かなければ人に回す", () => {
+    const rv = { reviews: [{ verdict: "changes", commit: "aaaaaaa" }] };
+    const a = only(run([pr({ ...rv, updatedAt: ago(31) })], [iss({ updatedAt: ago(31), labels: [] })]));
+    assert.equal(a.action, "changes-stuck");
+    assert.deepEqual(a.addLabels, ["status:needs-human"]);
+    assert.equal(run([pr({ ...rv, updatedAt: ago(20) })], [iss({ updatedAt: ago(20), labels: [] })]).actions.length, 0);
+    // 直したコミットが増えていれば対象外
+    assert.equal(run([pr({ reviews: [{ verdict: "changes", commit: "ddddddd" }], updatedAt: ago(31) })], [iss({ updatedAt: ago(31), labels: [] })]).actions.length, 0);
+  });
+
+  it("5: CI が通った draft が 15 分動かなければ Ready にし、Issue の起動のラベルを外す", () => {
+    const p = pr({ appCheck: "success", updatedAt: ago(16) });
+    const a = only(run([p], [iss({ updatedAt: ago(16), labels: ["status:in-progress-hard"] })]));
+    assert.equal(a.action, "ready-stalled");
+    assert.equal(a.draft, "to-ready");
+    assert.deepEqual(a.issue, { number: 5, removeLabels: ["status:in-progress-hard"], addLabels: [] });
+    assert.equal(run([pr({ appCheck: "success", updatedAt: ago(14) })], [iss({ updatedAt: ago(14) })]).actions.length, 0);
+    // 最新のレビューの後が取り込みだけなら Ready にしない。中身の変わるコミットがあれば Ready にする
+    const rv = { reviews: [{ verdict: "changes", commit: "bbbbbbb" }], updatedAt: ago(16) };
+    assert.equal(run([pr({ appCheck: "success", ...rv, after: { bbbbbbb: [{ sha: "c", mergeOnly: true }] } })], [iss({ updatedAt: ago(16), labels: [] })]).actions.length, 0);
+    assert.equal(only(run([pr({ appCheck: "success", ...rv, after: { bbbbbbb: [{ sha: "c", mergeOnly: false }] } })], [iss({ updatedAt: ago(16), labels: [] })])).action, "ready-stalled");
+  });
+
+  it("6: 作業中で CI が落ちた draft が 30 分動かなければ、Issue を人に回す", () => {
+    const a = only(run([pr({ appCheck: "failure", updatedAt: ago(31) })], [iss({ updatedAt: ago(31) })]));
+    assert.equal(a.target, "issue");
+    assert.equal(a.number, 5);
+    assert.equal(a.action, "stalled");
+    assert.deepEqual(a.removeLabels, ["status:in-progress"]);
+    assert.deepEqual(a.addLabels, ["status:needs-human"]);
+    assert.match(a.comment!, /CI が落ちたまま 30 分/);
+    assert.equal(run([pr({ appCheck: "failure", updatedAt: ago(29) })], [iss({ updatedAt: ago(29) })]).actions.length, 0);
+  });
+
+  it("7: 作業中で PR が無い・draft のまま 60 分動かなければ、Issue を人に回す", () => {
+    const a = only(run([], [iss({ updatedAt: ago(61), labels: ["status:in-progress-hard"] })]));
+    assert.equal(a.action, "stalled");
+    assert.deepEqual(a.removeLabels, ["status:in-progress-hard"]);
+    assert.match(a.comment!, /60 分動きが無い/);
+    assert.equal(run([], [iss({ updatedAt: ago(59) })]).actions.length, 0);
+    assert.equal(only(run([pr({ appCheck: "pending", updatedAt: ago(61) })], [iss({ updatedAt: ago(61) })])).comment!.includes("60 分"), true);
+    // Ready の PR がある Issue は、ここでは扱わない
+    assert.equal(run([pr({ draft: false, readyAt: ago(1), updatedAt: ago(99) })], [iss({ updatedAt: ago(99) })]).actions.length, 0);
+  });
+
+  it("8: 起動のラベルが無く、CI が通らない draft が 60 分動かなければ PR を人に回す", () => {
+    for (const appCheck of ["failure", "pending", "none"] as const) {
+      const a = only(run([pr({ appCheck, updatedAt: ago(61) })], [iss({ updatedAt: ago(61), labels: [] })]));
+      assert.equal(a.action, "stalled-ci");
+      assert.equal(a.target, "pr");
+      assert.deepEqual(a.addLabels, ["status:needs-human"]);
+    }
+    assert.equal(run([pr({ appCheck: "failure", updatedAt: ago(59) })], [iss({ updatedAt: ago(59), labels: [] })]).actions.length, 0);
+  });
+
+  describe("9: Mergify の時間切れ", () => {
+    const base = (o: Partial<StalledPr> = {}) =>
+      pr({ draft: false, readyAt: ago(60), labels: ["merge:requested", "merge:dequeued"], appCheck: "success", reviews: [{ verdict: "ok", commit: "aaaaaaa" }], mergifyTimeout: { at: ago(6) }, ...o });
+    it("条件がそろえば人に回す。旧名 dequeued も同じ", () => {
+      const a = only(run([base()], []));
+      assert.equal(a.action, "checks-timeout");
+      assert.deepEqual(a.addLabels, ["status:needs-human"]);
+      assert.equal(only(run([base({ labels: ["merge:requested", "dequeued"] })], [])).action, "checks-timeout");
+    });
+    it("5 分たたない・CI が成功でない・ok が最新でない・ラベルが足りないときは何もしない", () => {
+      assert.equal(run([base({ mergifyTimeout: { at: ago(4) } })], []).actions.length, 0);
+      assert.equal(run([base({ appCheck: "failure" })], []).actions.length, 0);
+      assert.equal(run([base({ mergifyTimeout: null })], []).actions.length, 0);
+      assert.equal(run([base({ labels: ["merge:requested"] })], []).actions.length, 0);
+      assert.equal(run([base({ labels: ["merge:dequeued"] })], []).actions.length, 0);
+      const stale = { reviews: [{ verdict: "ok", commit: "bbbbbbb" }], after: { bbbbbbb: [{ sha: "c", mergeOnly: false }] } };
+      assert.equal(run([base({ ...stale, readyAt: ago(5) })], []).actions.some((x) => x.action === "checks-timeout"), false);
+      // 後が取り込みだけなら ok のまま
+      assert.equal(only(run([base({ reviews: [{ verdict: "ok", commit: "bbbbbbb" }], after: { bbbbbbb: [{ sha: "c", mergeOnly: true }] } })], [])).action, "checks-timeout");
+    });
+  });
+
+  it("10: 閉じた Issue に残った起動のラベルを外す（コメントなし）", () => {
+    const r = run([], [], [{ number: 7, labels: ["status:in-progress", "type:fix"] }, { number: 8, labels: ["type:fix"] }]);
+    const a = only(r);
+    assert.deepEqual({ target: a.target, number: a.number, action: a.action, comment: a.comment }, { target: "issue", number: 7, action: "cleanup", comment: null });
+    assert.deepEqual(a.removeLabels, ["status:in-progress"]);
+  });
+
+  it("1 つの PR には、最初に当たった処置だけを出す", () => {
+    // 衝突（行 2）・CI 成功（行 5）・60 分動かない（行 7）のすべてに当たる draft は、行 2 だけ
+    const r = run([pr({ mergeable: false, appCheck: "success", updatedAt: ago(99) })], [iss({ updatedAt: ago(99) })]);
+    assert.deepEqual(r.actions.map((a) => a.action), ["conflict-kick"]);
+  });
+
+  it("人を待っているものは対象にしない", () => {
+    const stuck = pr({ draft: false, mergeable: false });
+    assert.equal(run([{ ...stuck, labels: ["status:needs-human"] }], []).actions.length, 0);
+    for (const label of ["status:blocked-question", "status:needs-human", "kind:epic"]) {
+      assert.equal(run([stuck], [iss({ labels: [label, "status:in-progress"], updatedAt: ago(99) })]).actions.length, 0, label);
+    }
+    assert.equal(run([], [iss({ labels: ["status:in-progress", "status:needs-human"], updatedAt: ago(99) })]).actions.length, 0);
+  });
+
+  it("claude/issue- 以外の PR は衝突の行だけ", () => {
+    const other = pr({ headRef: "claude/hand-made", draft: false, readyAt: ago(99), updatedAt: ago(99), appCheck: "none" });
+    assert.equal(run([other], []).actions.length, 0); // レビューが無くても rereview しない
+    assert.equal(only(run([{ ...other, mergeable: false }], [])).action, "conflict");
+  });
+
+  it("コメントの印は役の名前になり、セッションが無ければ行を省く", () => {
+    const r = stalledActions({ role: "patrol", now: NOW, sessionUrl: null, prs: [pr({ draft: false, mergeable: false })], issues: [], closedStarted: [] });
+    assert.equal(r.actions[0].comment, "<!-- factory:patrol action=conflict -->\n`main` と衝突しているので draft に戻した。衝突を直して Ready に戻す。");
   });
 });
