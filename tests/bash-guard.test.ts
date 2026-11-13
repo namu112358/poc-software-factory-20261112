@@ -22,6 +22,11 @@ describe("Bash のフック（承認の画面で止まりやすい形を断る�
     for (const c of ["rm -rf node_modules", "rm -fr /tmp/x", "rm -r -f dist", "ls; rm -rf x"]) assert.equal(denied(c), true, c);
   });
 
+  it("手元の変更を捨てる形（checkout -- ・checkout .・restore）は断る。ブランチを替えるだけの checkout は通す", () => {
+    for (const c of ["git checkout -- .", "git checkout claude/x -- src/a.ts", "git checkout .", "git restore src/a.ts"]) assert.equal(denied(c), true, c);
+    for (const c of ["git checkout claude/issue-1", "git checkout -b claude/kaizen-x", "git checkout main"]) assert.equal(denied(c), false, c);
+  });
+
   it("ヒアドキュメントで python・node に流す形は断る", () => {
     for (const c of ["python3 - <<'EOF'\nprint(1)\nEOF", "node <<EOF\nconsole.log(1)\nEOF", "cat <<'EOF' | python3\nprint(1)\nEOF"]) assert.equal(denied(c), true, c);
   });

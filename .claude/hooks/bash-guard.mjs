@@ -35,6 +35,11 @@ export function check(command) {
     return { deny: true, reason: `\`rm -rf\` は実行しません。消すファイルを 1 つずつ確かめてから \`rm <ファイル>\` で消すか、人に頼んでください。${HINT}` };
   }
 
+  // 手元の変更を捨てる形（`git checkout ... -- <パス>`・`git checkout .`・`git restore`）。許可の `git checkout claude/*` に紛れないように
+  if (/(^|[\s;&|(])git\s+(checkout\s+(.*\s)?(--(\s|$)|\.(\s|$))|restore(\s|$))/.test(head)) {
+    return { deny: true, reason: `手元の変更を捨てる形（\`git checkout -- <パス>\`・\`git checkout .\`・\`git restore\`）は実行しません。捨ててよいか確かめてから、人に頼んでください。${HINT}` };
+  }
+
   // git を含み、`&&`・`||`・`;`・改行でほかのコマンドとつないでいる
   const usesGit = /(^|[\s;&|(])git(\s|$)/.test(head);
   const chained = /&&|\|\||;|\n/.test(head);
