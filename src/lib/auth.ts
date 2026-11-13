@@ -331,6 +331,7 @@ export type PasswordChangeResult =
  * 同じ利用者のほかのセッションの削除を 1 つのトランザクションで行い、keepToken のセッションだけを残す。
  * 今のパスワードの誤りはログインの失敗と同じ回数制限に数え、ロック中は照合しない。
  * 接続元は見分けず（ID ごとの組）、アカウント全体の数にも入る。アカウント全体のロック中も変えられない（#526）。
+ * 仮のパスワードの利用者（#523）は、仮のパスワードを今のパスワードとして変え、変えたら仮のパスワードの止めが外れる。
  */
 export function changePassword(
   userId: string,
@@ -346,7 +347,8 @@ export function changePassword(
     return { ok: false, reason: "wrong-password" };
   }
   transaction(db, () => {
-    db.prepare("UPDATE users SET password_hash = ? WHERE id = ?").run(hashPassword(input.newPassword), userId);
+    // 仮のパスワードの間（#523）だったなら、ここで止めを外す（仮のパスワードはハッシュが替わるので使えなくなる）。
+    db.prepare("UPDATE users SET password_hash = ?, must_change_password = 0 WHERE id = ?").run(hashPassword(input.newPassword), userId);
     db.prepare("DELETE FROM sessions WHERE user_id = ? AND token <> ?").run(userId, keepToken);
     clearFailures(userId, db);
   });
