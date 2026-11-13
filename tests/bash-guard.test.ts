@@ -67,11 +67,64 @@ describe("Bash のフック（承認の画面で止まりやすい形を断る�
       "git diff --stat | grep claim",
       'git commit -m "直す; 理由 && 補足"',
       "npm test",
-      "npm run build && npm test",
       "node scripts/factory/claim.ts gate --role review --number 1",
       "rm tmp.txt",
       "cat <<'EOF' > /tmp/x.md\n本文; git && x\nEOF",
       "python3 scripts/check-skills.py",
+    ]) assert.equal(denied(c), false, c);
+  });
+
+  it("git を含まなくても、`;`・`&&`・`||` でつないだ形は断る。引用符の中・パイプ・`\\;` は通す", () => {
+    for (const c of ["npm run build && npm test", "ls; pwd", "test -f a || echo ng", "echo a;echo b", "mkdir /tmp/x && node /tmp/x/a.mjs"]) assert.equal(denied(c), true, c);
+    for (const c of ["ls | head -5", 'echo "a; b && c"', "echo 'a || b'", "find . -name x -exec ls {} \\;"]) assert.equal(denied(c), false, c);
+  });
+
+  it("`&` で裏で動かす形は断る。`2>&1`・`>&2` は通す", () => {
+    for (const c of ["python3 -m http.server 6006 &", "(python3 -m http.server 6006 &)", "npm start &", "sleep 1 & echo x"]) assert.equal(denied(c), true, c);
+    for (const c of ["echo a 2>&1", "echo a >&2", "npm test 2>&1 | tail -5", "npm test &> /tmp/x.log", 'echo "a & b"']) assert.equal(denied(c), false, c);
+  });
+
+  it("シェル変数の代入・展開（$NAME・${...}・$(...)・バッククォート）は断る。環境変数の前置きだけは通す", () => {
+    for (const c of ["echo $HOME", "ls ${TMPDIR}/x", "cat $(ls)", "echo `date`", 'echo "$S/check.js"', "cat > $S/check.js <<'EOF'\nconsole.log(1)\nEOF", "S=/tmp/x\nnode $S/a.mjs", "S=/tmp/x\nls /tmp"]) assert.equal(denied(c), true, c);
+    for (const c of ["FOO=bar npm test", "NODE_ENV=test node /tmp/x/check.mjs", "echo '$HOME'", 'echo "cost \\$5"', 'git commit -m "直す: 値は $5 ではない"']) assert.equal(denied(c), false, c);
+  });
+
+  it("断るときの文言に、分け方（1 回に 1 コマンド・Write でスクリプト・run_in_background）を書く", () => {
+    for (const c of ["ls; pwd", "npm start &", "echo $HOME"]) {
+      const r = check(c) as { reason: string };
+      assert.match(r.reason, /1 回に 1 コマンド/, c);
+      assert.match(r.reason, /Write/, c);
+      assert.match(r.reason, /run_in_background/, c);
+      assert.match(r.reason, /新しい名前/, c);
+    }
+  });
+
+  it("git diff・log・show の --output・-o、npm の設定の引数、checkout claude/<ブランチ> に続く引数は断る", () => {
+    for (const c of [
+      "git diff --output=/tmp/x.patch",
+      "git -C /x log --output /tmp/x",
+      "git show -o /tmp/x HEAD",
+      "git diff -ofile",
+      "npm test --script-shell=/tmp/x.sh",
+      "npm run build --script-shell /tmp/x.sh",
+      "npm run build --node-options=--require=/tmp/x.js",
+      "npm test --foo=bar",
+      "npm run build --cache=/tmp/x -- --foo",
+      "git checkout claude/issue-1 src/a.ts",
+      "git -C /x checkout claude/issue-1 package.json",
+    ]) assert.equal(denied(c), true, c);
+    for (const c of [
+      "git status",
+      "git -C /x log --oneline",
+      "git log --oneline | grep -o x",
+      "git diff --output-indicator-new=+",
+      "npm test",
+      "npm run build -- --foo",
+      "npm run build -- --foo=bar",
+      "git checkout claude/issue-1",
+      "git -C /x checkout -B claude/x origin/claude/x",
+      "git checkout claude/issue-1 2>&1",
+      "node /tmp/x/check.mjs",
     ]) assert.equal(denied(c), false, c);
   });
 

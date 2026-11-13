@@ -3,14 +3,39 @@
 // - git をほかのコマンドと `&&`・`;`・`||` でつなぐ（`cd ... && git ...` を含む）
 // - `rm -rf`（`rm -fr`・`rm -r -f` も）
 // - ヒアドキュメントで python・node にスクリプトを流す
+// - コマンドの種類を問わず `;`・`&&`・`||` でつなぐ、`&` で裏で動かす、シェル変数の代入・展開（`$NAME`・`$(...)`・バッククォート）
+// - git diff|log|show の `--output`・`-o`、npm test|run の `--script-shell`・`--node-options`・`--<名前>=<値>`、`git checkout claude/<ブランチ>` に続く引数
 // 読むだけのパイプ（`| head`・`| grep` など）は止めない。
 // 断った理由は permissionDecisionReason でエージェントに返る（Claude Code のフックの仕様: 終了コード 0 と JSON の出力）。
 // 判定は check() に置き、tests/bash-guard.test.ts で確かめる。
 
-/** 引用符の中を消す（`git commit -m "a; b"` の `;` で断らないため） */
-function stripQuotes(s) {
-  return s.replace(/'[^']*'/g, "''").replace(/"(?:\\.|[^"\\])*"/g, '""');
+/**
+ * 引用符の中を消す（`git commit -m "a; b"` の `;` で断らないため）。
+ * keepDouble が true のときは、シェルが展開する二重引用符の中身（`"$X"`・`"$(...)"`）は残す。
+ * 引用符の外のバックスラッシュ（`\;` など）は、次の 1 文字ごと空白にする。
+ */
+function mask(s, keepDouble = false) {
+  let out = "";
+  let q = null;
+  for (let i = 0; i < s.length; i++) {
+    const c = s[i];
+    if (q === "'") {
+      if (c === "'") { q = null; out += c; }
+      continue;
+    }
+    if (q === '"') {
+      if (c === "\\") { if (keepDouble) out += " "; i++; continue; }
+      if (c === '"') { q = null; out += c; continue; }
+      if (keepDouble) out += c;
+      continue;
+    }
+    if (c === "\\") { out += " "; i++; continue; }
+    if (c === "'" || c === '"') q = c;
+    out += c;
+  }
+  return out;
 }
+const stripQuotes = (s) => mask(s);
 
 /** `rm` に、再帰（-r・-R・--recursive）と強制（-f・--force）の両方が付いているか（並びと書き方を問わない） */
 function isRecursiveForceRm(head) {
@@ -27,6 +52,8 @@ function isRecursiveForceRm(head) {
 }
 
 const HINT = "1 コマンドずつに分けて実行してください。git は `git -C <ディレクトリ>` かフルパスで実行し、`cd` とつながないでください。";
+
+const SPLIT = "1 回に 1 コマンドにしてください。複数の手順の確かめは、Write でスクラッチパッドにスクリプト（.mjs など）を書き、`node <ファイル>` で 1 コマンドで実行します。サーバーは Bash の run_in_background で 1 コマンドで起動します。一時のフォルダーは消さずに新しい名前で作ります。";
 
 /**
  * @param {string} command
@@ -65,6 +92,42 @@ export function check(command) {
   const chained = /&&|\|\||;|\n/.test(head);
   if (usesGit && chained) {
     return { deny: true, reason: `git をほかのコマンドとつないだ形（\`&&\`・\`;\`・\`||\`、\`cd ... && git ...\`）は、承認の画面で止まりやすいので実行しません。${HINT}` };
+  }
+
+  // コマンドの種類を問わず、引用符の外の `;`・`&&`・`||` でつないだ形
+  if (/&&|\|\||;/.test(head)) {
+    return { deny: true, reason: `コマンドを \`;\`・\`&&\`・\`||\` でつないだ形は、承認の画面で止まりやすいので実行しません。${SPLIT}` };
+  }
+
+  // 引用符の外の `&`（裏での実行）。`2>&1`・`>&2`・`&>file`・`|&` は通す
+  if (/&/.test(head.replace(/\d*[<>]&(?:\d+|-)?/g, "").replace(/&>>?/g, "").replace(/\|&/g, "|"))) {
+    return { deny: true, reason: `\`&\` で裏で動かす形（\`cmd &\`・\`(cmd &)\`）は、承認の画面で止まりやすいので実行しません。${SPLIT}` };
+  }
+
+  // シェル変数の展開（`$NAME`・`${...}`・`$(...)`・バッククォート）と、変数だけを代入する行（`NAME=...`）
+  const expandable = mask(hasHeredoc ? firstLine : cmd, true);
+  const lines = head.split("\n").filter((l) => l.trim() !== "");
+  if (/\$[A-Za-z_]|\$\{|\$\(|`/.test(expandable) || (lines.length > 1 && lines.some((l) => /^\s*(?:[A-Za-z_]\w*=\S*\s*)+$/.test(l)))) {
+    return { deny: true, reason: `シェル変数の代入・展開（\`NAME=...\`・\`$NAME\`・\`\${...}\`・\`$(...)\`・バッククォート）は、承認の画面で止まりやすいので実行しません。値はコマンドに直接書いてください。${SPLIT}` };
+  }
+
+  // 出力先を指定する git のオプション（`git diff|log|show` の `--output`・`-o`）
+  if (/(^|[\s(])git(?:\s+(?:-C\s+\S+|-c\s+\S+|--[\w-]+(?:=\S+)?|-[a-zA-Z]+))*\s+(?:diff|log|show)\s+(?:[^|]*\s)?(?:--output(?:=\S*)?|-o\S*)(?:\s|$)/.test(head)) {
+    return { deny: true, reason: `\`git diff\`・\`git log\`・\`git show\` の \`--output\`・\`-o\` はファイルに書き出すので実行しません。出力は画面に出してください。${SPLIT}` };
+  }
+
+  // npm の設定を変える引数（`npm test|run` で `--` より前の `--script-shell`・`--node-options`・`--<名前>=<値>`）
+  const npm = head.match(/(?:^|[\s(])npm((?:\s[^|]*)?)$/m);
+  if (npm) {
+    const beforeDashes = npm[1].split(/\s--(?:\s|$)/)[0];
+    if (/\s(?:test|t|run|run-script)(?:\s|$)/.test(beforeDashes) && /(?:^|\s)--(?:script-shell|node-options)(?:=|\s|$)|(?:^|\s)--[a-zA-Z][\w-]*=\S/.test(beforeDashes)) {
+      return { deny: true, reason: `\`npm test\`・\`npm run\` に \`--script-shell\`・\`--node-options\`・\`--<名前>=<値>\` を付けた形は、任意のコマンドや設定を動かせるので実行しません。引数は \`--\` の後ろに置いてください。${SPLIT}` };
+    }
+  }
+
+  // `git checkout claude/<ブランチ>` の後にさらに引数（パス）が続く形
+  if (/(^|[\s(])git(?:\s+(?:-C\s+\S+|-c\s+\S+|--[\w-]+(?:=\S+)?|-[a-zA-Z]+))*\s+checkout\s+claude\/\S+\s+(?!\d?[<>])[^\s|]/.test(head)) {
+    return { deny: true, reason: `\`git checkout claude/<ブランチ>\` の後ろに引数（パス）を付けた形は、ファイルを書き換えるので実行しません。ブランチの切り替えだけにしてください。${SPLIT}` };
   }
   return { deny: false, reason: "" };
 }
