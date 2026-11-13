@@ -37,6 +37,25 @@ export function listExtensionsAwaitingMe(userId: string, db: Db = getDb()): Pend
   return listPendingExtensions(db).filter((e) => e.requester !== userId);
 }
 
+export type SuspendedBacklogRow = { id: string; name: string; count: number };
+
+/**
+ * ログインを停止した人が担当のまま残っている、未完了・アーカイブしていない・削除していないタスクの件数（停止した人ごと、ID 順）。
+ * 0 件の人は含めない。取りまとめる人でなければ、担当を替えられないので何も返さない（#538）。
+ */
+export function listSuspendedBacklog(userId: string, db: Db = getDb()): SuspendedBacklogRow[] {
+  if (!isCoordinator(userId, db)) return [];
+  const rows = db
+    .prepare(
+      `SELECT u.id AS id, u.name AS name, COUNT(*) AS count
+       FROM users u JOIN tasks t ON t.assignee = u.id
+       WHERE u.suspended_at IS NOT NULL AND t.status <> 'done' AND t.archived = 0 AND t.deleted_at IS NULL
+       GROUP BY u.id, u.name ORDER BY u.id`,
+    )
+    .all() as SuspendedBacklogRow[];
+  return rows.map(({ id, name, count }) => ({ id, name, count }));
+}
+
 /** 「対応が必要なもの」の各項目で、欄に並べる最大の件数。超えた分は「ほか N 件」にする。 */
 export const MY_ATTENTION_LIMIT = 5;
 

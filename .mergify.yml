@@ -4,6 +4,7 @@
 #   ただし risk:high の PR（DB のスキーマ・ログイン・権限など）と、品質のゲート（この設定・.github/・.claude/・scripts/factory/・AGENTS.md・
 #   CLAUDE.md・docs/rulesets/・package.json など。一覧は scripts/factory/claim-core.ts の GATE_PATHS）を変える PR には factory-review を付けないので、人が `merge:requested` のラベルを付けたときだけ入る。
 # - 人が PR に `merge:requested` のラベルを付けたときも、条件を満たしていればキューに入る（pull_request_rules。Workflow Automation が必要）。
+#   ただし最新のコミットに factory-reviewed（レビューを通った）が要る。ラベルを付けた後の push が、レビューを受けないまま入らないようにする（#499）。
 # - キューは「その場」方式: 1 件ずつ、PR のブランチに main を取り込んで、PR そのものの上で CI を回し直してから
 #   squash でマージする。一時的な draft の PR は作らない（PR 本文の検査が元の PR の上で走り、Ruleset の strict も残せる）。
 #   その場方式の条件: max_parallel_checks が 1、batch_size が 1、merge_conditions を書かない（queue_conditions と同じ扱い）。
@@ -16,13 +17,19 @@ merge_queue:
 queue_rules:
   - name: default
     merge_method: squash
+    # キューの中の CI を待つ時間。既定の auto（最近の CI の時間の 95 パーセンタイル＋余裕）は、CI が 45 秒前後なので 3 分 33 秒になり、
+    # CI の実行機の順番待ちだけでキューから外れた（#318・#328）。実行機の順番待ちも含めて待てる長さにする。
+    checks_timeout: "10 minutes"
     queue_conditions:
       - -draft
       - check-success = app-check
       - check-success = design-system-check
       - check-success = pr-body-check
       - or:
-          - label = merge:requested
+          # 人がマージを決めた PR も、最新のコミットがレビューを通っていること（ラベルの後の push が未レビューのまま入らないように。#499）
+          - and:
+              - label = merge:requested
+              - status-success = factory-reviewed
           - and:
               - -label = risk:high
               - status-success = factory-review
@@ -40,7 +47,10 @@ pull_request_rules:
     conditions:
       - -draft
       - or:
-          - label = merge:requested
+          # 人がマージを決めた PR も、最新のコミットがレビューを通っていること（ラベルの後の push が未レビューのまま入らないように。#499）
+          - and:
+              - label = merge:requested
+              - status-success = factory-reviewed
           - and:
               - -label = risk:high
               - status-success = factory-review

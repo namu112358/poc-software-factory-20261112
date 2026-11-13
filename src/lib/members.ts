@@ -77,6 +77,17 @@ export type AssigneeOption = { id: string; name: string; label: string };
 /** ログインを停止したメンバーの名前に付ける印。 */
 export const SUSPENDED_MARK = "（停止中）";
 
+/** 担当者の名前の表示。ログインを停止した人には「（停止中）」を付ける（#538）。 */
+export function withSuspendedMark(name: string, suspended: boolean): string {
+  return suspended ? `${name}${SUSPENDED_MARK}` : name;
+}
+
+/** ログインを停止している利用者の ID の集合（一覧の担当者の欄に印を付けるため）。 */
+export function listSuspendedUserIds(db: Db = getDb()): Set<string> {
+  const rows = db.prepare("SELECT id FROM users WHERE suspended_at IS NOT NULL").all() as { id: string }[];
+  return new Set(rows.map((r) => r.id));
+}
+
 /**
  * 担当者の選択肢（id・name・件数つきの label）。件数はメンバーの一覧と同じ数え方。並びはユーザー ID 順。
  * 休みは、休み中の人に加えて、これから始まる休みを登録している人にも付ける（先の休みに気づかず割り当てないため。#437）。
@@ -95,7 +106,7 @@ export function listAssigneeOptions(
       id: m.id,
       name: m.name,
       label: m.suspended
-        ? `${m.name}${SUSPENDED_MARK}`
+        ? withSuspendedMark(m.name, true)
         : formatAssigneeOption({ ...m, leaveUntil: leaveEndDates.get(m.id) ?? null }),
     }));
 }

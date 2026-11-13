@@ -644,6 +644,18 @@ export function reviewStatus(mc: ReturnType<typeof mergeCheck>, headSha: string,
   return { state: null, description: mc.reason };
 }
 
+/**
+ * 「最新のコミットがレビューを通った」ことを表す status（context=factory-reviewed）の値。merge:requested で人がキューに入れる PR にも要る
+ * （人がラベルを付けた後の push が、レビューを受けないままマージされたため。#499）。
+ * merge-check のレビューの部分と同じ判定で、ok なら success（risk:high・品質のゲートを変える PR でも付く）、最新のコミットへのレビューが ok でなければ failure、それ以外は付けない（null）。
+ */
+export function reviewedStatus(mc: ReturnType<typeof mergeCheck>, headSha: string): { state: "success" | "failure" | null; description: string } {
+  const onHead = mc.review !== null && (headSha.startsWith(mc.review.commit) || mc.review.commit.startsWith(headSha));
+  if (mc.ok) return { state: "success", description: mc.reason };
+  if (onHead && mc.review !== null && mc.review.verdict !== "ok") return { state: "failure", description: mc.reason };
+  return { state: null, description: mc.reason };
+}
+
 export function mergeCheck(args: {
   reviews: { body: string; association: string }[];
   headSha: string;

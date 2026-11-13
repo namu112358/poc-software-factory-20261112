@@ -1,10 +1,11 @@
 import { getDb, type Db } from "./db/index.ts";
+import { withSuspendedMark } from "./members.ts";
 import { todayInJapan } from "./tasks.ts";
 
 export type OverdueRow = {
   id: number;
   title: string;
-  assigneeName: string; // 担当者がいないときは「—」
+  assigneeName: string; // 担当者がいないときは「—」。ログインを停止した人には「（停止中）」が付く
   dueDate: string; // YYYY-MM-DD
   daysOverdue: number;
   label: string; // 「3 日超過」
@@ -21,14 +22,14 @@ export function daysOverdue(dueDate: string, today: string): number {
 export function listOverdueTasks(db: Db = getDb(), today: string = todayInJapan()): OverdueRow[] {
   const rows = db
     .prepare(
-      `SELECT t.id AS id, t.title AS title, t.due_date AS dueDate, u.name AS assigneeName
+      `SELECT t.id AS id, t.title AS title, t.due_date AS dueDate, u.name AS assigneeName, u.suspended_at AS suspendedAt
        FROM tasks t LEFT JOIN users u ON u.id = t.assignee
        WHERE t.status <> 'done' AND t.archived = 0 AND t.deleted_at IS NULL AND t.due_date < ?
        ORDER BY t.due_date, t.id`,
     )
-    .all(today) as { id: number; title: string; dueDate: string; assigneeName: string | null }[];
+    .all(today) as { id: number; title: string; dueDate: string; assigneeName: string | null; suspendedAt: string | null }[];
   return rows.map((r) => {
     const days = daysOverdue(r.dueDate, today);
-    return { id: r.id, title: r.title, assigneeName: r.assigneeName ?? "—", dueDate: r.dueDate, daysOverdue: days, label: `${days} 日超過` };
+    return { id: r.id, title: r.title, assigneeName: r.assigneeName === null ? "—" : withSuspendedMark(r.assigneeName, r.suspendedAt !== null), dueDate: r.dueDate, daysOverdue: days, label: `${days} 日超過` };
   });
 }

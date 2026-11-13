@@ -13,7 +13,8 @@ import { passwordStrengthText } from "@/lib/password-strength";
 import { isSessionExpired } from "@/lib/session-expired";
 import { SessionExpiredNotice } from "../../session-expired";
 
-export function PasswordForm() {
+/** afterChangeHref: 変えた後に出す、次の画面へのリンク（仮のパスワードから変えたとき。#523）。 */
+export function PasswordForm({ afterChangeHref }: { afterChangeHref?: string } = {}) {
   const [errors, setErrors] = useState<string[]>([]);
   const [expired, setExpired] = useState(false);
   const [done, setDone] = useState(false);
@@ -85,7 +86,17 @@ export function PasswordForm() {
       <button type="submit" disabled={pending}>
         変更
       </button>
-      {done && <p role="status">{PASSWORD_CHANGED_MESSAGE}</p>}
+      {done && (
+        <p role="status">
+          {PASSWORD_CHANGED_MESSAGE}
+          {afterChangeHref && (
+            <>
+              {" "}
+              <a href={afterChangeHref} data-testid="password-continue">タスク一覧へ進む</a>
+            </>
+          )}
+        </p>
+      )}
       {expired && (
         <p role="alert" data-testid="password-session-expired">
           <SessionExpiredNotice />

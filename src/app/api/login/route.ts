@@ -3,6 +3,7 @@
 // JSON でもフォームでもない送り方は 415、読めないフォームは 400 を JSON で返す（#513）。
 // ログインの失敗は、ID と接続元（X-Forwarded-For のいちばん右の IP アドレス）の組と、アカウント全体で数える（#526）。
 // フォーム送信の next（ログインした後の戻り先。#491）は、このアプリの中の画面のときだけ使い、それ以外はタスク一覧へ移す。
+// 仮のパスワードでログインしたとき（#523）は、パスワード変更の画面へ移す（JSON では mustChangePassword: true を足す）。
 import { NextResponse } from "next/server";
 import { jsonError } from "@/lib/api";
 import { SESSION_COOKIE, SESSION_TTL_MS, login } from "@/lib/auth";
@@ -10,6 +11,8 @@ import { loginErrorPath } from "@/lib/login-error";
 import { loginSourceFromHeaders } from "@/lib/login-source";
 import { readLoginRequest } from "@/lib/login-request";
 import { afterLoginPath } from "@/lib/session-expired";
+import { PASSWORD_CHANGE_PATH } from "@/lib/session";
+import { mustChangePassword } from "@/lib/users";
 
 export async function POST(request: Request) {
   const body = await readLoginRequest(request);
@@ -35,9 +38,11 @@ export async function POST(request: Request) {
       : jsonError(429, "ログインに続けて失敗したため、しばらくログインできません", details);
   }
 
+  // 仮のパスワードでログインしたら（#523）、戻り先によらずパスワード変更の画面へ移す。JSON では mustChangePassword で知らせる。
+  const pending = mustChangePassword(result.user.id);
   const response = isJson
-    ? NextResponse.json({ user: result.user })
-    : NextResponse.redirect(new URL(afterLoginPath(next), request.url), 303);
+    ? NextResponse.json({ user: result.user, ...(pending ? { mustChangePassword: true } : {}) })
+    : NextResponse.redirect(new URL(pending ? PASSWORD_CHANGE_PATH : afterLoginPath(next), request.url), 303);
   response.cookies.set(SESSION_COOKIE, result.token, {
     httpOnly: true,
     sameSite: "lax",

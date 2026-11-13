@@ -11,7 +11,19 @@ export function suspendConfirmMessage(name: string): string {
   return `${name} さんのログインを停止しますか？ ログイン中の端末はすべてログアウトし、担当者の選択肢から外れます。担当のタスクや記録は残ります。`;
 }
 
-export type SuspensionToggleResult = { status: "done"; suspended: boolean } | { status: "error"; message: string };
+/** 停止した人の担当のタスクを、その人で絞り込んだ一覧へのリンク。 */
+export function memberTasksHref(memberId: string): string {
+  return `/tasks?assignee=${encodeURIComponent(memberId)}`;
+}
+
+/** 停止した後に出す案内。残っている未完了のタスクの件数と、担当を替えに行く一覧へのリンクの要否。 */
+export function suspendedNotice(name: string, openTaskCount: number): string {
+  return openTaskCount > 0
+    ? `${name} さんの未完了のタスクが ${openTaskCount} 件残っています。担当を替えてください。`
+    : `${name} さんの未完了のタスクは残っていません。`;
+}
+
+export type SuspensionToggleResult = { status: "done"; suspended: boolean; openTaskCount?: number } | { status: "error"; message: string };
 
 type Deps = {
   fetch: (url: string, init: { method: "POST" | "DELETE" }) => Promise<{ ok: boolean; json(): Promise<unknown> }>;
@@ -22,8 +34,11 @@ export async function setMemberSuspended(memberId: string, suspend: boolean, dep
   const fallback = suspend ? "ログインを停止できませんでした。" : "ログインを再開できませんでした。";
   try {
     const res = await deps.fetch(`/api/users/${encodeURIComponent(memberId)}/suspension`, { method: suspend ? "POST" : "DELETE" });
-    if (res.ok) return { status: "done", suspended: suspend };
-    const data = (await res.json().catch(() => ({}))) as { error?: unknown };
+    const data = (await res.json().catch(() => ({}))) as { error?: unknown; openTaskCount?: unknown };
+    if (res.ok) {
+      const n = data?.openTaskCount;
+      return typeof n === "number" ? { status: "done", suspended: suspend, openTaskCount: n } : { status: "done", suspended: suspend };
+    }
     return { status: "error", message: typeof data?.error === "string" ? data.error : fallback };
   } catch {
     return { status: "error", message: fallback };
