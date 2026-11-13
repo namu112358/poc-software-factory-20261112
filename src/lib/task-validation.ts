@@ -1,6 +1,7 @@
 import { getDb, type Db } from "./db/index.ts";
 import { getUser, isAssignableUser } from "./users.ts";
 import { isValidDate } from "./valid-date.ts";
+import { checkBodyFields, unknownFieldErrors } from "./body-fields.ts";
 import { isTaskPriority, isTaskStatus, TASK_SORTS, UNASSIGNED, type TaskInput, type TaskSort, type ValidationResult, MEMO_MAX_LENGTH } from "./task-types.ts";
 
 /** URL のクエリの並び順を検証する。不正な値は「作成順」として扱う。 */
@@ -77,8 +78,15 @@ export function parseTaskId(value: unknown): number | undefined {
 /** ログインを停止した利用者を担当者にしようとしたときの文言。 */
 export const SUSPENDED_ASSIGNEE_ERROR = "ログインを停止しているメンバーは担当者にできません";
 
+/** 作成（POST /api/tasks）の本文で受け付ける項目。 */
+export const TASK_INPUT_FIELDS = ["title", "status", "assignee", "dueDate", "priority", "estimateMinutes", "memo", "archived"] as const;
+
+/** 更新（PATCH /api/tasks/:id）の本文で受け付ける項目。作成の項目に、編集を始めたときの更新日時を加える。 */
+export const TASK_UPDATE_FIELDS = [...TASK_INPUT_FIELDS, "expectedUpdatedAt"] as const;
+
 /**
  * API に送られたタスクの内容を検証する。partial = true（更新）のときは、送られた項目だけを検証する。
+ * 受け付ける項目（作成は TASK_INPUT_FIELDS、更新は TASK_UPDATE_FIELDS）のほかの項目があれば誤りにする（#527）。
  * 担当者が存在するかは DB で確認する。ログインを停止した利用者は担当者にできない（#522）。
  * ただし更新で、今の担当者（currentAssignee）をそのまま送ったときは、その人が停止していても通す（担当を変えずにほかの項目を直せるように）。
  */
@@ -91,7 +99,7 @@ export function validateTaskInput(
     return { ok: false, errors: ["リクエストの形式が正しくありません"] };
   }
   const b = body as Record<string, unknown>;
-  const errors: string[] = [];
+  const errors: string[] = unknownFieldErrors(b, options.partial ? TASK_UPDATE_FIELDS : TASK_INPUT_FIELDS);
   const value: Partial<TaskInput> = {};
   const need = (key: string) => !options.partial || key in b;
 
@@ -175,13 +183,16 @@ export const BULK_COMPLETE_MAX = 100;
 
 /**
  * まとめて完了にする API の本文を検証する。`ids` は 1〜100 件の正の整数の配列。
- * 重複した ID は 1 件にまとめ、送られた順（初出順）で返す。
+ * 重複した ID は 1 件にまとめ、送られた順（初出順）で返す。`ids` のほかの項目があれば誤り（#527）。
  */
 export function validateBulkCompleteInput(body: unknown): ValidationResult<number[]> {
   if (typeof body !== "object" || body === null || Array.isArray(body)) {
     return { ok: false, errors: ["リクエストの形式が正しくありません"] };
   }
-  const ids = (body as Record<string, unknown>).ids;
+  return checkBodyFields(body as Record<string, unknown>, ["ids"], (b) => parseBulkCompleteIds(b.ids));
+}
+
+function parseBulkCompleteIds(ids: unknown): ValidationResult<number[]> {
   if (ids === undefined) return { ok: false, errors: ["ids を指定してください"] };
   if (!Array.isArray(ids)) return { ok: false, errors: ["ids はタスクの ID の配列で指定してください"] };
   if (ids.length === 0) return { ok: false, errors: ["ids に 1 件以上の ID を指定してください"] };

@@ -3,6 +3,7 @@
 import { BULK_UNDO_MINUTES } from "./bulk-select.ts";
 import { getDb, transaction, type Db } from "./db/index.ts";
 import { nextUpdatedAt, type ValidationResult } from "./tasks.ts";
+import { checkBodyFields } from "./body-fields.ts";
 
 export { BULK_UNDO_MINUTES };
 
@@ -13,14 +14,15 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-/** 元に戻す API の本文を検証する。`id` はまとめての変更 1 回分の ID（正の整数）。 */
+/** 元に戻す API の本文を検証する。`id` はまとめての変更 1 回分の ID（正の整数）。`id` のほかの項目があれば誤り（#527）。 */
 export function validateBulkUndoInput(body: unknown): ValidationResult<{ id: number }> {
   if (!isPlainObject(body)) return { ok: false, errors: ["リクエストの形式が正しくありません"] };
-  const id = body.id;
-  if (typeof id !== "number" || !Number.isSafeInteger(id) || id <= 0) {
-    return { ok: false, errors: ["id には元に戻す変更の ID（正の整数）を指定してください"] };
-  }
-  return { ok: true, value: { id } };
+  return checkBodyFields(body, ["id"], ({ id }) => {
+    if (typeof id !== "number" || !Number.isSafeInteger(id) || id <= 0) {
+      return { ok: false, errors: ["id には元に戻す変更の ID（正の整数）を指定してください"] };
+    }
+    return { ok: true, value: { id } };
+  });
 }
 
 export type BulkUndoRecord = { changedBy: string | null; changedAt: string; undoneAt: string | null };

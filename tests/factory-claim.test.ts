@@ -28,6 +28,7 @@ import {
   type IssueInfo,
   normalizeLabel,
   START_LABELS,
+  isOwnClaudePr,
 } from "../scripts/factory/claim-core.ts";
 
 const touch = (files: string, at: string) => ({ body: `<!-- factory:touch files=${files} -->\n着手します。`, createdAt: at });
@@ -869,10 +870,10 @@ describe("gate: 各役の起動の判定", () => {
       const r = gateDecision(impl({ comments: [startMark], branchExists: true, closingPrs: [{ number: 90, headRef: "claude/issue-7", headRepo: REPO, draft: true, reviewed: false }] }));
       assert.equal(r.decision, "stop");
     });
-    it("フォークの PR（head のリポジトリが違う・null）は引き継がず stop", () => {
+    it("フォークの PR（head のリポジトリが違う・null）は引き継がず、着手も止めない（数えずに lock へ）", () => {
       for (const headRepo of ["someone/poc-software-factory-20261112", null]) {
         const r = gateDecision(impl({ closingPrs: [{ number: 90, headRef: "claude/issue-7", headRepo, draft: true, reviewed: false }] }));
-        assert.equal(r.decision, "stop", String(headRepo));
+        assert.equal(r.decision, "lock", String(headRepo));
         assert.equal(r.pr, null);
       }
     });
@@ -991,5 +992,21 @@ describe("gate: 各役の起動の判定", () => {
       const mergeable = await settleMergeable(r.read, r.wait);
       assert.equal(gateDecision(fix({ reviews: [], mergeable })).decision, "go");
     });
+  });
+});
+
+describe("isOwnClaudePr（フォークの PR を役の対象にしない）", () => {
+  const repo = "o/r";
+  it("このリポジトリの claude/ のブランチは対象", () => {
+    assert.equal(isOwnClaudePr({ head: { ref: "claude/issue-1", repo: { full_name: repo } } }, repo), true);
+  });
+  it("フォークの PR は、ブランチ名が claude/ でも対象にしない", () => {
+    assert.equal(isOwnClaudePr({ head: { ref: "claude/issue-1", repo: { full_name: "x/r" } } }, repo), false);
+  });
+  it("フォークが消えた PR（repo が null）は対象にしない", () => {
+    assert.equal(isOwnClaudePr({ head: { ref: "claude/issue-1", repo: null } }, repo), false);
+  });
+  it("claude/ で始まらないブランチは対象にしない", () => {
+    assert.equal(isOwnClaudePr({ head: { ref: "sf-d/x", repo: { full_name: repo } } }, repo), false);
   });
 });
