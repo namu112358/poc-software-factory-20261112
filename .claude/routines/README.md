@@ -47,8 +47,9 @@ flowchart LR
 | 実装 | Issue → ラベル付き | Labels is one of `status:in-progress` | [implement.md](implement.md) |
 | 実装（難しい用） | Issue → ラベル付き | Labels is one of `status:in-progress-hard` | [implement.md](implement.md) |
 | レビュー | Pull request → Ready for review | Head branch starts with `claude/` | [review.md](review.md) |
-| 修正 | Pull request → Converted to draft | Head branch starts with `claude/` | [fix.md](fix.md) |
+| 修正 | Pull request → Converted to draft | Head branch starts with `claude/issue-` | [fix.md](fix.md) |
 | 割り当て | Pull request → Closed | Head branch starts with `claude/` | [dispatch.md](dispatch.md) |
+| 割り当て（承認） | Issue → ラベル付き | Labels is one of `status:ready` | [dispatch.md](dispatch.md) |
 | 巡回 | 1 時間ごと（Schedule。リポジトリを選んでおく） | — | [patrol.md](patrol.md) |
 | 振り返り | 1 日 1 回（Schedule） | — | [retro.md](retro.md) |
 
