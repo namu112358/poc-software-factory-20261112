@@ -26,6 +26,19 @@
   ],
   "permissions": {
     "allow": [
+      "Bash(git fetch *)",
+      "Bash(git checkout -b claude/*)",
+      "Bash(git checkout claude/*)",
+      "Bash(git checkout main)",
+      "Bash(git status *)",
+      "Bash(git diff *)",
+      "Bash(git log *)",
+      "Bash(git show *)",
+      "Bash(npm test *)",
+      "Bash(npm run *)",
+      "Bash(node scripts/factory/claim.ts *)",
+      "Bash(python3 scripts/check-*.py)",
+      "Bash(python3 scripts/check-*.py *)",
       "Bash(git status)",
       "Bash(git diff)",
       "Bash(git diff --stat)",
@@ -123,6 +136,17 @@
           {
             "type": "command",
             "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/session-start.sh"
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/bash-guard.mjs\""
           }
         ]
       }

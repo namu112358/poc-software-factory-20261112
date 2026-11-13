@@ -737,6 +737,15 @@ function changedAfterLatestReview(pr: StalledPr): boolean {
   return after == null || after.some((c) => !c.mergeOnly);
 }
 
+/**
+ * stalled の入力として、PR ごとに何を読むか（claim.ts の loadStalled が使う）。
+ * レビューと Ready の時刻は、claude/issue- 以外の PR でも読む（レビューの起こし直しは claude/ のすべての PR が対象。#559）。
+ * Ready の時刻は Ready の PR だけ。CI・PR 本文の検査・Mergify の状況は、claude/issue- の PR で mergeable が分かっているときだけ（ほかの行で使う）。
+ */
+export function stalledLoadPlan(p: { own: boolean; mergeable: boolean | null; draft: boolean }): { reviews: boolean; readyAt: boolean; checks: boolean } {
+  return { reviews: true, readyAt: !p.draft, checks: p.own && p.mergeable !== null };
+}
+
 export function stalledComment(role: string, action: string, text: string, sessionUrl: string | null, commit?: string): string {
   const mark = `<!-- factory:${role} action=${action}${commit ? ` commit=${commit}` : ""} -->`;
   return [mark, text, ...(sessionUrl ? [`セッション: ${sessionUrl}`] : [])].join("\n");
@@ -745,7 +754,7 @@ export function stalledComment(role: string, action: string, text: string, sessi
 /**
  * 止まった実装・PR の判定（dispatch.md・patrol.md の表を 1 つにしたもの）。GitHub には書かず、役が行う操作だけを返す。
  * 1 つの PR・Issue に当てはまる処置は、行の順（1〜9）で最初の 1 つだけ。mergeable が null の PR は unknown に入れ、ほかの行も判定しない。
- * 対象: claude/ の PR（claude/issue- 以外は「衝突」の行だけ）。PR に status:needs-human、その Issue に blocked-question・needs-human・kind:epic があるものは対象外。
+ * 対象: claude/ の PR（claude/issue- 以外は「衝突」と「レビューが動かなかった」の行だけ。巡回は「レビューが動かなかった」だけ）。PR に status:needs-human、その Issue に blocked-question・needs-human・kind:epic があるものは対象外。
  * issues: 開いていて status:in-progress（-hard）が付いた Issue と、PR の Issue（PR の Issue は prs の headRef から引く）。
  * closedStarted: 閉じた Issue のうち、status:in-progress（-hard）が残っているもの（行 10）。
  */
@@ -804,7 +813,18 @@ export function stalledActions(input: {
       });
     };
 
-    if (issueNo === null && role !== "dispatch") continue; // claude/issue- 以外の PR は、割り当ての衝突の知らせだけ（巡回は扱わない）
+    // 3: レビューが動かなかった（claude/ のすべての PR。レビューの起動の取りこぼしは、出したセッションでは気づきにくい。#482・#518）
+    const rereview = () => {
+      if (!pr.draft && !pr.reviews.some((r) => sameCommit(r.commit, pr.headSha)) && !okCoversHead(pr) && pr.readyAt && minutesSince(pr.readyAt, now) >= 10) {
+        once({ action: "rereview", draft: "draft-then-ready" }, "レビューが動かなかったので起こし直した。");
+        return true;
+      }
+      return false;
+    };
+    if (issueNo === null && role !== "dispatch") {
+      rereview(); // claude/issue- 以外の PR は、巡回はレビューの起こし直しだけ
+      continue;
+    }
     if (pr.mergeable === null) {
       unknown.push({ pr: pr.number, reason: "mergeable が null" });
       continue;
@@ -814,16 +834,15 @@ export function stalledActions(input: {
       once({ action: "conflict", draft: "to-draft" }, "`main` と衝突しているので draft に戻した。衝突を直して Ready に戻す。");
       continue;
     }
-    if (issueNo === null) continue; // claude/issue- 以外は、衝突の行だけ
+    if (issueNo === null) {
+      rereview(); // claude/issue- 以外は、衝突とレビューの起こし直しだけ
+      continue;
+    }
     if (pr.draft && pr.mergeable === false && idle >= 30) {
       once({ action: "conflict-kick", draft: "ready-then-draft" }, "衝突したまま止まっているので、修正の役を起こし直した。");
       continue;
     }
-    // 3: レビューが動かなかった
-    if (!pr.draft && !pr.reviews.some((r) => sameCommit(r.commit, pr.headSha)) && !okCoversHead(pr) && pr.readyAt && minutesSince(pr.readyAt, now) >= 10) {
-      once({ action: "rereview", draft: "draft-then-ready" }, "レビューが動かなかったので起こし直した。");
-      continue;
-    }
+    if (rereview()) continue;
     // 4: 必須の指摘が直されないまま
     const latest = pr.reviews.at(-1);
     if (pr.draft && latest?.verdict === "changes" && sameCommit(latest.commit, pr.headSha) && idle >= 30) {
