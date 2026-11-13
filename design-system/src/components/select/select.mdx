@@ -1,0 +1,34 @@
+import { Meta, Canvas, Controls, Stories } from "@storybook/addon-docs/blocks";
+import * as SelectStories from "./select.stories";
+
+<Meta of={SelectStories} />
+
+# Select
+
+決まった選択肢から 1 つを選ぶ欄。ブラウザ標準の `<select>` を使う（キーボード・読み上げ・スマートフォンでの扱いが安定している）。名前（Label）・補足・誤りの文言とあわせて描く。
+
+<Canvas of={SelectStories.Default} />
+<Controls of={SelectStories.Default} />
+
+## 使う場面
+
+- 並べ方・分類・担当など、決まった選択肢が 4 個以上あり、その中から 1 つを選んでもらうとき。
+- 選ばれていない状態（はじめの案内）から選んでもらい、選び忘れを誤りの文言（`error`）で伝えるとき。
+- 選び方の補足を、欄の下に添えるとき（`description`）。
+
+## 使わない場面
+
+- 選択肢が 2〜3 個なら使わない（Radio を使う。別の部品）。
+- 選択肢が多く、文字で探して選ぶときには使わない（Combobox を使う。別の部品）。
+- 複数を選ぶときには使わない。
+- 名前を付けない欄には使わない。名前（`label`）は必ず渡す。
+
+## 書き方の決まり
+
+- 選択肢は子に `<option>` で渡す。はじめの案内は、値が空の `<option value="">` で置く。
+- 暗い表示でも選択肢が読めるよう、`<select>` の地（`bg-bg`）と文字（`text-fg`）をトークンのクラスで明示している。
+- `id` は渡さなくてよい。渡さなければ欄ごとに別の値が付く。
+
+## すべての状態
+
+<Stories />
