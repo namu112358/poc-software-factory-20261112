@@ -1,16 +1,17 @@
 import { notFound } from "next/navigation";
 import { formatAssigneeChange, listAssigneeChanges } from "@/lib/assignee-history";
-import { commentEditedLabel, listComments, splitCommentBody } from "@/lib/comments";
+import { commentEditedLabel, listComments, listDeletedComments, splitCommentBody } from "@/lib/comments";
+import { commentPreview } from "@/lib/comment-delete";
 import { requireUser } from "@/lib/session";
 import { listTags, listTagSuggestions } from "@/lib/tags";
-import { PRIORITY_LABELS, STATUS_LABELS, formatCompletedAt, formatEstimate, formatJstDateTime, formatTaskNumber, getTask, isDueSoon, isOverdue, parseTaskId, todayInJapan } from "@/lib/tasks";
+import { PRIORITY_LABELS, RESTORE_DAYS, STATUS_LABELS, formatCompletedAt, formatEstimate, formatJstDateTime, formatTaskNumber, getTask, isDueSoon, isOverdue, parseTaskId, todayInJapan } from "@/lib/tasks";
 import { listAssigneeOptions } from "@/lib/members";
 import { getUser } from "@/lib/users";
 import { ArchiveButton } from "./archive";
 import { DeleteTaskButton } from "./delete";
 import { DuplicateButton } from "./duplicate";
 import { EditTaskForm } from "./edit-form";
-import { CommentForm, DeleteCommentButton, EditCommentForm } from "./comments";
+import { CommentForm, DeleteCommentButton, EditCommentForm, RestoreCommentButton } from "./comments";
 import { listExtensions } from "@/lib/extensions";
 import { canRequestExtension, extensionResultLabel, findPendingExtension, pendingExtensionLabel, recentExtensionResults } from "@/lib/task-extension-panel";
 import { ExtensionRequestForm } from "./extension-form";
@@ -27,6 +28,7 @@ export default async function TaskDetailPage({ params }: Props) {
   if (!task) notFound();
   const assignee = getUser(task.assignee);
   const comments = listComments(task.id);
+  const deletedComments = listDeletedComments(task.id);
   const tags = listTags(task.id);
   const tagSuggestions = listTagSuggestions(task.id);
   const assigneeChanges = listAssigneeChanges(task.id);
@@ -186,6 +188,25 @@ export default async function TaskDetailPage({ params }: Props) {
           </ul>
         )}
         <CommentForm taskId={task.id} />
+        {deletedComments.length > 0 && (
+          <section aria-labelledby="deleted-comments-heading">
+            <h3 id="deleted-comments-heading">削除したコメント</h3>
+            <p>削除してから {RESTORE_DAYS} 日のあいだは、書いた本人が元に戻せます。</p>
+            <ul>
+              {deletedComments.map((c) => (
+                <li key={c.id} data-testid="deleted-comment">
+                  「{commentPreview(c.body)}」 — {c.authorName}、<time dateTime={c.deletedAt}>{formatJstDateTime(c.deletedAt)}</time> に削除
+                  {c.author === user.id && (
+                    <>
+                      {" "}
+                      <RestoreCommentButton taskId={task.id} commentId={c.id} />
+                    </>
+                  )}
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
       </section>
     </main>
   );
