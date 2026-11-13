@@ -215,7 +215,7 @@ function commitsAfter(n: number, last: string, headSha: string): StalledCommit[]
     const diff = git("show", "--format=", "--remerge-diff", sha).stdout.trim();
     // 取り込みだけのコミット: main を取り込んだ（2 つ目の親が main に含まれる）マージで、--remerge-diff の差分が空
     const fromMain = parents.length === 2 && git("merge-base", "--is-ancestor", parents[1], "refs/factory/main").status === 0;
-    return { sha, mergeOnly: fromMain && diff === "", merge: parents.length >= 2 };
+    return { sha, mergeOnly: fromMain && diff === "", merge: fromMain };
   });
 }
 

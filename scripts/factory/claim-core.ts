@@ -656,7 +656,7 @@ export function mergeCheck(args: {
 
 // ---- 止まった実装・PR の片付け（`claim.ts stalled`。割り当ての「3.」・巡回の「1.」） ----
 
-export type StalledCommit = { sha: string; mergeOnly: boolean; merge?: boolean }; // merge: マージのコミット（親が 2 つ以上）。gate の軽い再レビューの判定に使う
+export type StalledCommit = { sha: string; mergeOnly: boolean; merge?: boolean }; // merge: main を取り込んだマージのコミット（2 つ目の親が main に含まれる。ほかのブランチのマージは false）。gate の軽い再レビューの判定に使う
 export type CheckState = "success" | "failure" | "pending" | "none";
 
 export type StalledPr = {

@@ -879,6 +879,11 @@ describe("gate: 各役の起動の判定", () => {
       assert.equal(r.decision, "go");
       assert.equal(r.light, true);
     });
+    it("main 以外のブランチを取り込んだマージ（merge: false）が入ったら、軽い再レビューにしない", () => {
+      const r = gateDecision(review({ reviews: rv, afterOk: [{ sha: "c1", mergeOnly: false, merge: false }] }));
+      assert.equal(r.decision, "go");
+      assert.equal(r.light, false);
+    });
     it("5: それ以外は go で light ではない（機能の変更を含む・ok が無い・履歴に無い）", () => {
       for (const o of [{ reviews: rv, afterOk: [{ sha: "c1", mergeOnly: false, merge: true }, { sha: "c2", mergeOnly: false, merge: false }] }, { reviews: [] }, { reviews: rv, afterOk: null }, { reviews: [{ verdict: "changes", commit: "bbbbbbb" }] }]) {
         const r = gateDecision(review(o));
