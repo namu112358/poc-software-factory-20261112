@@ -205,9 +205,30 @@ export function recordConflict(state: TaskEditState, current: Task): TaskEditSta
   return current.id === state.taskId ? { ...state, conflict: current } : state;
 }
 
-/** 「今の値で編集し直す」。フォームの値・編集を始めたときの値・送る更新日時を、今のタスクのものにする。 */
+/**
+ * 編集し直したときのフォームの値を、項目ごとに決める。相手が変えた項目（`changedFields`）は今の値、
+ * それ以外の項目は自分の入力にする（相手が変えていない項目の入力を消さないため。#446）。
+ */
+export function mergeEditValues(base: TaskEditValues, current: TaskEditValues, mine: TaskEditValues): TaskEditValues {
+  const changed = new Set(changedFields(base, current));
+  const merged = { ...mine };
+  for (const field of changed) (merged as Record<keyof TaskEditValues, string>)[field] = current[field];
+  return merged;
+}
+
+/**
+ * 「今の値で編集し直す」。編集を始めたときの値・送る更新日時を今のタスクのものにし、
+ * フォームの値は、相手が変えた項目だけを今の値にする（ほかの項目は自分の入力を残す）。
+ */
 export function rebaseOnCurrent(state: TaskEditState): TaskEditState {
-  return state.conflict ? startTaskEdit(state.conflict) : state;
+  if (!state.conflict) return state;
+  const current = taskToEditValues(state.conflict);
+  return {
+    taskId: state.taskId,
+    values: mergeEditValues(state.base, current, state.values),
+    base: current,
+    expectedUpdatedAt: state.conflict.updatedAt,
+  };
 }
 
 /** 保存できるか。衝突の表が出ている間は、自分の入力のまま送り直させない。 */
