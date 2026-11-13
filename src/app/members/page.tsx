@@ -1,6 +1,7 @@
 import { formatPageTitle } from "@/lib/page-title";
 import { formatMonthDay } from "@/lib/absence";
 import { listMemberWorkload, sortMembersByOverdue } from "@/lib/members";
+import { VISIBLE_TASK_LIMIT, memberMoreHref, splitVisible } from "@/lib/task-overflow";
 import { requireUser } from "@/lib/session";
 
 export const metadata = { title: formatPageTitle("メンバー一覧") };
@@ -22,7 +23,9 @@ export default async function MembersPage() {
           </tr>
         </thead>
         <tbody>
-          {members.map((m) => (
+          {members.map((m) => {
+            const { shown, hiddenCount } = splitVisible(m.tasks, VISIBLE_TASK_LIMIT);
+            return (
             <tr key={m.id} data-testid="member-row" style={m.overdueCount > 0 ? { background: "#fdecea", fontWeight: "bold" } : undefined}>
               <td>
                 {m.name}
@@ -40,16 +43,25 @@ export default async function MembersPage() {
                   "なし"
                 ) : (
                   <ul>
-                    {m.tasks.map((t) => (
+                    {shown.map((t) => (
                       <li key={t.id}>
-                        <a href={`/tasks/${t.id}`}>{t.label}</a>
+                        <a href={`/tasks/${t.id}`} title={t.title}>{t.label}</a>
                       </li>
                     ))}
                   </ul>
                 )}
+                {hiddenCount > 0 && (
+                  <>
+                    <a href={memberMoreHref(m.id)} data-testid="member-more">
+                      ほか {hiddenCount} 件
+                    </a>
+                    <small>（リンク先は、完了したタスクも含めた {m.name} さんの担当の一覧です）</small>
+                  </>
+                )}
               </td>
             </tr>
-          ))}
+            );
+          })}
         </tbody>
       </table>
     </main>
