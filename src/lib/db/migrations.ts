@@ -292,4 +292,20 @@ export const MIGRATIONS: readonly Migration[] = [
       ALTER TABLE comments ADD COLUMN deleted_at TEXT;
     `,
   },
+  {
+    version: 25,
+    name: "comment_revisions",
+    sql: `
+      -- コメントを編集したときの、編集の前の本文。本文が変わった編集 1 回につき 1 行。
+      -- edited_at は、その本文を書き換えた日時（ISO 8601（UTC））。コメントの edited_at と同じ値を入れる。
+      -- 既存のコメントの前の本文は残っていないので、履歴は空から始まる。
+      CREATE TABLE comment_revisions (
+        id         INTEGER PRIMARY KEY AUTOINCREMENT,
+        comment_id INTEGER NOT NULL REFERENCES comments(id) ON DELETE CASCADE,
+        body       TEXT NOT NULL,
+        edited_at  TEXT NOT NULL
+      );
+      CREATE INDEX comment_revisions_comment ON comment_revisions(comment_id);
+    `,
+  },
 ];
