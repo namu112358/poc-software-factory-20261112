@@ -1,27 +1,20 @@
 // POST /api/login — JSON（{ userId, password }）またはフォーム送信でログインする。
 // フォーム送信のときは画面遷移（303）、JSON のときは JSON で応答する。
+// JSON でもフォームでもない送り方は 415、読めないフォームは 400 を JSON で返す（#513）。
 // フォーム送信の next（ログインした後の戻り先。#491）は、このアプリの中の画面のときだけ使い、それ以外はタスク一覧へ移す。
 import { NextResponse } from "next/server";
-import { jsonError, readJson } from "@/lib/api";
+import { jsonError } from "@/lib/api";
 import { SESSION_COOKIE, SESSION_TTL_MS, login } from "@/lib/auth";
 import { loginErrorPath } from "@/lib/login-error";
+import { readLoginRequest } from "@/lib/login-request";
 import { afterLoginPath } from "@/lib/session-expired";
 
 export async function POST(request: Request) {
-  const isJson = (request.headers.get("content-type") ?? "").includes("application/json");
-  let userId: unknown;
-  let password: unknown;
-  let next: unknown;
-  if (isJson) {
-    const body = (await readJson(request)) as Record<string, unknown> | undefined;
-    userId = body?.userId;
-    password = body?.password;
-  } else {
-    const form = await request.formData();
-    userId = form.get("userId");
-    password = form.get("password");
-    next = form.get("next");
-  }
+  const body = await readLoginRequest(request);
+  // 読めない送り方は、ログインの判定（誤りの回数・ロック）の前に 4xx で返す（#513）
+  if (!body.ok) return jsonError(body.status, body.error, body.details);
+  const isJson = body.kind === "json";
+  const { userId, password, next } = body;
 
   const result = login(userId, password, undefined, undefined, request.headers.get("user-agent"));
   if (!result.ok) {
