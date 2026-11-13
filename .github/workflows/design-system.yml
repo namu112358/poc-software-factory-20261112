@@ -1,0 +1,37 @@
+name: Design system
+
+on:
+  pull_request:
+    paths:
+      - "design-system/**"
+      - ".github/workflows/design-system.yml"
+  push:
+    branches: [main]
+    paths:
+      - "design-system/**"
+      - ".github/workflows/design-system.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    # app-check とは別のジョブ。必須のチェックにするかは人が Ruleset で決める
+    name: design-system-check
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: design-system
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: design-system/package-lock.json
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm test
+      - run: npm run build
