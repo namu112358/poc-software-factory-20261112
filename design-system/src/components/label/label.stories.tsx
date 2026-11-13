@@ -5,6 +5,7 @@ import { Label } from "./label";
 
 /**
  * Label は入力欄と組み合わせて使う。Input などの部品はまだ無いので、Story では素の <input> を使う。
+ * 欄の `id` は Story ごとに変える（Docs のページでは複数の Story が同じページに並ぶため、同じ `id` だと名前が別の Story の欄に結び付く）。
  * axe（アクセシビリティの検査）は、すべての Story に自動でかかる（.storybook/preview.tsx）。
  */
 const meta = {
@@ -21,7 +22,7 @@ const meta = {
   render: (args) => (
     <div className="flex flex-col gap-1">
       <Label {...args} />
-      <input id="field" type="text" className="rounded-md border border-border-strong bg-bg px-2.5 py-1.5 text-base text-fg" />
+      <input id={args.htmlFor} type="text" className="rounded-md border border-border-strong bg-bg px-2.5 py-1.5 text-base text-fg" />
     </div>
   ),
 } satisfies Meta<typeof Label>;
@@ -32,6 +33,7 @@ type Story = StoryObj<typeof meta>;
 /** ふつうの名前。名前を押すと、結び付いた欄にフォーカスが移る。 */
 export const Default: Story = {
   name: "ふつう",
+  args: { htmlFor: "field-default" },
   play: async ({ canvas }) => {
     const input = canvas.getByRole("textbox", { name: "表示名" });
     await userEvent.click(canvas.getByText("表示名"));
@@ -42,7 +44,7 @@ export const Default: Story = {
 /** 必須の欄。見た目は「*」、読み上げでは「必須」と読まれる。 */
 export const Required: Story = {
   name: "必須",
-  args: { required: true },
+  args: { required: true, htmlFor: "field-required" },
   play: async ({ canvas }) => {
     const input = canvas.getByRole("textbox", { name: /必須/ });
     await expect(input).toHaveAccessibleName("表示名 必須");
@@ -54,11 +56,11 @@ export const Required: Story = {
 /** 押せない欄の名前。薄く表示する。 */
 export const Disabled: Story = {
   name: "押せない欄の名前",
-  args: { disabled: true },
+  args: { disabled: true, htmlFor: "field-disabled" },
   render: (args) => (
     <div className="flex flex-col gap-1">
       <Label {...args} />
-      <input id="field" type="text" disabled className="rounded-md border border-border-strong bg-bg px-2.5 py-1.5 text-base text-fg" />
+      <input id={args.htmlFor} type="text" disabled className="rounded-md border border-border-strong bg-bg px-2.5 py-1.5 text-base text-fg" />
     </div>
   ),
   play: async ({ canvas }) => {
@@ -72,5 +74,5 @@ export const Disabled: Story = {
 export const Dark: Story = {
   name: "暗い表示",
   globals: { theme: "dark" },
-  args: { required: true },
+  args: { required: true, htmlFor: "field-dark" },
 };

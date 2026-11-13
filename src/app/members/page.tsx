@@ -8,6 +8,10 @@ import { showSuspensionControl } from "@/lib/member-suspension";
 import { SuspensionButton } from "./suspension-button";
 import { showAddMemberControl } from "@/lib/member-create";
 import { AddMemberForm } from "./add-member-form";
+import { roleControlFor, roleLabel } from "@/lib/member-role";
+import { RoleButton } from "./role-button";
+import { TEMPORARY_PASSWORD_PENDING_LABEL, showReissueControl } from "@/lib/member-temporary-password";
+import { TemporaryPasswordButton } from "./temporary-password-button";
 
 export const metadata = { title: formatPageTitle("メンバー一覧") };
 
@@ -27,11 +31,13 @@ export default async function MembersPage() {
             <th>未完了のタスク数</th>
             <th>未完了のタスク</th>
             <th>ログイン</th>
+            <th>役割</th>
           </tr>
         </thead>
         <tbody>
           {members.map((m) => {
             const { shown, hiddenCount } = splitVisible(m.tasks, VISIBLE_TASK_LIMIT);
+            const roleTo = roleControlFor(viewer, m);
             return (
             <tr key={m.id} data-testid="member-row" style={m.overdueCount > 0 ? { background: "#fdecea", fontWeight: "bold" } : undefined}>
               <td>
@@ -68,10 +74,31 @@ export default async function MembersPage() {
               </td>
               <td data-testid="member-login">
                 {m.suspended ? "停止中" : "利用中"}
+                {m.mustChangePassword && (
+                  <>
+                    {"、"}
+                    <span data-testid="member-temporary-password-pending">{TEMPORARY_PASSWORD_PENDING_LABEL}</span>
+                  </>
+                )}
                 {showSuspensionControl(viewer, m.id) && (
                   <>
                     {" "}
                     <SuspensionButton memberId={m.id} name={m.name} suspended={m.suspended} />
+                  </>
+                )}
+                {showReissueControl(viewer, m) && (
+                  <>
+                    {" "}
+                    <TemporaryPasswordButton memberId={m.id} name={m.name} />
+                  </>
+                )}
+              </td>
+              <td data-testid="member-role">
+                {roleLabel(m.role)}
+                {roleTo && (
+                  <>
+                    {" "}
+                    <RoleButton memberId={m.id} name={m.name} to={roleTo} self={m.id === viewer.id} />
                   </>
                 )}
               </td>

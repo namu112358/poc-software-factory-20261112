@@ -644,6 +644,18 @@ export function reviewStatus(mc: ReturnType<typeof mergeCheck>, headSha: string,
   return { state: null, description: mc.reason };
 }
 
+/**
+ * 「最新のコミットがレビューを通った」ことを表す status（context=factory-reviewed）の値。merge:requested で人がキューに入れる PR にも要る
+ * （人がラベルを付けた後の push が、レビューを受けないままマージされたため。#499）。
+ * merge-check のレビューの部分と同じ判定で、ok なら success（risk:high・品質のゲートを変える PR でも付く）、最新のコミットへのレビューが ok でなければ failure、それ以外は付けない（null）。
+ */
+export function reviewedStatus(mc: ReturnType<typeof mergeCheck>, headSha: string): { state: "success" | "failure" | null; description: string } {
+  const onHead = mc.review !== null && (headSha.startsWith(mc.review.commit) || mc.review.commit.startsWith(headSha));
+  if (mc.ok) return { state: "success", description: mc.reason };
+  if (onHead && mc.review !== null && mc.review.verdict !== "ok") return { state: "failure", description: mc.reason };
+  return { state: null, description: mc.reason };
+}
+
 export function mergeCheck(args: {
   reviews: { body: string; association: string }[];
   headSha: string;
@@ -725,6 +737,15 @@ function changedAfterLatestReview(pr: StalledPr): boolean {
   return after == null || after.some((c) => !c.mergeOnly);
 }
 
+/**
+ * stalled の入力として、PR ごとに何を読むか（claim.ts の loadStalled が使う）。
+ * レビューと Ready の時刻は、claude/issue- 以外の PR でも読む（レビューの起こし直しは claude/ のすべての PR が対象。#559）。
+ * Ready の時刻は Ready の PR だけ。CI・PR 本文の検査・Mergify の状況は、claude/issue- の PR で mergeable が分かっているときだけ（ほかの行で使う）。
+ */
+export function stalledLoadPlan(p: { own: boolean; mergeable: boolean | null; draft: boolean }): { reviews: boolean; readyAt: boolean; checks: boolean } {
+  return { reviews: true, readyAt: !p.draft, checks: p.own && p.mergeable !== null };
+}
+
 export function stalledComment(role: string, action: string, text: string, sessionUrl: string | null, commit?: string): string {
   const mark = `<!-- factory:${role} action=${action}${commit ? ` commit=${commit}` : ""} -->`;
   return [mark, text, ...(sessionUrl ? [`セッション: ${sessionUrl}`] : [])].join("\n");
@@ -733,7 +754,7 @@ export function stalledComment(role: string, action: string, text: string, sessi
 /**
  * 止まった実装・PR の判定（dispatch.md・patrol.md の表を 1 つにしたもの）。GitHub には書かず、役が行う操作だけを返す。
  * 1 つの PR・Issue に当てはまる処置は、行の順（1〜9）で最初の 1 つだけ。mergeable が null の PR は unknown に入れ、ほかの行も判定しない。
- * 対象: claude/ の PR（claude/issue- 以外は「衝突」の行だけ）。PR に status:needs-human、その Issue に blocked-question・needs-human・kind:epic があるものは対象外。
+ * 対象: claude/ の PR（claude/issue- 以外は「衝突」と「レビューが動かなかった」の行だけ。巡回は「レビューが動かなかった」だけ）。PR に status:needs-human、その Issue に blocked-question・needs-human・kind:epic があるものは対象外。
  * issues: 開いていて status:in-progress（-hard）が付いた Issue と、PR の Issue（PR の Issue は prs の headRef から引く）。
  * closedStarted: 閉じた Issue のうち、status:in-progress（-hard）が残っているもの（行 10）。
  */
@@ -792,7 +813,18 @@ export function stalledActions(input: {
       });
     };
 
-    if (issueNo === null && role !== "dispatch") continue; // claude/issue- 以外の PR は、割り当ての衝突の知らせだけ（巡回は扱わない）
+    // 3: レビューが動かなかった（claude/ のすべての PR。レビューの起動の取りこぼしは、出したセッションでは気づきにくい。#482・#518）
+    const rereview = () => {
+      if (!pr.draft && !pr.reviews.some((r) => sameCommit(r.commit, pr.headSha)) && !okCoversHead(pr) && pr.readyAt && minutesSince(pr.readyAt, now) >= 10) {
+        once({ action: "rereview", draft: "draft-then-ready" }, "レビューが動かなかったので起こし直した。");
+        return true;
+      }
+      return false;
+    };
+    if (issueNo === null && role !== "dispatch") {
+      rereview(); // claude/issue- 以外の PR は、巡回はレビューの起こし直しだけ
+      continue;
+    }
     if (pr.mergeable === null) {
       unknown.push({ pr: pr.number, reason: "mergeable が null" });
       continue;
@@ -802,16 +834,15 @@ export function stalledActions(input: {
       once({ action: "conflict", draft: "to-draft" }, "`main` と衝突しているので draft に戻した。衝突を直して Ready に戻す。");
       continue;
     }
-    if (issueNo === null) continue; // claude/issue- 以外は、衝突の行だけ
+    if (issueNo === null) {
+      rereview(); // claude/issue- 以外は、衝突とレビューの起こし直しだけ
+      continue;
+    }
     if (pr.draft && pr.mergeable === false && idle >= 30) {
       once({ action: "conflict-kick", draft: "ready-then-draft" }, "衝突したまま止まっているので、修正の役を起こし直した。");
       continue;
     }
-    // 3: レビューが動かなかった
-    if (!pr.draft && !pr.reviews.some((r) => sameCommit(r.commit, pr.headSha)) && !okCoversHead(pr) && pr.readyAt && minutesSince(pr.readyAt, now) >= 10) {
-      once({ action: "rereview", draft: "draft-then-ready" }, "レビューが動かなかったので起こし直した。");
-      continue;
-    }
+    if (rereview()) continue;
     // 4: 必須の指摘が直されないまま
     const latest = pr.reviews.at(-1);
     if (pr.draft && latest?.verdict === "changes" && sameCommit(latest.commit, pr.headSha) && idle >= 30) {
@@ -1081,4 +1112,41 @@ export function isOwnClaudePr(p: { head: HeadRef }, repo: string): boolean {
 /** PR の head がこのリポジトリのブランチか（フォーク・消えたフォークは false）。フォークの判定はここだけに置く */
 export function isOwnHead(headRepo: string | null, repo: string): boolean {
   return headRepo !== null && headRepo === repo;
+}
+
+/**
+ * クラウドのセッションの URL（環境変数 CLAUDE_CODE_REMOTE_SDK_URL）から、コメントに書くセッションの ID（session_...）を取り出す。
+ * URL の `cse_<ID>` を `session_<ID>` に読み替える。無い・形が違うときは null（ID を手で書かせないため。#156）。
+ */
+export function sessionIdFromUrl(url: string | undefined): string | null {
+  const m = /cse_([A-Za-z0-9]+)/.exec(url ?? "");
+  return m ? `session_${m[1]}` : null;
+}
+
+/**
+ * `claim.ts rest-get <パス>` のパスを確かめる。このリポジトリの REST（`/repos/<repo>/...`）だけを読ませる。
+ * `..`・空白・`per_page`・`page` を含むもの、`?` より前に `%`・`\`・`#` を含むものは断る（ページは claim.ts が読む。`&` はフックに断られるため）。
+ */
+export function parseRestPath(value: string | undefined, repo: string): string {
+  const p = value ?? "";
+  // `?` より前に `%`（%2e%2e など符号化した `..`）・`\`・`#` があれば、許可したパスの外に出られるので断る
+  const pathPart = p.split("?")[0];
+  const ok = p.startsWith(`/repos/${repo}/`) && !p.includes("..") && !/[%\\#]/.test(pathPart) && !/\s/.test(p) && !/[?&](per_page|page)=/.test(p);
+  if (!ok) throw new Error(`/repos/${repo}/ で始まるパスを、per_page・page を付けずに指定する（例: node scripts/factory/claim.ts rest-get /repos/${repo}/issues/123/events）`);
+  return p;
+}
+
+/** 待つ秒数の上限。割り当ての間隔（30 秒）・unknown の読み直し（60 秒）に足りる長さにとどめる */
+export const WAIT_MAX_SECONDS = 600;
+
+/**
+ * `claim.ts wait <秒>` の秒数を読む。1〜WAIT_MAX_SECONDS の整数だけを受け付け、それ以外は例外。
+ * 単独の `sleep` は Claude Code に断られ、`node -e "setTimeout(...)"` はフックに断られるため、待つのはこのサブコマンドで行う。
+ */
+export function parseWaitSeconds(value: string | undefined): number {
+  const s = Number(value);
+  if (value === undefined || !/^\d+$/.test(value) || !Number.isInteger(s) || s < 1 || s > WAIT_MAX_SECONDS) {
+    throw new Error(`待つ秒数を 1〜${WAIT_MAX_SECONDS} の整数で指定する（例: node scripts/factory/claim.ts wait 30）`);
+  }
+  return s;
 }

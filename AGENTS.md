@@ -81,6 +81,8 @@ Storybook で部品を作るデザインシステムの見本（本採用は未�
   - 理由: 案内が実態とずれると、エージェントは古い案内を正しいものとして読んでしまうため。
 - PR を出す前に `python3 scripts/check-skills.py` を実行し、エラーを 0 件にする。
   - 理由: Skills の形式・参照先・評価ケースの定義と、vendored Skills が手で編集されていないことを、モデルを呼ばずに確かめられるため。
+- 自作の Skill の名前は `namu112358-` で始める。
+  - 理由: vendored の Skill と見分けるため。`scripts/check-skills.py` が確かめる。
 - 自作の Skill には、`evals/evals.json`（評価ケース）と `evals/trigger.json`（発火すべき例・発火すべきでない例）を Skill のディレクトリに置く。形式は skill-creator（`.claude/skills/skill-creator/references/schemas.md`）に合わせる。
   - 理由: 評価の入力と合格条件を Skill の隣に置くと、Skill を変えたときに同じケースで確かめ直せるため（withastro/astro の形）。
 - 失敗の再発防止は、型・Lint・単体テスト・結合テスト・E2E テストの順に、その失敗を検出できる一番手前の段に置き、置いた段と理由を PR に書く。

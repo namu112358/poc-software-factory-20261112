@@ -30,7 +30,7 @@ flowchart LR
 | `status:blocked-question` | Issue | 確認事項があり止まっている | 実装・修正、未決の点が残る Issue を返す割り当て・巡回 |
 | `status:needs-human` | Issue・PR | 上限に達した・手順の外のことが要る | どの役でも |
 | `risk:high` | PR | 高リスクの変更。人が重点的に見る。自動ではキューに入らない | レビュー（レビューの結果を書く前に付ける） |
-| `merge:requested` | PR | マージしてよい（Mergify のキューに入る）。`risk:high` の PR と、自動で入らない PR に使う | 人だけ（付ける前に `claim.ts merge-check`） |
+| `merge:requested` | PR | マージしてよい（Mergify のキューに入る）。`risk:high` の PR と、自動で入らない PR に使う | 人だけ（付ける前に `claim.ts merge-check`）。付けても、最新のコミットがレビューを通っていなければ（status `factory-reviewed`）キューに入らない |
 | `kind:epic` | Issue | Epic。実装しない | 人 |
 | `kind:kaizen` | Issue | 運用の課題の記録（台帳 #123 の子）。実装しない | 人 |
 | `type:feat`・`type:fix`・`type:refactor`・`type:docs`・`type:test`・`type:chore`・`type:ci`・`type:perf` | Issue・PR | 変更の種類（Conventional Commits の type） | Issue はテンプレート・人、PR は実装（Issue と同じもの） |
@@ -59,11 +59,16 @@ flowchart LR
 - `kind:epic`・`kind:kaizen` の付いた Issue は対象にしない。
 - マージ・Approve・`merge:requested` のラベルを付けることはしない（人がする。レビューを通った PR は、`risk:high` 以外は自動でキューに入る）。Mergify の設定（`.mergify.yml`）を変える PR は、人がキューを通さずにマージする（その前に `claim.ts merge-check`）。AI は管理者の例外を使わない。
 - `.github/`・`.claude/`・`scripts/factory/`・`AGENTS.md`・`CLAUDE.md`・`docs/rulesets/` は変えない（例外は、振り返りの役が draft の PR で出す案だけ）。
-- 起動のラベル（`status:in-progress`・`status:in-progress-hard`）は、その Issue のほかのラベルを付け外ししてから 30 秒以上あけて付ける（同じ数秒にほかのラベルも付くと、実装が重ねて起動した。#429）。
+- 起動のラベル（`status:in-progress`・`status:in-progress-hard`）は、その Issue のほかのラベルを付け外ししてから 30 秒以上あけて付ける（同じ数秒にほかのラベルも付くと、実装が重ねて起動した。#429）。待つのは `node scripts/factory/claim.ts wait <秒>`（例: `wait 30`）で行う。単独の `sleep` は Claude Code に断られ、`node -e "setTimeout(...)"` はフックに断られる。
 - push するのは `claude/` で始まるブランチだけ。force push はしない。
-- `claude/issue-` 以外の `claude/` の PR（有人のセッションが出した手順書・スクリプトの PR など）は、出したセッションが直す。修正・巡回の役は扱わない（衝突や指摘で `status:needs-human` を付けない）。レビューと、割り当ての衝突の知らせは同じように行う。
+- コマンドは 1 回に 1 つ実行する。`&&`・`;`・`||` でつながない、`cd` しない（作業ディレクトリはリポジトリの直下なので、`git <サブコマンド>` をそのまま実行する。`git -C` は使わない。許可に当たらず承認の画面に回るため）、`rm -rf` を使わない。つないだコマンドは承認の画面で止まり、Routine はそこから進めない（05:43・05:50 UTC のレビューの Routine）。git を含まないつなぎ（`S=...; $S`、`(cmd &)`、`cat > $S/x <<'EOF'`）でも 6 回止まった。
+  - Bash のコマンドに、`;` `&` `<` `>` `$` バッククォート `\` `(` `)` `{` `}` と改行を書かない（引用符の中も）。リダイレクト・ヒアドキュメント・変数・`$(...)`・`NAME=値 npm test` のような前置きも使わない。`|` は `head`・`tail`・`grep`・`wc`・`sort` に渡す形だけ。git は cd せず、リポジトリの直下で `git <サブコマンド>` をそのまま実行し（`git -C` は使わない）、`git -c` などで設定を差し替えない。
+  - よく使う形（`.claude/settings.json` の許可に当たる形）: ブランチの取り出しは `git fetch origin claude/<名前>` の後に `git switch claude/<名前>`（新しく作るときは `git switch -c claude/<名前>`）、`main` の取り込みは `git fetch origin main` の後に `git merge origin/main`、push は `git push origin claude/<名前>`、差分は `git diff origin/main...HEAD`、手順書の `main` の版は `git show origin/main:.claude/routines/<役>.md`、取り込みのコミットの差分は `git show --remerge-diff <コミット>`、前回のレビューの後のコミットは `git log --oneline <前回のコミット>..HEAD`。`design-system/` のコマンドは cd せず `npm --prefix design-system <...>`（例: `npm --prefix design-system test`）。GitHub の REST は `node scripts/factory/claim.ts rest-get <パス>` で読む（`gh`・`curl` は使わない）。
+  - 複数の手順の確かめは、Write でスクラッチパッドにスクリプト（.mjs など）を書き、`node <ファイル>` で 1 コマンドで実行する。サーバーは Bash の `run_in_background` で 1 コマンドで起動する。`git commit -m` で書けない本文は、Write でファイルに書いて `git commit -F <ファイル>` で渡す。一時のフォルダーは消さずに新しい名前で作る。
+  - `.claude/settings.json` の `PreToolUse` にフック（`.claude/hooks/bash-guard.mjs`）が登録済みで、上の文字を含むコマンドは実行前に断られる（断られたら、言い換えずに分けて実行し直す）。フックの役目は、承認の画面で止まらないように早めに断って分け方を返すこと。何を実行してよいかの境界は、`.claude/settings.json` の許可（`permissions.allow`）である。
+- `claude/issue-` 以外の `claude/` の PR（有人のセッションが出した手順書・スクリプトの PR など）は、出したセッションが直す。修正の役は扱わず、衝突や必須の指摘で `status:needs-human` を付けない。レビューと、割り当ての衝突の知らせ、割り当て・巡回のレビューの起こし直し（Ready のまま 10 分レビューが無いとき。同じコミットで 2 回目は `status:needs-human`）は同じように行う。
 - PR の draft と Ready の切り替えは、GitHub MCP の `update_pull_request`（`draft: true` / `false`）で行う。
 - 実装の着手の鍵は、ブランチ `claude/issue-<番号>` の作成（同じ名前は 2 度作れない）。
 - 「取り込みだけのコミット」（`main` を取り込んだマージのコミットで、`git show --remerge-diff <コミット>` の差分が空のもの。ただの `git show` は、手の入っていない取り込みでも差分を出すことがある）は、レビュー済みかを判定するときに数えない。
 - 権限で拒まれた操作は、言い換えて通そうとせず、拒まれたコマンドをコメントに書いて `status:needs-human` を付けて止まる。
-- 役の最後に、Issue か PR に「何をしたか・次に誰が何をするか」を 1〜3 行でコメントする。先頭に `<!-- factory:<役> -->`、最後に `セッション: https://claude.ai/code/session_<ID>` を書く（`<ID>` は `echo "$CLAUDE_CODE_REMOTE_SDK_URL" | sed 's/.*cse_/session_/'` で取る。コミットの行からは取らない）。コミットに書く `Claude-Session:` の行も、同じ方法で取った ID で書く（手で書き写さない。崩れた URL が 4 行あった。#156）。
+- 役の最後に、Issue か PR に「何をしたか・次に誰が何をするか」を 1〜3 行でコメントする。先頭に `<!-- factory:<役> -->`、最後に `セッション: https://claude.ai/code/session_<ID>` を書く（`<ID>` は `node scripts/factory/claim.ts session-id` を実行し、出力の `sessionId` をそのまま使う。`error` なら ID を手で書かず、取れなかったことを書く。環境変数を `printenv`・`echo` で読む形は使わない。自動モードの判定に断られたことがあるため。コミットの行からは取らない）。コミットに書く `Claude-Session:` の行も、同じ方法で取った ID で書く（手で書き写さない。崩れた URL が 4 行あった。#156）。

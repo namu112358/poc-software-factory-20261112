@@ -5,11 +5,14 @@
 //   node scripts/factory/claim.ts relabel --minutes 15                  起動しなかった実装の付け直しの対象（付け直す数は budget の残りまで）
 //   node scripts/factory/claim.ts handled --since <ISO 8601>            ほかの割り当てがもう処理した Issue・PR
 //   node scripts/factory/claim.ts merge-check <PR>                      merge:requested のラベルを付けてよいか（最新のレビューが ok で、その後は取り込みだけか）
-//   node scripts/factory/claim.ts review-status <PR>                    レビューを通ったことを表す status（factory-review）の値（success・failure・null）。GitHub Actions が使う
+//   node scripts/factory/claim.ts review-status <PR>                    レビューの結果の status の値（state: 自動でキューに入ってよいか〔factory-review〕、reviewed: 最新のコミットがレビューを通ったか〔factory-reviewed〕）。GitHub Actions が使う
 //   node scripts/factory/claim.ts stalled --role dispatch|patrol       止まった実装・PR の片付け（actions に、そのまま行う操作。unknown は 1 分後にもう一度）
 //   node scripts/factory/claim.ts gate --role implement|review|fix --number <N>   実装・レビュー・修正が起動してよいか（decision と、役が行う ops）
 //   node scripts/factory/claim.ts ci-wait --pr <N> [--minutes 15] [--role implement|fix]   PR の CI（app-check）が終わるまで待つ（result のとおりに動く。1 回に 16 分ほどかかるのでバックグラウンドで実行する）
 //   node scripts/factory/claim.ts budget                                直近 60 分に status:in-progress を付けた回数と、あと何回付けてよいか
+//   node scripts/factory/claim.ts wait <秒>                              指定の秒数（1〜600）だけ待つ（GitHub は読まない。単独の sleep は Claude Code に断られるため）
+//   node scripts/factory/claim.ts session-id                            このセッションの ID（session_...）と URL（コメントの最後の行・コミットの Claude-Session: に書く）
+//   node scripts/factory/claim.ts rest-get /repos/<repo>/<パス>          このリポジトリの REST を GET で読む（一覧は全ページ。gh api・curl は許可に当たらないため）
 // Node 22.18 以上（型を外して .ts をそのまま動かす）。クラウドのプロキシを通すため、NODE_USE_ENV_PROXY=1 で自分を起動し直す。
 import { spawnSync } from "node:child_process";
 import {
@@ -36,12 +39,14 @@ import {
   errorActions,
   mergeCheck,
   reviewStatus,
+  reviewedStatus,
   ciCheck,
   CI_CHECKS,
   combineChecks,
   TRUSTED_ASSOCIATIONS,
   precheck,
   precheckActions,
+  stalledLoadPlan,
   isOwnClaudePr,
   type HeadRef,
   readyBudget,
@@ -50,6 +55,9 @@ import {
   type Comment,
   type IssueInfo,
   type PrInfo,
+  sessionIdFromUrl,
+  parseWaitSeconds,
+  parseRestPath,
 } from "./claim-core.ts";
 
 const REPO = process.env.FACTORY_REPO ?? "namu112358/poc-software-factory-20261112";
@@ -198,8 +206,7 @@ function arg(name: string): string | undefined {
 }
 
 function mySession(): string | null {
-  const m = /cse_([A-Za-z0-9]+)/.exec(process.env.CLAUDE_CODE_REMOTE_SDK_URL ?? "");
-  return m ? `session_${m[1]}` : null;
+  return sessionIdFromUrl(process.env.CLAUDE_CODE_REMOTE_SDK_URL);
 }
 
 const git = (...a: string[]) => spawnSync("git", a, { encoding: "utf-8" });
@@ -270,14 +277,8 @@ async function loadStalled(role: string) {
           .filter((m): m is RegExpExecArray => m !== null)
           .map((m) => ({ action: m[1], commit: m[2] }));
       }
-      if (mergeable !== null && own) {
-        const checkState = async (name: string): Promise<CheckState> => {
-          const runs = (await get<{ check_runs: { status: string; conclusion: string | null; started_at: string }[] }>(`/repos/${REPO}/commits/${full.head.sha}/check-runs?check_name=${name}&per_page=100`)).data.check_runs ?? [];
-          const latest = runs.sort((a, b) => (a.started_at < b.started_at ? -1 : 1)).at(-1);
-          return !latest ? "none" : latest.status !== "completed" ? "pending" : latest.conclusion === "success" ? "success" : "failure";
-        };
-        appCheck = combineChecks(await Promise.all(CI_CHECKS.map((name) => checkState(name))));
-        bodyCheck = await checkState("pr-body-check");
+      const plan = stalledLoadPlan({ own, mergeable, draft: full.draft });
+      if (plan.reviews) {
         reviews = (await getAll<{ body: string | null; submitted_at: string; author_association: string }>(`/repos/${REPO}/pulls/${n}/reviews`))
           .sort((a, b) => (a.submitted_at < b.submitted_at ? -1 : 1))
           .filter((r) => TRUSTED_ASSOCIATIONS.includes(r.author_association))
@@ -287,10 +288,19 @@ async function loadStalled(role: string) {
         for (const commit of new Set([reviews.at(-1)?.commit, reviews.filter((r) => r.verdict === "ok").at(-1)?.commit])) {
           if (commit) after[commit] = commitsAfter(n, commit, full.head.sha);
         }
-        if (!full.draft) {
-          const tl = await getAll<{ event: string; created_at: string }>(`/repos/${REPO}/issues/${n}/timeline`);
-          readyAt = tl.filter((e) => e.event === "ready_for_review").at(-1)?.created_at ?? full.created_at;
-        }
+      }
+      if (plan.readyAt) {
+        const tl = await getAll<{ event: string; created_at: string }>(`/repos/${REPO}/issues/${n}/timeline`);
+        readyAt = tl.filter((e) => e.event === "ready_for_review").at(-1)?.created_at ?? full.created_at;
+      }
+      if (plan.checks) {
+        const checkState = async (name: string): Promise<CheckState> => {
+          const runs = (await get<{ check_runs: { status: string; conclusion: string | null; started_at: string }[] }>(`/repos/${REPO}/commits/${full.head.sha}/check-runs?check_name=${name}&per_page=100`)).data.check_runs ?? [];
+          const latest = runs.sort((a, b) => (a.started_at < b.started_at ? -1 : 1)).at(-1);
+          return !latest ? "none" : latest.status !== "completed" ? "pending" : latest.conclusion === "success" ? "success" : "failure";
+        };
+        appCheck = combineChecks(await Promise.all(CI_CHECKS.map((name) => checkState(name))));
+        bodyCheck = await checkState("pr-body-check");
         if (labels.some((l) => l === "merge:dequeued" || l === "dequeued")) {
           const comments = await getAll<RawTrustedComment>(`/repos/${REPO}/issues/${n}/comments`);
           // Mergify のボットの状況のコメントだけを読む（ほかの人が同じ文字を書いても、判定に使わない）
@@ -482,11 +492,14 @@ async function main(): Promise<unknown> {
       const raw = await getAll<{ filename: string; previous_filename?: string }>(`/repos/${REPO}/pulls/${n}/files`);
       // 一覧が途中で切れた・判定の間に head が変わったときは、付けない（安全側に倒す）
       const now = (await get<{ head: { sha: string }; changed_files: number }>(`/repos/${REPO}/pulls/${n}`)).data;
-      if (now.head.sha !== pr.head.sha) return { pr: n, sha: pr.head.sha, state: null, description: "判定の間に PR の最新のコミットが変わった。次のきっかけで判定し直す。" };
-      if (raw.length !== now.changed_files) return { pr: n, sha: pr.head.sha, state: null, description: `変更ファイルの一覧（${raw.length} 件）が PR の変更ファイル数（${now.changed_files} 件）と合わない。人が確かめる。` };
+      const none = { state: null, description: "判定の間に PR の最新のコミットが変わった。次のきっかけで判定し直す。" };
+      if (now.head.sha !== pr.head.sha) return { pr: n, sha: pr.head.sha, ...none, reviewed: none };
+      // factory-reviewed（レビューを通ったか）は、変更ファイルによらない
+      const reviewed = reviewedStatus(review, pr.head.sha);
+      if (raw.length !== now.changed_files) return { pr: n, sha: pr.head.sha, state: null, description: `変更ファイルの一覧（${raw.length} 件）が PR の変更ファイル数（${now.changed_files} 件）と合わない。人が確かめる。`, reviewed };
       // 判定のよりどころは GitHub の変更ファイル（PR の側の記述は読まない）
       const files = raw.flatMap((f) => [f.filename, ...(f.previous_filename ? [f.previous_filename] : [])]);
-      return { pr: n, sha: pr.head.sha, ...reviewStatus(review, pr.head.sha, pr.labels.map((l) => l.name), files) };
+      return { pr: n, sha: pr.head.sha, ...reviewStatus(review, pr.head.sha, pr.labels.map((l) => l.name), files), reviewed };
     }
     case "stalled": {
       const role = arg("role");
@@ -513,8 +526,27 @@ async function main(): Promise<unknown> {
       const comments = raw.map((c) => ({ issue: Number(c.issue_url.split("/").pop()), body: c.body ?? "", createdAt: c.created_at }));
       return { since, mySession: mySession(), handled: handledByOthers({ comments, since, mySession: mySession() }) };
     }
+    case "wait": {
+      const seconds = parseWaitSeconds(num);
+      await sleep(seconds * 1000);
+      return { waited: seconds };
+    }
+    case "rest-get": {
+      const path = parseRestPath(num, REPO);
+      const sep = path.includes("?") ? "&" : "?";
+      const first = await get<unknown>(`${path}${sep}per_page=100`);
+      // 一覧（配列）なら、続きのページも読む（10 ページまで）
+      if (first.status === 404) return { path, status: 404, data: null };
+      if (Array.isArray(first.data)) return { path, status: first.status, data: await getAll<unknown>(path) };
+      return { path, status: first.status, data: first.data };
+    }
+    case "session-id": {
+      const id = mySession();
+      if (!id) throw new Error("環境変数 CLAUDE_CODE_REMOTE_SDK_URL が無いか、cse_ を含まない。セッションの ID は手で書かず、取れなかったことをコメントに書く");
+      return { sessionId: id, url: `https://claude.ai/code/${id}` };
+    }
     default:
-      throw new Error("pick / precheck / relabel / stalled / gate / ci-wait / handled / budget / merge-check / review-status のどれかを指定する");
+      throw new Error("pick / precheck / relabel / stalled / gate / ci-wait / handled / budget / merge-check / review-status / wait / session-id / rest-get のどれかを指定する");
   }
 }
 

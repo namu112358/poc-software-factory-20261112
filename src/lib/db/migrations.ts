@@ -391,4 +391,39 @@ export const MIGRATIONS: readonly Migration[] = [
       ALTER TABLE users ADD COLUMN must_change_password INTEGER NOT NULL DEFAULT 0 CHECK (must_change_password IN (0, 1));
     `,
   },
+  {
+    version: 31,
+    name: "idempotency_keys",
+    sql: `
+      -- 作成の API に付けられた Idempotency-Key と、最初の応答（#528）。同じ利用者が同じ用途・同じキーで送り直したら、新しく作らずにこの応答を返す。
+      -- scope は用途（'tasks.create'・'comments.create'）。fingerprint は送られた本文（コメントは対象のタスクの ID も含む）の SHA-256。
+      -- 成功した応答（response_status と、JSON の response_body）だけを残す。created_at は ISO 8601（UTC）。24 時間を過ぎた行は、書くついでに消す。
+      CREATE TABLE idempotency_keys (
+        user_id         TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        scope           TEXT NOT NULL,
+        key             TEXT NOT NULL,
+        fingerprint     TEXT NOT NULL,
+        response_status INTEGER NOT NULL,
+        response_body   TEXT NOT NULL,
+        created_at      TEXT NOT NULL,
+        PRIMARY KEY (user_id, scope, key)
+      );
+      CREATE INDEX idempotency_keys_created_at ON idempotency_keys(created_at);
+    `,
+  },
+  {
+    version: 32,
+    name: "temporary_password_reissues",
+    sql: `
+      -- 取りまとめる人が、利用者に仮のパスワードを出し直した記録（#566）。だれの（user_id）・だれが（issued_by）・いつ（issued_at。ISO 8601（UTC））。
+      -- 出し直された本人が仮のパスワードのままの間、パスワード変更の画面で、いちばん新しい記録を知らせる。行は消さない。
+      CREATE TABLE temporary_password_reissues (
+        id        INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id   TEXT NOT NULL REFERENCES users(id),
+        issued_by TEXT NOT NULL REFERENCES users(id),
+        issued_at TEXT NOT NULL
+      );
+      CREATE INDEX temporary_password_reissues_user ON temporary_password_reissues(user_id, id);
+    `,
+  },
 ];

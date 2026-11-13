@@ -6,13 +6,13 @@
 
 きっかけの時刻（PR が閉じた時刻、または `status:ready` が付いた時刻）を T として `node scripts/factory/claim.ts handled --since <T>` を実行し、`handled` の Issue・PR には 1〜3 で触らない。`error` なら、この確かめを飛ばす。
 
-`status:ready` が付いて起動したときは、「1.」だけを行う（承認されてすぐ着手させるため。#357）。そのとき、きっかけの Issue に最後にラベルが付いてから 30 秒たつまで待ってから始める（同じ数秒にほかのラベルも付くと、実装が重ねて起動する。#429）。
+`status:ready` が付いて起動したときは、「1.」だけを行う（承認されてすぐ着手させるため。#357）。そのとき、きっかけの Issue に最後にラベルが付いてから 30 秒たつまで待ってから始める（待つのは `node scripts/factory/claim.ts wait 30`。同じ数秒にほかのラベルも付くと、実装が重ねて起動する。#429）。
 
 ## 1. 待っている Issue に着手させる
 
 `node scripts/factory/claim.ts pick` を実行する（`error` なら、出力を終えるコメントに書いて 2 へ）。`rewait` の Issue には、その `comment` をそのままコメントする。
 
-`pick` の Issue ごとに、順に次を行う。2 件目からは、前の 1 件にラベルを付けてから 30 秒あける（`node -e "setTimeout(() => {}, 30000)"`）。
+`pick` の Issue ごとに、順に次を行う。2 件目からは、前の 1 件にラベルを付けてから 30 秒あける（`node scripts/factory/claim.ts wait 30` を実行する。単独の `sleep` は Claude Code に断られる）。
 
 1. ラベルを読み直し、`status:ready` が無いか、`status:in-progress`・`status:blocked-question`・`status:needs-human`・`kind:epic`・`kind:kaizen` が付いていれば、次へ。
 2. `status:ready` を付けた人が書き込み権限を持つかを確かめる（Issue のイベントの最後の `labeled status:ready` の人を、GitHub MCP の `list_repository_collaborators` で見る）。持たなければ `status:ready` を外して `status:needs-human` を付け、理由をコメントして次へ。
@@ -38,7 +38,7 @@
 
 ## 3. 止まった実装・PR を片付ける
 
-`node scripts/factory/claim.ts stalled --role dispatch` を実行し、`actions` を上から順に（2 件目からは 30 秒あけて）そのとおりにする。`target` の PR か Issue に対し、`removeLabels` を外し、`addLabels` を付け、`draft` の指定どおりに draft と Ready を切り替え（`draft-then-ready` は draft にしてから Ready、`ready-then-draft` は Ready にしてから draft）、`issue` があればその Issue のラベルも同じように変え、`comment` をそのまま書く（`null` ならコメントしない）。`unknown` の PR は、1 分待って 1 回だけ実行し直す。
+`node scripts/factory/claim.ts stalled --role dispatch` を実行し、`actions` を上から順に（2 件目からは 30 秒あけて）そのとおりにする。`target` の PR か Issue に対し、`removeLabels` を外し、`addLabels` を付け、`draft` の指定どおりに draft と Ready を切り替え（`draft-then-ready` は draft にしてから Ready、`ready-then-draft` は Ready にしてから draft）、`issue` があればその Issue のラベルも同じように変え、`comment` をそのまま書く（`null` ならコメントしない）。`unknown` の PR は、1 分待って（`node scripts/factory/claim.ts wait 60`）1 回だけ実行し直す。
 
 ## 4. 終える
 

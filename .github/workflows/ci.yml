@@ -22,4 +22,21 @@ jobs:
       - run: npm ci
       - run: npm run typecheck
       - run: npm test
+      # その PR が足した・変えたテストのファイルだけを 20 回くり返して動かし、1 回でも落ちたら失敗にする（ときどきしか落ちないテストを、
+      # マージの前に見つけるため。#354 のテストはファイル単体で 1 回あたり約 12% 落ち、PR の CI の 1 回をすり抜けて main に入り、18 分で PR 6 本と main を落とした。
+      # 5 回では 10 試行中 5 回しか見つからなかったので 20 回にした（見つかる見込み約 92%。1 回 1 秒ほど）。
+      # 落ちたテストを通すための再試行ではない（1 回でも落ちれば失敗のまま）。main への push では動かない。
+      - name: 変えたテストをくり返し動かす
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          git fetch --no-tags --depth=1 origin "$BASE_SHA"
+          files=$(git diff --name-only --diff-filter=AMR "$BASE_SHA" HEAD -- 'tests/*.test.ts')
+          if [ -z "$files" ]; then echo "足した・変えたテストは無い"; exit 0; fi
+          echo "くり返すテスト:"; echo "$files"
+          for i in $(seq 1 20); do
+            echo "--- ${i} 回目"
+            node --experimental-strip-types --no-warnings --test $files || { echo "::error::${i} 回目で落ちた。ときどきしか落ちないテストの見込み"; exit 1; }
+          done
       - run: npm run build

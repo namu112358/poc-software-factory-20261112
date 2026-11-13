@@ -47,10 +47,10 @@ describe("取りまとめる人の区別（isCoordinator）", () => {
     assert.throws(() => db.prepare("UPDATE users SET role = 'admin' WHERE id = 'sato'").run());
   });
 
-  it("利用者の一覧・ログイン中の利用者の応答には、役割を出さない（これまでどおり ID と名前だけ）", () => {
+  it("担当者の候補などの利用者の一覧には役割を出さず、ログイン中の利用者の応答には役割を足す（#524）", () => {
     const db = openDb();
     for (const u of [...listUsers(db), ...listUserOptions(db)]) assert.deepEqual(Object.keys(u).sort(), ["id", "name"]);
-    assert.deepEqual(Object.keys(toMeResponse(listUsers(db)[0]).user).sort(), ["id", "name"]);
+    assert.deepEqual(Object.keys(toMeResponse({ ...listUsers(db)[0], role: "member" }).user).sort(), ["id", "name", "role"]);
   });
 });
 

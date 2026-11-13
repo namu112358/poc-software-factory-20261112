@@ -395,7 +395,7 @@ describe("GET /api/me の知らせ（API で使う人向け）", () => {
     const a = signIn(db, "sato", T0);
     fail(db, "sato", 3, at(48));
     signIn(db, "sato", at(49), BOT_UA);
-    const body = toMeResponse({ id: "sato", name: "佐藤" }, getLoginNotice(a, db, at(50)) ?? null);
+    const body = toMeResponse({ id: "sato", name: "佐藤", role: "member" }, getLoginNotice(a, db, at(50)) ?? null);
     assert.deepEqual(body.loginNotice, {
       throughId: body.loginNotice!.throughId,
       count: 1,
@@ -405,9 +405,9 @@ describe("GET /api/me の知らせ（API で使う人向け）", () => {
   });
 
   it("知らせが無ければ loginNotice は null。知らせに別の項目が混ざっていても出さない", () => {
-    assert.equal(toMeResponse({ id: "sato", name: "佐藤" }).loginNotice, null);
+    assert.equal(toMeResponse({ id: "sato", name: "佐藤", role: "member" }).loginNotice, null);
     const leaky = { throughId: 1, count: 1, latest: { device: "x", loggedInAt: T0.toISOString(), user_agent: "secret" }, failedLogins: 0, token: "secret" };
-    const text = JSON.stringify(toMeResponse({ id: "sato", name: "佐藤" }, leaky as unknown as LoginNotice));
+    const text = JSON.stringify(toMeResponse({ id: "sato", name: "佐藤", role: "member" }, leaky as unknown as LoginNotice));
     assert.ok(!text.includes("secret"));
   });
 });
