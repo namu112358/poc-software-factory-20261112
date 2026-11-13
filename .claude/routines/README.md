@@ -30,7 +30,7 @@ flowchart LR
 | `status:blocked-question` | Issue | 確認事項があり止まっている | 実装・修正、未決の点が残る Issue を返す割り当て・巡回 |
 | `status:needs-human` | Issue・PR | 上限に達した・手順の外のことが要る | どの役でも |
 | `risk:high` | PR | 高リスクの変更。人が重点的に見る。自動ではキューに入らない | レビュー（レビューの結果を書く前に付ける） |
-| `merge:requested` | PR | マージしてよい（Mergify のキューに入る）。`risk:high` の PR と、自動で入らない PR に使う | 人だけ（付ける前に `claim.ts merge-check`） |
+| `merge:requested` | PR | マージしてよい（Mergify のキューに入る）。`risk:high` の PR と、自動で入らない PR に使う | 人だけ（付ける前に `claim.ts merge-check`）。付けても、最新のコミットがレビューを通っていなければ（status `factory-reviewed`）キューに入らない |
 | `kind:epic` | Issue | Epic。実装しない | 人 |
 | `kind:kaizen` | Issue | 運用の課題の記録（台帳 #123 の子）。実装しない | 人 |
 | `type:feat`・`type:fix`・`type:refactor`・`type:docs`・`type:test`・`type:chore`・`type:ci`・`type:perf` | Issue・PR | 変更の種類（Conventional Commits の type） | Issue はテンプレート・人、PR は実装（Issue と同じもの） |
