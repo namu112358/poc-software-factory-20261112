@@ -1,9 +1,12 @@
 "use client";
 // タスク作成のフォーム。誤りがあれば画面の上に理由を並べ、入力した値は残す。
+// ログインが切れていたら（401）、ログイン画面へは移らず、入力を残したまま、誤りの一覧にログインし直す案内を出す（#491）。
 import { useEffect, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import { TASK_CREATE_FAILED_MESSAGE, buildTaskBody, taskDetailHref, taskFormErrorMessages } from "@/lib/task-form";
 import { fieldErrorId, fieldErrorProps, fieldErrorText, toFormErrorItems, type FormErrorItem, type TaskFormField } from "@/lib/form-errors";
+import { isSessionExpired } from "@/lib/session-expired";
+import { SessionExpiredNotice } from "../../session-expired";
 import { MEMO_MAX_LENGTH, PRIORITY_LABELS, STATUS_LABELS, TASK_PRIORITIES, TASK_STATUSES, isTaskPriority, isTaskStatus } from "@/lib/task-types";
 
 const ERROR_PREFIX = "new-task";
@@ -19,13 +22,14 @@ type Props = { users: { id: string; name: string; label?: string }[]; defaultAss
 
 export function TaskForm({ users, defaultAssignee }: Props) {
   const [errors, setErrors] = useState<FormErrorItem[]>([]);
+  const [expired, setExpired] = useState(false);
   const errorListRef = useRef<HTMLUListElement>(null);
   const [pending, setPending] = useState(false);
 
-  // 誤りで断られたら、誤りの一覧にフォーカスを移す（読み上げで気づけるように）。
+  // 誤りやログイン切れで断られたら、誤りの一覧にフォーカスを移す（読み上げで気づけるように）。
   useEffect(() => {
-    if (errors.length > 0) errorListRef.current?.focus();
-  }, [errors]);
+    if (errors.length > 0 || expired) errorListRef.current?.focus();
+  }, [errors, expired]);
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -41,6 +45,7 @@ export function TaskForm({ users, defaultAssignee }: Props) {
       memo: String(data.get("memo") ?? ""),
     });
     setErrors([]);
+    setExpired(false);
     setPending(true);
     try {
       const res = await fetch("/api/tasks", {
@@ -48,8 +53,8 @@ export function TaskForm({ users, defaultAssignee }: Props) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
       });
-      if (res.status === 401) {
-        window.location.href = "/login";
+      if (isSessionExpired(res.status)) {
+        setExpired(true);
         return;
       }
       const json = await res.json().catch(() => undefined);
@@ -67,8 +72,13 @@ export function TaskForm({ users, defaultAssignee }: Props) {
 
   return (
     <form onSubmit={onSubmit} aria-label="タスク作成" noValidate>
-      {errors.length > 0 && (
+      {(errors.length > 0 || expired) && (
         <ul role="alert" data-testid="form-errors" ref={errorListRef} tabIndex={-1}>
+          {expired && (
+            <li data-testid="new-task-session-expired">
+              <SessionExpiredNotice />
+            </li>
+          )}
           {errors.map((e) => (
             <li key={e.message}>{e.message}</li>
           ))}

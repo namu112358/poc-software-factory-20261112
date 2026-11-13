@@ -5,6 +5,7 @@
 //   node scripts/factory/claim.ts relabel --minutes 15                  起動しなかった実装の付け直しの対象（付け直す数は budget の残りまで）
 //   node scripts/factory/claim.ts handled --since <ISO 8601>            ほかの割り当てがもう処理した Issue・PR
 //   node scripts/factory/claim.ts merge-check <PR>                      merge:requested のラベルを付けてよいか（最新のレビューが ok で、その後は取り込みだけか）
+//   node scripts/factory/claim.ts review-status <PR>                    レビューを通ったことを表す status（factory-review）の値（success・failure・null）。GitHub Actions が使う
 //   node scripts/factory/claim.ts stalled --role dispatch|patrol       止まった実装・PR の片付け（actions に、そのまま行う操作。unknown は 1 分後にもう一度）
 //   node scripts/factory/claim.ts gate --role implement|review|fix --number <N>   実装・レビュー・修正が起動してよいか（decision と、役が行う ops）
 //   node scripts/factory/claim.ts budget                                直近 60 分に status:in-progress を付けた回数と、あと何回付けてよいか
@@ -30,6 +31,7 @@ import {
   normalizeLabel,
   errorActions,
   mergeCheck,
+  reviewStatus,
   ciCheck,
   TRUSTED_ASSOCIATIONS,
   precheck,
@@ -57,7 +59,11 @@ type RawIssue = { number: number; body: string | null; state: string; pull_reque
 type RawComment = { body: string | null; created_at: string; issue_url: string; user?: { login: string } };
 
 async function get<T>(path: string): Promise<{ status: number; data: T }> {
-  const res = await fetch(`${API}${path}`, { headers: { Accept: "application/vnd.github+json" } });
+  const token = process.env.GITHUB_TOKEN;
+  const res = await fetch(`${API}${path}`, {
+    // GitHub Actions の中では GITHUB_TOKEN で読む（クラウドのセッションでは、プロキシが認証を付ける）
+    headers: { Accept: "application/vnd.github+json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+  });
   if (res.status === 404) return { status: 404, data: [] as T };
   if (!res.ok) throw new Error(`GET ${path} → ${res.status} ${await res.text()}`);
   return { status: res.status, data: (await res.json()) as T };
@@ -277,9 +283,10 @@ async function loadStalled(role: string) {
           const tl = await getAll<{ event: string; created_at: string }>(`/repos/${REPO}/issues/${n}/timeline`);
           readyAt = tl.filter((e) => e.event === "ready_for_review").at(-1)?.created_at ?? full.created_at;
         }
-        if (labels.includes(LABEL.merge) && labels.some((l) => l === "merge:dequeued" || l === "dequeued")) {
+        if (labels.some((l) => l === "merge:dequeued" || l === "dequeued")) {
           const comments = await getAll<RawTrustedComment>(`/repos/${REPO}/issues/${n}/comments`);
-          const m = comments.filter((c) => /dequeue_reason[\s\S]{0,300}?CHECKS_TIMEOUT/.test(c.body ?? "")).at(-1);
+          // Mergify のボットの状況のコメントだけを読む（ほかの人が同じ文字を書いても、判定に使わない）
+          const m = comments.filter((c) => c.user?.login === "mergify[bot]" && /dequeue_reason[\s\S]{0,300}?CHECKS_TIMEOUT/.test(c.body ?? "")).at(-1);
           if (m) mergifyTimeout = { at: m.updated_at };
         }
       }
@@ -372,6 +379,20 @@ async function runGate(role: string | undefined, n: number) {
   return first;
 }
 
+/** merge-check・review-status に共通のレビューの判定（人の merge-check と自動の判定が食い違わないよう、1 か所にする） */
+async function reviewCheck(n: number, headSha: string): Promise<ReturnType<typeof mergeCheck>> {
+  const reviews = (await getAll<{ body: string | null; submitted_at: string; author_association: string }>(`/repos/${REPO}/pulls/${n}/reviews`))
+    .sort((a, b) => (a.submitted_at < b.submitted_at ? -1 : 1))
+    .map((r) => ({ body: r.body ?? "", association: r.author_association }));
+  const commitOf = /<!--\s*factory:review\s+verdict=\w+[^>]*?commit=([0-9a-f]+)/;
+  const last = reviews
+    .filter((r) => TRUSTED_ASSOCIATIONS.includes(r.association))
+    .map((r) => commitOf.exec(r.body)?.[1])
+    .filter(Boolean)
+    .at(-1);
+  return mergeCheck({ reviews, headSha, after: last ? commitsAfter(n, last, headSha) : [] });
+}
+
 async function main(): Promise<unknown> {
   const [cmd, num] = process.argv.slice(2);
   const n = Number(num);
@@ -395,17 +416,7 @@ async function main(): Promise<unknown> {
     case "merge-check": {
       if (!Number.isInteger(n)) throw new Error("PR の番号を指定する");
       const pr = (await get<{ head: { sha: string } }>(`/repos/${REPO}/pulls/${n}`)).data;
-      const reviews = (await getAll<{ body: string | null; submitted_at: string; author_association: string }>(`/repos/${REPO}/pulls/${n}/reviews`))
-        .sort((a, b) => (a.submitted_at < b.submitted_at ? -1 : 1))
-        .map((r) => ({ body: r.body ?? "", association: r.author_association }));
-      const commitOf = /<!--\s*factory:review\s+verdict=\w+[^>]*?commit=([0-9a-f]+)/;
-      const last = reviews
-        .filter((r) => TRUSTED_ASSOCIATIONS.includes(r.association))
-        .map((r) => commitOf.exec(r.body)?.[1])
-        .filter(Boolean)
-        .at(-1);
-      const after = last ? commitsAfter(n, last, pr.head.sha) : [];
-      const review = mergeCheck({ reviews, headSha: pr.head.sha, after });
+      const review = await reviewCheck(n, pr.head.sha);
       if (!review.ok) return { pr: n, ...review };
       // レビューが ok でも、キューに入る条件のチェックが落ちていればキューに入らない（#364）
       const runs = (
@@ -416,6 +427,19 @@ async function main(): Promise<unknown> {
     }
     case "gate":
       return runGate(arg("role"), Number(arg("number")));
+    case "review-status": {
+      if (!Number.isInteger(n)) throw new Error("PR の番号を指定する");
+      const pr = (await get<{ head: { sha: string }; labels: { name: string }[] }>(`/repos/${REPO}/pulls/${n}`)).data;
+      const review = await reviewCheck(n, pr.head.sha);
+      const raw = await getAll<{ filename: string; previous_filename?: string }>(`/repos/${REPO}/pulls/${n}/files`);
+      // 一覧が途中で切れた・判定の間に head が変わったときは、付けない（安全側に倒す）
+      const now = (await get<{ head: { sha: string }; changed_files: number }>(`/repos/${REPO}/pulls/${n}`)).data;
+      if (now.head.sha !== pr.head.sha) return { pr: n, sha: pr.head.sha, state: null, description: "判定の間に PR の最新のコミットが変わった。次のきっかけで判定し直す。" };
+      if (raw.length !== now.changed_files) return { pr: n, sha: pr.head.sha, state: null, description: `変更ファイルの一覧（${raw.length} 件）が PR の変更ファイル数（${now.changed_files} 件）と合わない。人が確かめる。` };
+      // 判定のよりどころは GitHub の変更ファイル（PR の側の記述は読まない）
+      const files = raw.flatMap((f) => [f.filename, ...(f.previous_filename ? [f.previous_filename] : [])]);
+      return { pr: n, sha: pr.head.sha, ...reviewStatus(review, pr.head.sha, pr.labels.map((l) => l.name), files) };
+    }
     case "stalled": {
       const role = arg("role");
       if (role !== "dispatch" && role !== "patrol") throw new Error("--role dispatch か --role patrol を指定する");
@@ -442,7 +466,7 @@ async function main(): Promise<unknown> {
       return { since, mySession: mySession(), handled: handledByOthers({ comments, since, mySession: mySession() }) };
     }
     default:
-      throw new Error("pick / precheck / relabel / stalled / gate / handled / budget / merge-check のどれかを指定する");
+      throw new Error("pick / precheck / relabel / stalled / gate / handled / budget / merge-check / review-status のどれかを指定する");
   }
 }
 

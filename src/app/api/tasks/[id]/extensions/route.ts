@@ -18,8 +18,9 @@ export async function POST(request: Request, { params }: Context) {
   const user = await requireApiUser();
   if (user instanceof NextResponse) return user;
   const id = parseTaskId((await params).id);
-  if (id === undefined || !getTask(id)) return jsonError(404, "タスクが見つかりません");
-  const result = validateExtensionInput(await readJson(request));
+  const task = id === undefined ? undefined : getTask(id);
+  if (id === undefined || !task) return jsonError(404, "タスクが見つかりません");
+  const result = validateExtensionInput(await readJson(request), task.dueDate);
   if (!result.ok) return jsonError(400, "入力内容に誤りがあります", result.errors);
   const extension = createExtension({ taskId: id, requester: user.id, ...result.value });
   if (extension === "conflict") return jsonError(409, "保留中の延長申請がすでにあります");

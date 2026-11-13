@@ -13,6 +13,7 @@ Routine（`.claude/routines/`）が使う判定のスクリプトです。GitHub
 | `gate --role implement\|review\|fix --number N` | 実装・レビュー・修正 | 起動してよいか（`decision`: `stop` / `takeover` / `lock` / `go` / `needs-human`）と理由、引き継ぐ PR（`pr`）、ブランチ（`branch`）、そのまま行う書き込み（`ops`）。PR の head がこのリポジトリのブランチでない（フォーク。null を含む）ものは、レビュー・修正が `stop`、実装は引き継がない。レビューは `light`（軽い再レビュー）と `riskFiles`、修正は `fix`（`changes`・`conflict`・`removeMergeRequested`）と、`changes` のレビューが 3 つ以上なら `needs-human`（`ops`）も返す。実装は、着手のコメントがある・`Closes` の PR がある・ブランチだけがある（60 秒待って読み直す）を順に判定し、どれでもなければ `lock`（役が `create_branch` で鍵を作る）。起動のラベルを付けた人は `labeler` に出すだけで、書き込み権限は役が確かめる |
 | `handled --since <時刻>` | 割り当て | ほかの割り当てのセッションが、その時刻より後に処理した Issue・PR |
 | `budget` | （確かめ用） | 直近 60 分に `status:in-progress`・`status:in-progress-hard` を付けた回数と、残り |
+| `review-status <PR>` | GitHub Actions（`.github/workflows/factory-review-status.yml`。main の定義で動くきっかけだけで起動する） | レビューを通ったことを表す status（`factory-review`）の値。`merge-check` のレビューの部分と同じ判定で `ok` なら `success`（`risk:high` の PR と、品質のゲート〔CI の動きを決めるファイル・Mergify・手順書・判定のスクリプト・規約・Ruleset。一覧は `GATE_PATHS`〕を変える PR は付けない）、最新のコミットへのレビューが ok でなければ `failure`、それ以外は `null`（付けない）。Mergify は `risk:high` 以外の PR を、これが `success` ならキューに入れる |
 | `merge-check <PR>` | 人（`merge:requested` を付ける前） | `merge:requested` を付けてよいか（`ok`）と理由。最新の `factory:review` が `verdict=ok` で、そのコミットより後が「取り込みだけのコミット」（`git show --remerge-diff` の差分が空）だけで、最新のコミットの `app-check`・`pr-body-check`（キューに入る条件）が成功していれば `ok` |
 
 `node scripts/factory/claim.ts <コマンド>` で動かす（Node 22.18 以上。クラウドのプロキシを通すため、自分を `NODE_USE_ENV_PROXY=1` で起動し直す）。`decision` が `error` のときは終了コード 2。
@@ -30,6 +31,9 @@ Routine（`.claude/routines/`）が使う判定のスクリプトです。GitHub
 - **`handled`**: PR が続けて閉じると割り当てが同時に動くので、ほかのセッションが先に処理したものを飛ばす。ほぼ同時に始まった 2 つは防げない。
 
 ## 人の手順: merge:requested を付ける前
+
+レビューを通った PR は、`risk:high` と品質のゲートを変える PR 以外は自動でキューに入る（`review-status`）。人が `merge:requested` を付けるのは、`risk:high` の PR・品質のゲートを変える PR・自動で入らなかった PR（キューから外れたものなど）だけ。
+
 
 PR に `merge:requested` を付ける前に、必ず `node scripts/factory/claim.ts merge-check <PR>` を実行し、`ok` が `true` のときだけ付ける。`false` なら `reason` のとおりにする（レビューを起こし直す、など）。レビューの ok が無いまま `merge:requested` が付いた PR が 4 本あったため（#293）。キューを通さずにマージするとき（`.mergify.yml` を変える PR など）も、マージの前に同じように実行する（#323 は、レビューの後に足した衝突の解消が未レビューのままマージされた）。
 

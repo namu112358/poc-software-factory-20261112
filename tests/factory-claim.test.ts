@@ -8,6 +8,7 @@ import {
   pick,
   precheck,
   mergeCheck,
+  reviewStatus,
   ciCheck,
   precheckActions,
   relabelTargets,
@@ -535,6 +536,42 @@ describe("main の CI を壊している不具合の直しを先に着手させ�
   });
 });
 
+describe("レビューを通ったことを表す status（reviewStatus・自動でキューに入れる）", () => {
+  const ok = (commit: string) => ({ body: `<!-- factory:review verdict=ok round=1 commit=${commit} -->`, association: "COLLABORATOR" });
+  const changes = (commit: string) => ({ body: `<!-- factory:review verdict=changes round=1 commit=${commit} -->`, association: "COLLABORATOR" });
+  it("最新のコミットが ok のレビューを受けていれば success", () => {
+    const mc = mergeCheck({ reviews: [ok("aaaa111")], headSha: "aaaa1112222", after: [] });
+    assert.equal(reviewStatus(mc, "aaaa1112222", []).state, "success");
+  });
+  it("ok の後が取り込みだけのコミットなら success を引き継ぐ（キューが main を取り込んだ後も入れるように）", () => {
+    const mc = mergeCheck({ reviews: [ok("aaaa111")], headSha: "bbbb222", after: [{ sha: "bbbb222", mergeOnly: true }] });
+    assert.equal(reviewStatus(mc, "bbbb222", []).state, "success");
+  });
+  it("ok の後に中身の変わるコミットがあれば付けない（レビューし直すまで入らない）", () => {
+    const mc = mergeCheck({ reviews: [ok("aaaa111")], headSha: "bbbb222", after: [{ sha: "bbbb222", mergeOnly: false }] });
+    assert.equal(reviewStatus(mc, "bbbb222", []).state, null);
+  });
+  it("最新のコミットへのレビューが changes なら failure", () => {
+    const mc = mergeCheck({ reviews: [ok("aaaa111"), changes("bbbb222")], headSha: "bbbb222", after: [] });
+    assert.equal(reviewStatus(mc, "bbbb222", []).state, "failure");
+  });
+  it("書き込み権限の無い人の ok の印では success にしない（なりすまし）", () => {
+    const mc = mergeCheck({ reviews: [{ ...ok("aaaa111"), association: "NONE" }], headSha: "aaaa111", after: [] });
+    assert.equal(reviewStatus(mc, "aaaa111", []).state, null);
+  });
+  it("品質のゲート（CI・Mergify・手順書・判定のスクリプト・規約・Ruleset・package.json などの CI の動きを決めるファイル）を変える PR には、ok でも success を付けない", () => {
+    const mc = mergeCheck({ reviews: [ok("aaaa111")], headSha: "aaaa111", after: [] });
+    for (const f of [".mergify.yml", ".github/workflows/ci.yml", ".claude/routines/review.md", "scripts/factory/claim.ts", "scripts/check-skills.py", "AGENTS.md", "CLAUDE.md", "docs/rulesets/main.json", "package.json", "package-lock.json", "tsconfig.json", "tests/factory-claim.test.ts"]) {
+      assert.equal(reviewStatus(mc, "aaaa111", [], ["src/app/page.tsx", f]).state, null, f);
+    }
+    assert.equal(reviewStatus(mc, "aaaa111", [], ["src/app/page.tsx", "docs/product.md", "tests/a.test.ts"]).state, "success");
+  });
+  it("risk:high の PR には、ok でも success を付けない（人が merge:requested を付ける）", () => {
+    const mc = mergeCheck({ reviews: [ok("aaaa111")], headSha: "aaaa111", after: [] });
+    assert.equal(reviewStatus(mc, "aaaa111", ["risk:high"]).state, null);
+  });
+});
+
 describe("stalled: 止まった実装・PR の片付け", () => {
   const NOW = "2026-11-13T12:00:00.000Z";
   const ago = (min: number) => new Date(new Date(NOW).getTime() - min * 60000).toISOString();
@@ -662,6 +699,8 @@ describe("stalled: 止まった実装・PR の片付け", () => {
       assert.equal(a.action, "checks-timeout");
       assert.deepEqual(a.addLabels, ["status:needs-human"]);
       assert.equal(only(run([base({ labels: ["merge:requested", "dequeued"] })], [])).action, "checks-timeout");
+      // レビューの status で自動で入った PR（merge:requested が無い）も同じ
+      assert.equal(only(run([base({ labels: ["merge:dequeued"] })], [])).action, "checks-timeout");
     });
     it("5 分たたない・CI が成功でない・ok が最新でない・ラベルが足りないときは何もしない", () => {
       assert.equal(run([base({ mergifyTimeout: { at: ago(4) } })], []).actions.length, 0);
@@ -670,7 +709,6 @@ describe("stalled: 止まった実装・PR の片付け", () => {
       assert.equal(run([base({ bodyCheck: "pending" })], []).actions.length, 0);
       assert.equal(run([base({ mergifyTimeout: null })], []).actions.length, 0);
       assert.equal(run([base({ labels: ["merge:requested"] })], []).actions.length, 0);
-      assert.equal(run([base({ labels: ["merge:dequeued"] })], []).actions.length, 0);
       const stale = { reviews: [{ verdict: "ok", commit: "bbbbbbb" }], after: { bbbbbbb: [{ sha: "c", mergeOnly: false }] } };
       assert.equal(run([base({ ...stale, readyAt: ago(5) })], []).actions.some((x) => x.action === "checks-timeout"), false);
       // 後が取り込みだけなら ok のまま
