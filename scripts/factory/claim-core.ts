@@ -611,6 +611,9 @@ export const GATE_PATHS = [
   "package-lock.json",
   ".npmrc",
   "tsconfig.json",
+  // デザインシステムの CI（design-system-check）の検査と設定
+  "design-system/scripts/",
+  "design-system/vitest.config.ts",
   "tests/factory-claim.test.ts",
 ];
 
@@ -643,6 +646,9 @@ export const HUMAN_GATE_PATHS = [
   "package-lock.json",
   ".npmrc",
   "tsconfig.json",
+  // デザインシステムの CI（design-system-check）の検査と設定
+  "design-system/scripts/",
+  "design-system/vitest.config.ts",
 ];
 
 export const touchesHumanGate = (files: string[]): string[] => matchPaths(files, HUMAN_GATE_PATHS);
