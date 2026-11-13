@@ -82,7 +82,14 @@ export function PendingExtensionsTable({
                 </td>
                 <td>{r.requesterName}</td>
                 <td>{r.currentDueDate}</td>
-                <td>{r.newDueDate}</td>
+                <td>
+                  {r.newDueDate}
+                  {r.alreadyExtended && (
+                    <div data-testid="extension-already-extended">
+                      期限はすでに希望の期限以降です。承認しても期限は変わりません
+                    </div>
+                  )}
+                </td>
                 <td>{r.reason}</td>
                 <td>
                   {r.requestedAt}

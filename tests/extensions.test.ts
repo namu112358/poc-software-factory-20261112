@@ -2,6 +2,7 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { openDb } from "../src/lib/db/index.ts";
 import {
+  approveResponse,
   createExtension,
   decideExtension,
   getExtension,
@@ -11,7 +12,7 @@ import {
   validateExtensionInput,
   withdrawExtension,
 } from "../src/lib/extensions.ts";
-import { getTask } from "../src/lib/tasks.ts";
+import { getTask, updateTask } from "../src/lib/tasks.ts";
 import type { Db } from "../src/lib/db/index.ts";
 
 const input = { taskId: 3, requester: "sato", newDueDate: "2026-11-20", reason: "レビュー待ちのため" };
@@ -336,5 +337,147 @@ describe("formatExtensionRequestedAt", () => {
   it("formats in Japan time as YYYY/MM/DD HH:mm", () => {
     assert.equal(formatExtensionRequestedAt("2026-11-09T03:04:05.000Z"), "2026/11/09 12:04");
     assert.equal(formatExtensionRequestedAt("2026-11-09T15:30:00.000Z"), "2026/11/10 00:30");
+  });
+});
+
+describe("decideExtension: 申請の後でタスクの期限が変わっていたとき（#505）", () => {
+  // シードのタスク 3 は期限 2026-11-14。申請の希望の期限は 2026-11-20。
+  const at = new Date("2026-11-13T03:00:00.000Z");
+  function setup() {
+    const db = openDb();
+    const ext = createExtension(input, db) as { id: number };
+    return { db, ext };
+  }
+  const setDue = (db: Db, due: string, updatedAt = "2026-11-12T00:00:00.000Z") =>
+    db.prepare("UPDATE tasks SET due_date = ?, updated_at = ? WHERE id = 3").run(due, updatedAt);
+
+  it("期限が希望の期限より後に変わっていたら、承認しても期限・最終更新日時は今のまま。申請は承認で閉じる", () => {
+    const { db, ext } = setup();
+    setDue(db, "2026-12-12");
+    const before = getTask(3, db)!;
+    const out = decideExtension(3, ext.id, "approved", "tanaka", db, at);
+    assert.equal(out.result, "decided");
+    if (out.result !== "decided") return;
+    assert.equal(out.dueDateChanged, false);
+    assert.equal(out.task.dueDate, "2026-12-12");
+    assert.deepEqual(getTask(3, db), before);
+    assert.equal(out.extension.status, "approved");
+    assert.equal(out.extension.decidedBy, "tanaka");
+  });
+
+  it("期限が希望の期限と同じ日に変わっていたら、期限は変えない（dueDateChanged: false）", () => {
+    const { db, ext } = setup();
+    setDue(db, "2026-11-20");
+    const out = decideExtension(3, ext.id, "approved", "tanaka", db, at);
+    assert.ok(out.result === "decided" && out.dueDateChanged === false);
+    assert.equal(getTask(3, db)!.updatedAt, "2026-11-12T00:00:00.000Z");
+  });
+
+  it("期限が変わっていなければ、今と同じく希望の期限にする（dueDateChanged: true）", () => {
+    const { db, ext } = setup();
+    const out = decideExtension(3, ext.id, "approved", "tanaka", db, at);
+    assert.ok(out.result === "decided" && out.dueDateChanged === true);
+    assert.equal(getTask(3, db)!.dueDate, "2026-11-20");
+    assert.equal(getTask(3, db)!.updatedAt, at.toISOString());
+  });
+
+  it("期限が希望の期限より前に変わっていたら（前の日・月をまたいだ前）、希望の期限にする", () => {
+    for (const due of ["2026-11-19", "2026-11-15", "2026-10-31"]) {
+      const { db, ext } = setup();
+      setDue(db, due);
+      const out = decideExtension(3, ext.id, "approved", "tanaka", db, at);
+      assert.ok(out.result === "decided" && out.dueDateChanged === true, due);
+      assert.equal(getTask(3, db)!.dueDate, "2026-11-20", due);
+    }
+  });
+
+  it("期限が一度後ろへ動いてから、希望の期限より前に戻っていたら、希望の期限にする", () => {
+    const { db, ext } = setup();
+    setDue(db, "2026-12-12");
+    setDue(db, "2026-11-16");
+    const out = decideExtension(3, ext.id, "approved", "tanaka", db, at);
+    assert.ok(out.result === "decided" && out.dueDateChanged === true);
+    assert.equal(getTask(3, db)!.dueDate, "2026-11-20");
+  });
+
+  it("却下は、期限が後ろへ変わっていても期限を変えない（dueDateChanged: false）", () => {
+    const { db, ext } = setup();
+    setDue(db, "2026-12-12");
+    const out = decideExtension(3, ext.id, "rejected", "tanaka", db, at);
+    assert.ok(out.result === "decided" && out.dueDateChanged === false);
+    assert.equal(getTask(3, db)!.dueDate, "2026-12-12");
+    assert.equal(getExtension(ext.id, db)!.status, "rejected");
+  });
+
+  it("承認の判定の後、書き込みの直前に期限が後ろへ編集されても、縮めない（判定と書き込みが 1 つの文）", () => {
+    const { db, ext } = setup();
+    let interleaved = false;
+    const racy = new Proxy(db, {
+      get(target, prop) {
+        const value = Reflect.get(target, prop, target);
+        if (prop !== "exec") return typeof value === "function" ? value.bind(target) : value;
+        return (sql: string) => {
+          if (!interleaved && sql === "BEGIN") {
+            interleaved = true;
+            setDue(target, "2026-12-12"); // ほかの人の編集が割り込む
+          }
+          return target.exec(sql);
+        };
+      },
+    }) as Db;
+    const out = decideExtension(3, ext.id, "approved", "tanaka", racy, at);
+    assert.ok(interleaved);
+    assert.ok(out.result === "decided" && out.dueDateChanged === false);
+    assert.equal(getTask(3, db)!.dueDate, "2026-12-12");
+  });
+
+  it("タスクの編集（PATCH と同じ処理）で期限を後ろへ変えた後の承認でも、縮めない", () => {
+    // 判定は承認の UPDATE の条件で、書き込む時点のタスクの期限を見る。どの入口で変えたかに依らない。
+    const { db, ext } = setup();
+    updateTask(3, { dueDate: "2027-01-05" }, db, "sato");
+    const out = decideExtension(3, ext.id, "approved", "tanaka", db, at);
+    assert.ok(out.result === "decided" && out.dueDateChanged === false);
+    assert.equal(getTask(3, db)!.dueDate, "2027-01-05");
+  });
+});
+
+describe("approveResponse（承認の API の応答）", () => {
+  it("期限を変えなかったときは、dueDateChanged: false と、今の期限・希望の期限を書いた理由を返す", () => {
+    const db = openDb();
+    const ext = createExtension(input, db) as { id: number };
+    db.prepare("UPDATE tasks SET due_date = '2026-12-12' WHERE id = 3").run();
+    const out = decideExtension(3, ext.id, "approved", "tanaka", db);
+    if (out.result !== "decided") throw new Error("setup");
+    const body = approveResponse(out);
+    assert.equal(body.dueDateChanged, false);
+    assert.equal(body.notice, "タスクの期限（2026-12-12）がすでに希望の期限（2026-11-20）以降のため、期限は変えずに承認しました");
+    assert.equal(body.task.dueDate, "2026-12-12");
+    assert.equal(body.extension.status, "approved");
+  });
+
+  it("期限を変えたときは、dueDateChanged: true で、理由（notice）は付けない", () => {
+    const db = openDb();
+    const ext = createExtension(input, db) as { id: number };
+    const out = decideExtension(3, ext.id, "approved", "tanaka", db);
+    if (out.result !== "decided") throw new Error("setup");
+    const body = approveResponse(out);
+    assert.equal(body.dueDateChanged, true);
+    assert.equal("notice" in body, false);
+    assert.equal(body.task.dueDate, "2026-11-20");
+  });
+});
+
+describe("listPendingExtensions: 承認しても期限が変わらない申請（#505）", () => {
+  it("今の期限が希望の期限以降の行は alreadyExtended が true", () => {
+    const db = openDb();
+    createExtension(input, db);
+    const flag = () => listPendingExtensions(db)[0].alreadyExtended;
+    assert.equal(flag(), false); // 11/14 < 11/20
+    db.prepare("UPDATE tasks SET due_date = '2026-11-20' WHERE id = 3").run();
+    assert.equal(flag(), true);
+    db.prepare("UPDATE tasks SET due_date = '2026-12-12' WHERE id = 3").run();
+    assert.equal(flag(), true);
+    db.prepare("UPDATE tasks SET due_date = '2026-11-19' WHERE id = 3").run();
+    assert.equal(flag(), false);
   });
 });

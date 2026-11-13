@@ -10,6 +10,7 @@ export type DecidableExtension = {
   taskTitle: string;
   requester: string; // 申請者の ID
   newDueDate: string; // 希望の期限 YYYY-MM-DD
+  alreadyExtended: boolean; // 今の期限がすでに希望の期限以降（承認しても期限は変わらない）
 };
 
 export type DecideExtensionResult =
@@ -34,12 +35,26 @@ export function canDecideExtension(requester: string, userId: string, isCoordina
 
 /** 確認のダイアログに出す文言。 */
 export function decideConfirmMessage(ext: DecidableExtension, decision: ExtensionDecision): string {
+  if (decision === "approve" && ext.alreadyExtended) {
+    return `タスク「${ext.taskTitle}」の期限は、すでに希望の期限（${ext.newDueDate}）以降です。期限は変えずに、この申請を承認します。よろしいですか？`;
+  }
   return decision === "approve"
     ? `タスク「${ext.taskTitle}」の期限を ${ext.newDueDate} に延長する申請を承認します。よろしいですか？`
     : `タスク「${ext.taskTitle}」の期限の延長（希望 ${ext.newDueDate}）の申請を却下します。よろしいですか？`;
 }
 
-/** 確認のダイアログで OK したときだけ、承認・却下の API を送る。キャンセルなら何も送らない。 */
+/** 承認・却下が通ったときのメッセージ。承認で期限を変えなかったときは、API が返す理由（notice）を出す。 */
+function decidedMessage(decision: ExtensionDecision, body: unknown): string {
+  if (decision === "reject") return "却下しました";
+  const b = body as { dueDateChanged?: unknown; notice?: unknown } | null;
+  if (b?.dueDateChanged === false && typeof b.notice === "string") return b.notice;
+  return "承認しました";
+}
+
+/**
+ * 確認のダイアログで OK したときだけ、承認・却下の API を送る。キャンセルなら何も送らない。
+ * 承認したが期限を変えなかったとき（一覧を開いた後に期限が後ろへ変わった場合も含む）は、その理由をメッセージにする。
+ */
 export async function confirmAndDecideExtension(
   ext: DecidableExtension,
   decision: ExtensionDecision,
@@ -49,7 +64,10 @@ export async function confirmAndDecideExtension(
   const fallback = decision === "approve" ? "承認できませんでした。" : "却下できませんでした。";
   try {
     const res = await deps.fetch(`/api/tasks/${ext.taskId}/extensions/${ext.id}/${decision}`, { method: "POST" });
-    if (res.ok) return { status: "decided", message: decision === "approve" ? "承認しました" : "却下しました" };
+    if (res.ok) {
+      const body = await res.json().catch(() => null);
+      return { status: "decided", message: decidedMessage(decision, body) };
+    }
     if (res.status === 409) return { status: "error", message: ALREADY_DECIDED_MESSAGE, reload: true };
     const data = (await res.json().catch(() => ({}))) as { error?: unknown };
     const message = typeof data?.error === "string" ? data.error : fallback;
