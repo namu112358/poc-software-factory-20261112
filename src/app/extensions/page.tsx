@@ -19,6 +19,7 @@ export default async function ExtensionsPage() {
     requesterName: r.requesterName,
     currentDueDate: r.currentDueDate,
     newDueDate: r.newDueDate,
+    alreadyExtended: r.alreadyExtended,
     reason: r.reason,
     requestedAt: formatExtensionRequestedAt(r.createdAt),
     waitDays: longWaitDays(r.createdAt, now),
