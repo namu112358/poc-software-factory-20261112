@@ -5,7 +5,7 @@
 //   node scripts/factory/claim.ts relabel --minutes 15                  起動しなかった実装の付け直しの対象（付け直す数は budget の残りまで）
 //   node scripts/factory/claim.ts handled --since <ISO 8601>            ほかの割り当てがもう処理した Issue・PR
 //   node scripts/factory/claim.ts merge-check <PR>                      merge:requested のラベルを付けてよいか（最新のレビューが ok で、その後は取り込みだけか）
-//   node scripts/factory/claim.ts review-status <PR>                    レビューを通ったことを表す status（factory-review）の値（success・failure・null）。GitHub Actions が使う
+//   node scripts/factory/claim.ts review-status <PR>                    レビューの結果の status の値（state: 自動でキューに入ってよいか〔factory-review〕、reviewed: 最新のコミットがレビューを通ったか〔factory-reviewed〕）。GitHub Actions が使う
 //   node scripts/factory/claim.ts stalled --role dispatch|patrol       止まった実装・PR の片付け（actions に、そのまま行う操作。unknown は 1 分後にもう一度）
 //   node scripts/factory/claim.ts gate --role implement|review|fix --number <N>   実装・レビュー・修正が起動してよいか（decision と、役が行う ops）
 //   node scripts/factory/claim.ts ci-wait --pr <N> [--minutes 15] [--role implement|fix]   PR の CI（app-check）が終わるまで待つ（result のとおりに動く。1 回に 16 分ほどかかるのでバックグラウンドで実行する）
@@ -36,6 +36,7 @@ import {
   errorActions,
   mergeCheck,
   reviewStatus,
+  reviewedStatus,
   ciCheck,
   CI_CHECKS,
   combineChecks,
@@ -482,11 +483,14 @@ async function main(): Promise<unknown> {
       const raw = await getAll<{ filename: string; previous_filename?: string }>(`/repos/${REPO}/pulls/${n}/files`);
       // 一覧が途中で切れた・判定の間に head が変わったときは、付けない（安全側に倒す）
       const now = (await get<{ head: { sha: string }; changed_files: number }>(`/repos/${REPO}/pulls/${n}`)).data;
-      if (now.head.sha !== pr.head.sha) return { pr: n, sha: pr.head.sha, state: null, description: "判定の間に PR の最新のコミットが変わった。次のきっかけで判定し直す。" };
-      if (raw.length !== now.changed_files) return { pr: n, sha: pr.head.sha, state: null, description: `変更ファイルの一覧（${raw.length} 件）が PR の変更ファイル数（${now.changed_files} 件）と合わない。人が確かめる。` };
+      const none = { state: null, description: "判定の間に PR の最新のコミットが変わった。次のきっかけで判定し直す。" };
+      if (now.head.sha !== pr.head.sha) return { pr: n, sha: pr.head.sha, ...none, reviewed: none };
+      // factory-reviewed（レビューを通ったか）は、変更ファイルによらない
+      const reviewed = reviewedStatus(review, pr.head.sha);
+      if (raw.length !== now.changed_files) return { pr: n, sha: pr.head.sha, state: null, description: `変更ファイルの一覧（${raw.length} 件）が PR の変更ファイル数（${now.changed_files} 件）と合わない。人が確かめる。`, reviewed };
       // 判定のよりどころは GitHub の変更ファイル（PR の側の記述は読まない）
       const files = raw.flatMap((f) => [f.filename, ...(f.previous_filename ? [f.previous_filename] : [])]);
-      return { pr: n, sha: pr.head.sha, ...reviewStatus(review, pr.head.sha, pr.labels.map((l) => l.name), files) };
+      return { pr: n, sha: pr.head.sha, ...reviewStatus(review, pr.head.sha, pr.labels.map((l) => l.name), files), reviewed };
     }
     case "stalled": {
       const role = arg("role");
