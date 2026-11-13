@@ -4,10 +4,12 @@
 # - 判定は scripts/factory/claim.ts の review-status（merge-check と同じ判定）。最新のレビューの印 <!-- factory:review verdict=ok ... commit=<SHA> -->
 #   が書き込み権限のある人のもので、SHA が最新のコミット（または、その後が main の取り込みだけのコミット）なら success、
 #   最新のコミットへのレビューが ok でなければ failure、それ以外は付けない。
-# - このワークフローは、必ず main の定義で動くきっかけ（pull_request_target・workflow_run）だけで起動する。PR の側でワークフローや
+# - このワークフローは、必ず main の定義で動くきっかけ（pull_request_target・workflow_run・schedule）だけで起動する。PR の側でワークフローや
 #   判定のスクリプトを書き換えても、status は付けられない。PR のコードは実行しない（main を取り出し、PR は git で差分を読むだけ）。
 # - レビューが書かれたときは factory-review-trigger.yml（権限なし）が終わったのをきっかけに動く。
 # - キューが main を取り込むと最新のコミットが変わるので、PR に push があったときも判定し直して引き継ぐ。
+# - 15 分ごとにも、開いている Ready の PR をすべて判定し直す（起動のイベントが届かなかったとき・#461 より前に作られたブランチで
+#   レビューのきっかけのワークフローが無いときも、15 分以内に拾うため）。今の status と同じなら付け直さない。
 name: Factory review status
 
 on:
@@ -16,6 +18,8 @@ on:
   workflow_run:
     workflows: ["Factory review trigger"]
     types: [completed]
+  schedule:
+    - cron: "7,22,37,52 * * * *"
 
 permissions:
   contents: read
@@ -32,39 +36,50 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
+          EVENT: ${{ github.event_name }}
           PR_FROM_TARGET: ${{ github.event.pull_request.number }}
           HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name || github.event.workflow_run.head_repository.full_name }}
           RUN_HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
         run: |
-          # フォークからの PR は対象にしない（このリポジトリのブランチの PR だけ）
-          if [ "$HEAD_REPO" != "$REPO" ]; then echo "フォークの PR は対象にしない"; exit 0; fi
-          pr="$PR_FROM_TARGET"
-          if [ -z "$pr" ]; then
-            pr=$(gh api "repos/$REPO/commits/$RUN_HEAD_SHA/pulls" --jq '[.[] | select(.state == "open")][0].number // empty')
+          if [ "$EVENT" = "schedule" ]; then
+            # 開いている Ready の PR のうち、このリポジトリのブランチのものだけ
+            prs=$(gh api "repos/$REPO/pulls?state=open&per_page=100" --jq "[.[] | select(.draft == false and .head.repo.full_name == \"$REPO\") | .number] | join(\" \")")
+          else
+            # フォークからの PR は対象にしない（このリポジトリのブランチの PR だけ）
+            if [ "$HEAD_REPO" != "$REPO" ]; then echo "フォークの PR は対象にしない"; exit 0; fi
+            prs="$PR_FROM_TARGET"
+            if [ -z "$prs" ]; then
+              prs=$(gh api "repos/$REPO/commits/$RUN_HEAD_SHA/pulls" --jq '[.[] | select(.state == "open")][0].number // empty')
+            fi
           fi
-          echo "number=$pr" >> "$GITHUB_OUTPUT"
+          echo "対象: ${prs:-なし}"
+          echo "numbers=$prs" >> "$GITHUB_OUTPUT"
       - uses: actions/checkout@v4
-        if: steps.pr.outputs.number != ''
+        if: steps.pr.outputs.numbers != ''
         with:
           ref: main
           fetch-depth: 0
       - uses: actions/setup-node@v4
-        if: steps.pr.outputs.number != ''
+        if: steps.pr.outputs.numbers != ''
         with:
           node-version: "22"
       - name: レビューの結果を status にする
-        if: steps.pr.outputs.number != ''
+        if: steps.pr.outputs.numbers != ''
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          PR: ${{ steps.pr.outputs.number }}
+          PRS: ${{ steps.pr.outputs.numbers }}
           REPO: ${{ github.repository }}
         run: |
-          out=$(node scripts/factory/claim.ts review-status "$PR")
-          echo "$out"
-          state=$(node -e 'const r=JSON.parse(process.argv[1]); process.stdout.write(r.state ?? "")' "$out")
-          sha=$(node -e 'const r=JSON.parse(process.argv[1]); process.stdout.write(r.sha ?? "")' "$out")
-          desc=$(node -e 'const r=JSON.parse(process.argv[1]); process.stdout.write(String(r.description ?? "").slice(0, 140))' "$out")
-          if [ -z "$state" ]; then echo "status は付けない"; exit 0; fi
-          gh api -X POST "repos/$REPO/statuses/$sha" -f state="$state" -f context=factory-review -f description="$desc" >/dev/null
-          echo "factory-review=$state を $sha に付けた"
+          for PR in $PRS; do
+            out=$(node scripts/factory/claim.ts review-status "$PR") || { echo "#$PR: 判定に失敗した（付けずに次へ）"; echo "$out"; continue; }
+            echo "$out"
+            state=$(node -e 'const r=JSON.parse(process.argv[1]); process.stdout.write(r.state ?? "")' "$out")
+            sha=$(node -e 'const r=JSON.parse(process.argv[1]); process.stdout.write(r.sha ?? "")' "$out")
+            desc=$(node -e 'const r=JSON.parse(process.argv[1]); process.stdout.write(String(r.description ?? "").slice(0, 140))' "$out")
+            if [ -z "$state" ]; then echo "PR $PR: status は付けない"; continue; fi
+            current=$(gh api "repos/$REPO/commits/$sha/statuses" --jq '[.[] | select(.context == "factory-review")][0].state // ""') || { echo "PR $PR: 今の status を読めなかった（付けずに次へ）"; continue; }
+            if [ "$current" = "$state" ]; then echo "PR $PR: factory-review は $state のまま"; continue; fi
+            gh api -X POST "repos/$REPO/statuses/$sha" -f state="$state" -f context=factory-review -f description="$desc" >/dev/null || { echo "PR $PR: status を付けられなかった（次の回にやり直す）"; continue; }
+            echo "PR $PR: factory-review=$state を $sha に付けた"
+          done

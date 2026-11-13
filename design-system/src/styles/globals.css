@@ -1,0 +1,95 @@
+@import "tailwindcss";
+@import "./tokens.css";
+
+/*
+ * Tailwind のテーマを、トークンだけに絞る。
+ * 既定の色・角丸・文字の大きさ・影を消すので、トークンに無い値（bg-blue-500 など）はクラスとして生成されない。
+ */
+@theme inline {
+  --color-*: initial;
+  --radius-*: initial;
+  --text-*: initial;
+  --shadow-*: initial;
+  --font-*: initial;
+
+  --color-bg: var(--bg);
+  --color-surface: var(--surface);
+  --color-surface-soft: var(--surface-soft);
+  --color-hover: var(--hover);
+  --color-fg: var(--fg);
+  --color-fg-2: var(--fg-2);
+  --color-muted: var(--muted);
+  --color-faint: var(--faint);
+  --color-border: var(--border);
+  --color-border-strong: var(--border-strong);
+  --color-brand: var(--brand);
+  --color-brand-fg: var(--brand-fg);
+  --color-brand-soft: var(--brand-soft);
+  --color-link: var(--link);
+  --color-ok: var(--ok);
+  --color-ok-soft: var(--ok-soft);
+  --color-warn: var(--warn);
+  --color-warn-soft: var(--warn-soft);
+  --color-warn-line: var(--warn-line);
+  --color-err: var(--err);
+  --color-err-soft: var(--err-soft);
+  --color-viz-now: var(--viz-now);
+  --color-viz-next: var(--viz-next);
+  --color-viz-r1: var(--viz-r1);
+  --color-viz-r2: var(--viz-r2);
+  --color-viz-r3: var(--viz-r3);
+  --color-viz-track: var(--viz-track);
+  --color-viz-prev: var(--viz-prev);
+  --color-transparent: transparent;
+
+  --radius-md: var(--r);
+  --radius-lg: var(--r-lg);
+  --radius-full: 9999px;
+
+  --font-sans: var(--font);
+
+  /* 影は浮く要素の 1 種類だけ（枠の代わりの影は border か inset で書く） */
+  --shadow-pop: var(--shadow);
+
+  /* 文字の大きさ（モックで使われている段だけ） */
+  --text-2xs: 11px;
+  --text-2xs--line-height: 1.5;
+  --text-xs: 12px;
+  --text-xs--line-height: 1.5;
+  --text-sm: 13px;
+  --text-sm--line-height: 1.6;
+  --text-base: 14px;
+  --text-base--line-height: 1.6;
+  --text-lg: 16px;
+  --text-lg--line-height: 1.4;
+  --text-xl: 20px;
+  --text-xl--line-height: 1.35;
+
+  /* 余白は 4px 刻み（p-1 = 4px, p-2.5 = 10px, p-3.5 = 14px, p-4 = 16px） */
+  --spacing: 4px;
+}
+
+@layer base {
+  body {
+    background: var(--bg);
+    color: var(--fg);
+    font-family: var(--font);
+    font-size: 14px;
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--brand);
+    outline-offset: 2px;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation: none !important;
+      transition: none !important;
+    }
+  }
+}
