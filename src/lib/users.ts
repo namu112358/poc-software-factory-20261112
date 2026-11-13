@@ -38,6 +38,14 @@ export function listUserSummaries(db: Db = getDb()): UserSummary[] {
   return rows.map((r) => ({ id: r.id, name: r.name, suspended: r.suspended_at !== null }));
 }
 
+/** 利用者が担当の、未完了・アーカイブしていない・削除していないタスクの件数（停止した後に残ったタスクの案内に使う。#538）。 */
+export function countOpenTasksOf(userId: string, db: Db = getDb()): number {
+  const row = db
+    .prepare("SELECT COUNT(*) AS n FROM tasks WHERE assignee = ? AND status <> 'done' AND archived = 0 AND deleted_at IS NULL")
+    .get(userId) as { n: number };
+  return row.n;
+}
+
 /** ログインを停止している利用者か。見つからない ID は false。 */
 export function isSuspended(userId: string, db: Db = getDb()): boolean {
   const row = db.prepare("SELECT suspended_at FROM users WHERE id = ?").get(userId) as { suspended_at: string | null } | undefined;
