@@ -1081,6 +1081,16 @@ describe("ゲートの監査（gate-review。台帳 #123 の E27）", () => {
       assert.equal(mode([]).decision, "go");
       assert.equal(mode([rv("ok", "session_R1", "old0000")]).decision, "go");
     });
+    it("2: 通常のレビュー（go）は、ok の後に監査を起こすか（startAudit）とパスを返す", () => {
+      const r = mode([]);
+      assert.equal(r.startAudit, true);
+      assert.deepEqual(r.gatePaths, [".claude/routines/fix.md"]);
+      // 人が見るパスを含む・risk:high・ゲートのパスに当たらない PR は、監査を起こさない
+      assert.equal(mode([], { files: [...AUDIT_FILES, ".github/workflows/ci.yml"] }).startAudit, false);
+      const pr = { open: true, draft: false, headRef: "claude/x", headSha: HEAD, labels: ["risk:high"], headRepo: REPO_ };
+      assert.equal(mode([], { pr }).startAudit, false);
+      assert.equal(mode([], { files: ["src/app/page.tsx"] }).startAudit, false);
+    });
     it("3: ok で、監査で通すパスに当たり、監査がまだ無ければ gate-review（出力にパスと 1 回目のセッション）。最新のコミットへのレビューがあっても、これが先", () => {
       const r = mode([rv("ok", "session_R1")]);
       assert.equal(r.decision, "gate-review");

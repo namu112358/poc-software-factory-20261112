@@ -38,7 +38,7 @@ PR が `Closes #<番号>` で参照する Issue を読み、次の 2 段を順�
 - 直すべき指摘には、それぞれ「必須」を付け、どの受入条件・どの確かめた結果に反するかを書く。好みの問題は「任意」にし、verdict には数えない。
 - 「必須」が 1 つでもあれば verdict=changes にし、PR を draft に戻す（これが修正の起動の合図）。
 - 無ければ verdict=ok にし、Ready のままにする。それ以上は何もしない（`risk:high` 以外は、GitHub Actions がレビューの結果を status にして、自動でキューに入る。`risk:high` は人が `merge:requested` を付ける）。
-- ok を書いた後、`gate` の出力の `gatePaths` が空でなく、人が見るパスに当たらず `risk:high` も無ければ、PR を draft にしてから Ready に戻す（ゲートの監査を別のセッションで起こす）。コメントに「ゲートの監査を起こした」と書く。
+- ok を書いた後、`gate` の出力の `startAudit` が `true` で、このレビューで `risk:high` を付けていなければ、PR を draft にしてから Ready に戻す（ゲートの監査を別のセッションで起こす）。コメントに「ゲートの監査を起こした」と書く。
 
 ## ゲートの監査
 

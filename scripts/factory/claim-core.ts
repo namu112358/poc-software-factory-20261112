@@ -1064,6 +1064,8 @@ export type GateResult = {
   gatePaths?: string[];
   firstReviewSession?: string | null;
   authorSessions?: string[];
+  /** review の go のとき: ok を書いた後に、ゲートの監査を起こすか（監査で通すパスがあり、人が見るパスに当たらず、risk:high が無い） */
+  startAudit?: boolean;
   fix?: { changes: boolean; conflict: boolean; removeMergeRequested: boolean } | null;
 };
 
@@ -1141,6 +1143,8 @@ export function gateDecision(input: GateInput): GateResult {
       ops: null,
       light,
       riskFiles,
+      gatePaths: auditPaths(input.files),
+      startAudit: auditPaths(input.files).length > 0 && touchesHumanGate(input.files).length === 0 && !pr.labels.includes(LABEL.riskHigh),
     };
   }
 
