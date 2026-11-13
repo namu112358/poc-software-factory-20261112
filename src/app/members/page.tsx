@@ -1,13 +1,16 @@
+import { formatPageTitle } from "@/lib/page-title";
 import { formatMonthDay } from "@/lib/absence";
 import { listMemberWorkload, sortMembersByOverdue } from "@/lib/members";
 import { requireUser } from "@/lib/session";
+
+export const metadata = { title: formatPageTitle("メンバー一覧") };
 
 export default async function MembersPage() {
   await requireUser();
   const members = sortMembersByOverdue(listMemberWorkload());
 
   return (
-    <main>
+    <main id="main-content" tabIndex={-1}>
       <h1>メンバー一覧</h1>
       <table>
         <thead>

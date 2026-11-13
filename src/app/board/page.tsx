@@ -1,12 +1,15 @@
+import { formatPageTitle } from "@/lib/page-title";
 import { listBoard } from "@/lib/board";
 import { requireUser } from "@/lib/session";
+
+export const metadata = { title: formatPageTitle("ステータス別のタスク") };
 
 export default async function BoardPage() {
   await requireUser();
   const rows = listBoard();
 
   return (
-    <main>
+    <main id="main-content" tabIndex={-1}>
       <h1>ステータス別のタスク</h1>
       <table>
         <thead>
