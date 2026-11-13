@@ -1,9 +1,9 @@
-import { formatPageTitle } from "@/lib/page-title";
+import { formatTaskDetailTitle } from "@/lib/page-title";
 import { notFound } from "next/navigation";
 import { formatAssigneeChange, listAssigneeChanges } from "@/lib/assignee-history";
 import { commentEditedLabel, listComments, listDeletedComments, splitCommentBody } from "@/lib/comments";
 import { commentPreview } from "@/lib/comment-delete";
-import { requireUser } from "@/lib/session";
+import { getCurrentUser, requireUser } from "@/lib/session";
 import { listTags, listTagSuggestions } from "@/lib/tags";
 import { PRIORITY_LABELS, RESTORE_DAYS, STATUS_LABELS, formatCompletedAt, formatEstimate, formatJstDateTime, formatTaskNumber, getTask, isDueSoon, isOverdue, parseTaskId, todayInJapan } from "@/lib/tasks";
 import { listAssigneeOptions } from "@/lib/members";
@@ -19,9 +19,9 @@ import { ExtensionRequestForm } from "./extension-form";
 import { RemoveTagButton, TagForm } from "./tags";
 
 export async function generateMetadata({ params }: Props) {
+  const user = await getCurrentUser();
   const id = parseTaskId((await params).id);
-  const task = id === undefined ? undefined : getTask(id);
-  return { title: formatPageTitle(task ? `${task.title} ${formatTaskNumber(task.id)}` : "タスクが見つかりません") };
+  return { title: formatTaskDetailTitle(user !== undefined, () => (id === undefined ? undefined : getTask(id))) };
 }
 
 type Props = {
