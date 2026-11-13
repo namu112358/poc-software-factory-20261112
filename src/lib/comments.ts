@@ -1,4 +1,4 @@
-import { getDb, type Db } from "./db/index.ts";
+import { getDb, transaction, type Db } from "./db/index.ts";
 import { restoreCutoff, restoreDeadline } from "./task-store.ts";
 import type { ValidationResult } from "./tasks.ts";
 
@@ -166,7 +166,8 @@ export type UpdateCommentResult =
 
 /**
  * コメントの本文を書き換え、編集日時を記録する。投稿者本人だけが編集できる（削除と同じ判定）。
- * 別のタスクのコメントは、だれが指定しても not_found。本文が今と同じなら、編集日時は変えない。
+ * 別のタスクのコメントは、だれが指定しても not_found。本文が今と同じなら、編集日時は変えず、前の本文も残さない。
+ * 本文が変わるときは、編集の前の本文を `comment_revisions` に残す（`listCommentRevisions` で読む）。
  * body は validateCommentInput を通した値を渡す。
  */
 export function updateComment(
@@ -177,18 +178,52 @@ export function updateComment(
   db: Db = getDb(),
   now: Date = new Date(),
 ): UpdateCommentResult {
-  // 判定と書き込みを 1 つの文で行い、読んでから書くまでに削除などが入っても、他人のコメントを書き換えない。
-  const { changes } = db
-    .prepare(
-      "UPDATE comments SET edited_at = CASE WHEN body = :body THEN edited_at ELSE :now END, body = :body WHERE id = :id AND task_id = :taskId AND author = :userId AND deleted_at IS NULL",
-    )
-    .run({ body, now: now.toISOString(), id: commentId, taskId, userId });
-  if (Number(changes) === 0) {
+  const params = { body, now: now.toISOString(), id: commentId, taskId, userId };
+  // 判定と書き込みを同じ条件の文で行い、読んでから書くまでに削除などが入っても、他人のコメントを書き換えない。
+  // 前の本文の記録と本文の書き換えは 1 つのトランザクションで行い、片方だけが起きないようにする。
+  const changes = transaction(db, () => {
+    db.prepare(
+      "INSERT INTO comment_revisions (comment_id, body, edited_at) SELECT id, body, :now FROM comments WHERE id = :id AND task_id = :taskId AND author = :userId AND deleted_at IS NULL AND body <> :body",
+    ).run(params);
+    return Number(
+      db
+        .prepare(
+          "UPDATE comments SET edited_at = CASE WHEN body = :body THEN edited_at ELSE :now END, body = :body WHERE id = :id AND task_id = :taskId AND author = :userId AND deleted_at IS NULL",
+        )
+        .run(params).changes,
+    );
+  });
+  if (changes === 0) {
     const comment = getComment(commentId, db);
     if (!comment || comment.taskId !== taskId) return { status: "not_found" };
     return { status: "forbidden" };
   }
   return { status: "updated", comment: getComment(commentId, db)! };
+}
+
+export type CommentRevision = {
+  body: string; // 編集の前の本文
+  editedAt: string; // この本文を書き換えた日時。ISO 8601（UTC）
+};
+
+/**
+ * タスクのコメントごとの、編集の前の本文を、編集した日時の古い順（同じなら編集した順）で返す。
+ * 削除したコメントの分も含む（戻したときにそのまま出せるように）。編集していないコメントは含まない。
+ */
+export function listCommentRevisions(taskId: number, db: Db = getDb()): Map<number, CommentRevision[]> {
+  const rows = db
+    .prepare(
+      `SELECT r.comment_id, r.body, r.edited_at FROM comment_revisions r JOIN comments c ON c.id = r.comment_id
+        WHERE c.task_id = ? ORDER BY r.comment_id, r.edited_at, r.id`,
+    )
+    .all(taskId) as { comment_id: number; body: string; edited_at: string }[];
+  const result = new Map<number, CommentRevision[]>();
+  for (const r of rows) {
+    const list = result.get(r.comment_id) ?? [];
+    list.push({ body: r.body, editedAt: r.edited_at });
+    result.set(r.comment_id, list);
+  }
+  return result;
 }
 
 /** 詳細画面で、日時の隣に出す編集の印。未編集なら空文字。 */
