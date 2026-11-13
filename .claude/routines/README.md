@@ -18,7 +18,7 @@ flowchart LR
 - `status:ready` は承認だけで、実装は起動しない。`status:ready` があって `status:in-progress` の無い Issue は、着手を待っている。
 - `status:in-progress`（難しい用は `status:in-progress-hard`）が実装の開始の合図。付けるのは割り当て・巡回の役（作業中が 0 件のときは人）。
 - PR の Ready は「レビューして」、draft に戻すのは「直して」の合図。
-- レビューを通った PR は、自動で Mergify のキューに入る（GitHub Actions がレビューの結果を最新のコミットの status `factory-review` にし、Mergify がそれを条件にする）。Mergify が `main` を取り込み、CI を回し直してからマージする。`risk:high` の PR と、品質のゲート（`.mergify.yml`・`.github/`・`.claude/`・`scripts/factory/`・`AGENTS.md`・`CLAUDE.md`・`docs/rulesets/`）を変える PR は自動で入らず、人が `merge:requested` を付ける（`.mergify.yml` を変える PR は、人がキューを通さずにマージする）。
+- レビューを通った PR は、自動で Mergify のキューに入る（GitHub Actions がレビューの結果を最新のコミットの status `factory-review` にし、Mergify がそれを条件にする）。Mergify が `main` を取り込み、CI を回し直してからマージする。`risk:high` の PR と、品質のゲート（`.mergify.yml`・`.github/`・`.claude/`・`scripts/`・`AGENTS.md`・`CLAUDE.md`・`docs/rulesets/`・`package.json` などの CI の動きを決めるファイル。一覧は `claim-core.ts` の `GATE_PATHS`）を変える PR は自動で入らず、人が `merge:requested` を付ける（`.mergify.yml` を変える PR は、人がキューを通さずにマージする）。
 
 ## ラベル
 

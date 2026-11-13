@@ -553,9 +553,9 @@ describe("レビューを通ったことを表す status（reviewStatus・自動
     const mc = mergeCheck({ reviews: [{ ...ok("aaaa111"), association: "NONE" }], headSha: "aaaa111", after: [] });
     assert.equal(reviewStatus(mc, "aaaa111", []).state, null);
   });
-  it("品質のゲート（.mergify.yml・.github/・.claude/・scripts/factory/・AGENTS.md・CLAUDE.md・docs/rulesets/）を変える PR には、ok でも success を付けない", () => {
+  it("品質のゲート（CI・Mergify・手順書・判定のスクリプト・規約・Ruleset・package.json などの CI の動きを決めるファイル）を変える PR には、ok でも success を付けない", () => {
     const mc = mergeCheck({ reviews: [ok("aaaa111")], headSha: "aaaa111", after: [] });
-    for (const f of [".mergify.yml", ".github/workflows/ci.yml", ".claude/routines/review.md", "scripts/factory/claim.ts", "AGENTS.md", "CLAUDE.md", "docs/rulesets/main.json"]) {
+    for (const f of [".mergify.yml", ".github/workflows/ci.yml", ".claude/routines/review.md", "scripts/factory/claim.ts", "scripts/check-skills.py", "AGENTS.md", "CLAUDE.md", "docs/rulesets/main.json", "package.json", "package-lock.json", "tsconfig.json", "tests/factory-claim.test.ts"]) {
       assert.equal(reviewStatus(mc, "aaaa111", [], ["src/app/page.tsx", f]).state, null, f);
     }
     assert.equal(reviewStatus(mc, "aaaa111", [], ["src/app/page.tsx", "docs/product.md", "tests/a.test.ts"]).state, "success");

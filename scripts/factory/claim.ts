@@ -253,7 +253,12 @@ async function main(): Promise<unknown> {
       if (!Number.isInteger(n)) throw new Error("PR の番号を指定する");
       const { headSha, labels, review } = await reviewCheck(n);
       // 判定のよりどころは GitHub の変更ファイル（PR の側の記述は読まない）
-      const files = (await getAll<{ filename: string; previous_filename?: string }>(`/repos/${REPO}/pulls/${n}/files`)).flatMap((f) => [f.filename, ...(f.previous_filename ? [f.previous_filename] : [])]);
+      const raw = await getAll<{ filename: string; previous_filename?: string }>(`/repos/${REPO}/pulls/${n}/files`);
+      // 一覧が途中で切れた・判定の間に head が変わったときは、付けない（安全側に倒す）
+      const now = (await get<{ head: { sha: string }; changed_files: number }>(`/repos/${REPO}/pulls/${n}`)).data;
+      if (now.head.sha !== headSha) return { pr: n, sha: headSha, state: null, description: "判定の間に PR の最新のコミットが変わった。次のきっかけで判定し直す。" };
+      if (raw.length !== now.changed_files) return { pr: n, sha: headSha, state: null, description: `変更ファイルの一覧（${raw.length} 件）が PR の変更ファイル数（${now.changed_files} 件）と合わない。人が確かめる。` };
+      const files = raw.flatMap((f) => [f.filename, ...(f.previous_filename ? [f.previous_filename] : [])]);
       return { pr: n, sha: headSha, ...reviewStatus(review, headSha, labels, files) };
     }
     case "relabel": {

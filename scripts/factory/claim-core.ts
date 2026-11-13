@@ -596,7 +596,23 @@ export function ciCheck(runs: { name: string; status: string; conclusion: string
  * risk:high の PR は人が merge:requested を付けてキューに入れるので、success は付けない（レビューの結果と risk:high の付く順が前後しても、自動で入らないように）。
  * 品質のゲート（CI・Mergify・Routine の手順書・判定のスクリプト・エージェントの規約・Ruleset）を変える PR も、success は付けない（人が確かめてマージする）。
  */
-export const GATE_PATHS = [".mergify.yml", ".github/", ".claude/", "scripts/factory/", "AGENTS.md", "CLAUDE.md", "docs/rulesets/"];
+// CI の動きを決めるファイル（package.json の test のスクリプト・依存・TypeScript の設定）も含める（書き換えると CI を空にできるため）。
+// tests/ は含めない（機能の PR はふつうテストを足す）。テストを外す・緩める変更は、レビューの役が見る（AGENTS.md の規約）。
+export const GATE_PATHS = [
+  ".mergify.yml",
+  ".mergify/",
+  ".github/",
+  ".claude/",
+  "scripts/",
+  "AGENTS.md",
+  "CLAUDE.md",
+  "docs/rulesets/",
+  "package.json",
+  "package-lock.json",
+  ".npmrc",
+  "tsconfig.json",
+  "tests/factory-claim.test.ts",
+];
 
 export function touchesGate(files: string[]): string[] {
   return files.filter((f) => GATE_PATHS.some((g) => (g.endsWith("/") ? f.startsWith(g) : f === g || f.endsWith(`/${g}`))));
