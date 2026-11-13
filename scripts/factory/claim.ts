@@ -280,7 +280,8 @@ async function loadStalled(role: string) {
         }
         if (labels.some((l) => l === "merge:dequeued" || l === "dequeued")) {
           const comments = await getAll<RawTrustedComment>(`/repos/${REPO}/issues/${n}/comments`);
-          const m = comments.filter((c) => /dequeue_reason[\s\S]{0,300}?CHECKS_TIMEOUT/.test(c.body ?? "")).at(-1);
+          // Mergify のボットの状況のコメントだけを読む（ほかの人が同じ文字を書いても、判定に使わない）
+          const m = comments.filter((c) => c.user?.login === "mergify[bot]" && /dequeue_reason[\s\S]{0,300}?CHECKS_TIMEOUT/.test(c.body ?? "")).at(-1);
           if (m) mergifyTimeout = { at: m.updated_at };
         }
       }
