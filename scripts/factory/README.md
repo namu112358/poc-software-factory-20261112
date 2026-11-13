@@ -1,6 +1,6 @@
 # scripts/factory
 
-Routine（`.claude/routines/`）が使う判定のスクリプトです。GitHub を読むだけで、書き込みはしません。役はスクリプトを実行し、出力（`decision`・`actions`・`comment`）のとおりにラベルとコメントを変えます。判定の決まりはここに書き、手順書には書きません。Routine はこのディレクトリを変えません。
+Routine（`.claude/routines/`）が使う判定のスクリプトです。GitHub を読むだけで、書き込みはしません。役はスクリプトを実行し、出力（`decision`・`actions`・`comment`）のとおりにラベルとコメントを変えます。判定の決まりはここに書き、手順書には書きません。役が扱う PR は、このリポジトリのブランチで名前が `claude/` で始まるものだけです（フォークの PR は、ブランチ名が `claude/...` でも対象にしない）。Routine はこのディレクトリを変えません。
 
 ## コマンド
 
