@@ -22,6 +22,19 @@ Routine（`.claude/routines/`）が使う判定のスクリプトです。GitHub
 
 `node scripts/factory/claim.ts <コマンド>` で動かす（Node 22.18 以上。クラウドのプロキシを通すため、自分を `NODE_USE_ENV_PROXY=1` で起動し直す）。`decision` が `error` のときは終了コード 2。
 
+## ファイルの構成
+
+別のサブコマンドを直す PR どうしが同じファイルを触って衝突しないよう、サブコマンドごとにファイルを分けている。
+
+| 場所 | 置くもの |
+|---|---|
+| `claim.ts` | 入口だけ。引数を見て `cmd/<サブコマンド>.ts` の関数を呼ぶ。手順書・`.claude/settings.json` の許可が `node scripts/factory/claim.ts *` を前提にしているため、名前と置き場所を変えない。足さない |
+| `cmd/<サブコマンド>.ts` | そのサブコマンドの GitHub・git の読み取りと出力（`pick`・`precheck`・`relabel`・`stalled`・`gate`・`ci-wait`・`handled`・`budget`・`merge-check`・`review-status`・`wait`・`session-id`・`rest-get`）。複数のサブコマンドが共有する読み取りは `github.ts`（REST・引数）・`issues.ts`・`open-prs.ts`・`open-state.ts`・`main-broken.ts`・`commits-after.ts`・`review-marks.ts`・`review-check.ts` |
+| `core/<名前>.ts` | 判定の本体（GitHub・git を読まない純粋な関数）。サブコマンドごとに `pick.ts`・`precheck.ts`・`relabel.ts`・`stalled.ts`・`gate.ts`・`ci-wait.ts`・`handled.ts`・`budget.ts`・`merge-check.ts`・`review-status.ts`・`wait.ts`・`session.ts`・`rest-get.ts`。共有するもの（ラベル `labels.ts`、待っている Issue の読み方 `queue.ts`、CI のチェック `checks.ts`、信頼の判定 `repo.ts`、コミット `commits.ts`、コメントの印 `marks.ts`） |
+| `claim-core.ts` | `core/` の全ファイルから re-export するだけ（`tests/` など、これまでの import を壊さないため）。判定は足さない |
+
+判定を直すときは、該当する `core/` のファイルとそのテストだけを直す。
+
 ## 決まり
 
 - **同時に実装する Issue は 4 件まで**（`WIP_LIMIT`）。`status:in-progress` か `status:in-progress-hard` の付いた開いている Issue の数で数える。
