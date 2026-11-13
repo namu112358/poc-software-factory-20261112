@@ -87,7 +87,7 @@ export const MixedUncontrolled: Story = {
   render: (args) => <Field name="すべての項目を選ぶ" {...args} />,
   play: async ({ canvas }) => {
     const box = canvas.getByRole("checkbox", { name: "すべての項目を選ぶ" });
-    await expect(box).toHaveAttribute("data-state", "indeterminate");
+    await expect(box).toHaveAttribute("data-indeterminate");
     await expect(box).toHaveAttribute("aria-checked", "mixed");
     // トークン --color-brand の値を、同じ描画で背景色にして比べる。
     // 見本は箱と同じ親に置き、テーマ（Story の枠の data-theme）をそろえる。
@@ -100,7 +100,9 @@ export const MixedUncontrolled: Story = {
     const dash = box.querySelectorAll("svg")[1];
     await expect(getComputedStyle(dash).display).not.toBe("none");
     await userEvent.click(box);
-    await expect(box).toHaveAttribute("data-state", "checked");
+    await expect(box).toHaveAttribute("data-checked");
+    await expect(box).not.toHaveAttribute("data-indeterminate");
+    await expect(box).toHaveAttribute("aria-checked", "true");
     await expect(getComputedStyle(dash).display).toBe("none");
   },
 };
