@@ -1,0 +1,32 @@
+import { Meta, Canvas, Controls, Stories } from "@storybook/addon-docs/blocks";
+import * as InputStories from "./input.stories";
+
+<Meta of={InputStories} />
+
+# Input
+
+1 行の文字を入れる欄。名前（Label）・補足・誤りの文言とあわせて描く。
+
+<Canvas of={InputStories.Default} />
+<Controls of={InputStories.Default} />
+
+## 使う場面
+
+- 表示名・題名・短い語など、1 行で済む文字を入れてもらうとき。
+- 入力の誤りを、赤い枠と文言で伝えるとき（`error`）。文言は読み上げでも欄の説明として読まれる。
+- 入れ方の補足を、欄の下に添えるとき（`description`）。
+
+## 使わない場面
+
+- 複数行の文章を入れるときには使わない（Textarea を使う。別の部品）。
+- 決まった選択肢から選ぶときには使わない（Select を使う。別の部品）。
+- 名前を付けない欄には使わない。名前（`label`）は必ず渡す。入力例を薄く出すだけで名前の代わりにしない。
+
+## 書き方の決まり
+
+- 誤りの文言は、何をどう直すかが分かる短い文で書く。
+- `id` は渡さなくてよい。渡さなければ欄ごとに別の値が付く。
+
+## すべての状態
+
+<Stories />

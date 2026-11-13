@@ -249,7 +249,7 @@ describe("GET /api/me のロックの知らせ", () => {
     const db = openDb();
     fail(db, "suzuki", MAX_FAILURES, T0);
     const token = tokenOf(login("suzuki", SEED_PASSWORD, db, afterLock(T0)));
-    const user = { id: "suzuki", name: "鈴木" };
+    const user = { id: "suzuki", name: "鈴木", role: "member" as const };
     const body = toMeResponse(user, null, getLockNotice(token, db, afterLock(T0)) ?? null);
     assert.deepEqual(body.lockNotice, { count: 1, lastLockedAt: T0.toISOString() });
     assert.equal(toMeResponse(user).lockNotice, null);
@@ -257,7 +257,7 @@ describe("GET /api/me のロックの知らせ", () => {
 
   it("決めた項目だけを詰め直す", () => {
     const leaky = { count: 1, lastLockedAt: T0.toISOString(), token: "secret" };
-    const body = toMeResponse({ id: "suzuki", name: "鈴木" }, null, leaky);
+    const body = toMeResponse({ id: "suzuki", name: "鈴木", role: "member" }, null, leaky);
     assert.ok(!JSON.stringify(body).includes("secret"));
   });
 });
