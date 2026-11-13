@@ -92,7 +92,7 @@ export const WithCount: Story = {
   },
 };
 
-/** 押せないタブがある。矢印キーで飛ばされ、クリックしても選ばれない。 */
+/** 押せないタブがある。矢印キーでは止まるが、Enter・Space・クリックでも選ばれない。 */
 export const WithDisabled: Story = {
   name: "押せないタブがある",
   render: () => (
@@ -119,14 +119,29 @@ export const WithDisabled: Story = {
     const first = canvas.getByRole("tab", { name: "最初" });
     const disabled = canvas.getByRole("tab", { name: "準備中" });
     const last = canvas.getByRole("tab", { name: "最後" });
-    await expect(disabled).toBeDisabled();
+    // Base UI の押せないタブは disabled 属性ではなく aria-disabled で、読み上げに「押せない」と伝える。
+    await expect(disabled).toHaveAttribute("aria-disabled", "true");
 
     await userEvent.tab();
     await expect(first).toHaveFocus();
+    // Base UI では、押せないタブにも矢印キーで止まる（読み上げでタブがあることを伝えるため）。選ばれはしない。
+    await userEvent.keyboard("{ArrowRight}");
+    await expect(disabled).toHaveFocus();
+    await userEvent.keyboard("{Enter}");
+    await userEvent.keyboard(" ");
+    await expect(disabled).toHaveAttribute("aria-selected", "false");
+    await expect(first).toHaveAttribute("aria-selected", "true");
+    await expect(canvas.getByRole("tabpanel", { name: "最初" })).toBeVisible();
+
     await userEvent.keyboard("{ArrowRight}");
     await expect(last).toHaveFocus();
     await expect(last).toHaveAttribute("aria-selected", "true");
     await expect(disabled).toHaveAttribute("aria-selected", "false");
+
+    // クリックしても選ばれない。
+    await userEvent.click(disabled);
+    await expect(disabled).toHaveAttribute("aria-selected", "false");
+    await expect(last).toHaveAttribute("aria-selected", "true");
   },
 };
 

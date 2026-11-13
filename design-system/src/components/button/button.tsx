@@ -1,5 +1,5 @@
 import * as React from "react";
-import { Slot } from "radix-ui";
+import { useRender } from "@base-ui/react/use-render";
 import { cva, type VariantProps } from "class-variance-authority";
 
 import { cn } from "@/lib/utils";
@@ -46,17 +46,21 @@ export type ButtonProps =
   | (ButtonBaseProps & { size?: "md" | "sm" | null })
   | (ButtonBaseProps & { size: "icon"; "aria-label": string });
 
-function Button({ className, variant, size, asChild = false, type, ...props }: ButtonProps) {
-  const Comp = asChild ? Slot.Root : "button";
-  return (
-    <Comp
-      data-slot="button"
+function Button({ className, variant, size, asChild = false, type, ref, children, ...props }: ButtonProps) {
+  return useRender({
+    defaultTagName: "button",
+    // asChild のときは、子の要素をそのまま描き、ボタンの見た目と props を重ねる（子の props が優先）。
+    render: asChild ? (children as React.ReactElement) : undefined,
+    ref,
+    props: {
+      "data-slot": "button",
       // フォームの中で思わず送信しないよう、<button> の既定は type="button" にする。
-      type={asChild ? type : (type ?? "button")}
-      className={cn(buttonVariants({ variant, size }), className)}
-      {...props}
-    />
-  );
+      type: asChild ? type : (type ?? "button"),
+      className: cn(buttonVariants({ variant, size }), className),
+      ...props,
+      children: asChild ? undefined : children,
+    },
+  });
 }
 
 export { Button, buttonVariants };

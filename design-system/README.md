@@ -31,4 +31,4 @@ npm run storybook   # http://localhost:6006 で部品を見る
 
 ## 作り方の決まり
 
-部品は shadcn/ui の作り方に従います（`cva` で見た目の種類を決め、`cn` でクラスをまとめ、`data-slot` を付け、振る舞いのある部品は Radix のプリミティブを包む）。規約は、リポジトリの `AGENTS.md` の「design-system/」の節を読んでください。
+部品は shadcn/ui の作り方に従います（`cva` で見た目の種類を決め、`cn` でクラスをまとめ、`data-slot` を付け、振る舞いのある部品は Base UI（`@base-ui/react`）の部品を包む）。規約は、リポジトリの `AGENTS.md` の「design-system/」の節を読んでください。

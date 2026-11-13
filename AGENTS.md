@@ -41,7 +41,7 @@ GitHub のイベントで起動する Claude Code の Routines（scheduled tasks
 
 ## design-system/
 
-Storybook で部品を作るデザインシステムの見本（本採用は未定）。React + Vite + Tailwind v4、部品は shadcn/ui の作り方（`cva`・`cn`・`data-slot`、振る舞いのある部品は Radix の `radix-ui` を包む）。アプリとは別の npm プロジェクトで、アプリのコードからは使わない。手本の部品は `design-system/src/components/button/`。
+Storybook で部品を作るデザインシステムの見本（本採用は未定）。React + Vite + Tailwind v4、部品は shadcn/ui の作り方（`cva`・`cn`・`data-slot`、振る舞いのある部品は Base UI の `@base-ui/react` を包む）。アプリとは別の npm プロジェクトで、アプリのコードからは使わない。手本の部品は `design-system/src/components/button/`。
 
 ### コマンド（`design-system/` で実行する）
 
