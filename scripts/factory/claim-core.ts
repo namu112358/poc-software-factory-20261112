@@ -725,6 +725,15 @@ function changedAfterLatestReview(pr: StalledPr): boolean {
   return after == null || after.some((c) => !c.mergeOnly);
 }
 
+/**
+ * stalled の入力として、PR ごとに何を読むか（claim.ts の loadStalled が使う）。
+ * レビューと Ready の時刻は、claude/issue- 以外の PR でも読む（レビューの起こし直しは claude/ のすべての PR が対象。#559）。
+ * Ready の時刻は Ready の PR だけ。CI・PR 本文の検査・Mergify の状況は、claude/issue- の PR で mergeable が分かっているときだけ（ほかの行で使う）。
+ */
+export function stalledLoadPlan(p: { own: boolean; mergeable: boolean | null; draft: boolean }): { reviews: boolean; readyAt: boolean; checks: boolean } {
+  return { reviews: true, readyAt: !p.draft, checks: p.own && p.mergeable !== null };
+}
+
 export function stalledComment(role: string, action: string, text: string, sessionUrl: string | null, commit?: string): string {
   const mark = `<!-- factory:${role} action=${action}${commit ? ` commit=${commit}` : ""} -->`;
   return [mark, text, ...(sessionUrl ? [`セッション: ${sessionUrl}`] : [])].join("\n");

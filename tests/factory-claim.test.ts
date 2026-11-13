@@ -32,6 +32,7 @@ import {
   normalizeLabel,
   START_LABELS,
   isOwnClaudePr,
+  stalledLoadPlan,
 } from "../scripts/factory/claim-core.ts";
 
 const touch = (files: string, at: string) => ({ body: `<!-- factory:touch files=${files} -->\n着手します。`, createdAt: at });
@@ -772,6 +773,18 @@ describe("stalled: 止まった実装・PR の片付け", () => {
     const other = pr({ headRef: "claude/hand-made", draft: true, readyAt: null, updatedAt: ago(99), appCheck: "success", mergeable: true });
     assert.equal(run([other], []).actions.length, 0); // CI が通ったまま止まった draft でも、Ready にしない（出したセッションが扱う）
     assert.equal(only(run([{ ...other, draft: false, mergeable: false }], [])).action, "conflict");
+  });
+
+  it("入力の読み込み: claude/issue- 以外の PR でも、レビューと（Ready なら）Ready の時刻を読む。mergeable が null でも読む", () => {
+    for (const mergeable of [true, false, null]) {
+      const other = stalledLoadPlan({ own: false, mergeable, draft: false });
+      assert.equal(other.reviews, true, String(mergeable));
+      assert.equal(other.readyAt, true, String(mergeable));
+      assert.equal(other.checks, false, String(mergeable)); // CI などは claude/issue- の PR のほかの行だけが使う
+    }
+    assert.equal(stalledLoadPlan({ own: false, mergeable: true, draft: true }).readyAt, false);
+    assert.deepEqual(stalledLoadPlan({ own: true, mergeable: true, draft: false }), { reviews: true, readyAt: true, checks: true });
+    assert.equal(stalledLoadPlan({ own: true, mergeable: null, draft: false }).checks, false);
   });
 
   it("claude/issue- 以外の PR（claude/ci- など）も、Ready のまま 10 分レビューが無ければ起こし直し、同じコミットで 2 回目は人に回す（#482・#518）", () => {
