@@ -11,7 +11,7 @@ PR が Ready for review になったときに起動します。実装した役�
 前回のレビューが `verdict=ok` で、その後に PR に入ったコミットが「`main` の取り込み（マージのコミット）」と、その衝突の解消だけのとき（`light`）は、2 段の確かめはせず、次だけを行う。
 
 - 衝突を解消した箇所（マージのコミットで、`main` の側とも PR の側とも違う行）を読み、両方の変更の意図が残っているかを見る。
-- `npm run typecheck`・`npm test`・`npm run build` が通るかを見る（`design-system/` を変えた PR は、`design-system/` でも `npm run typecheck`・`npm run lint`・`npm test`・`npm run build`）。
+- `npm run typecheck`・`npm test`・`npm run build` が通るかを見る（`design-system/` を変えた PR は、`npm --prefix design-system run typecheck`・`npm --prefix design-system run lint`・`npm --prefix design-system test`・`npm --prefix design-system run build` も）。
 
 問題が無ければ verdict=ok にする（コメントに「軽い再レビュー」と書く）。
 
@@ -20,10 +20,12 @@ PR が Ready for review になったときに起動します。実装した役�
 PR が `Closes #<番号>` で参照する Issue を読み、次の 2 段を順に行う。2 段を混ぜない。`Closes` の Issue が無い PR（手順書や設定だけの変更など）は、受入条件の代わりに PR 本文の「変更内容」と照合する。
 
 1. **要件の照合**: Issue の受入条件を 1 つずつ取り上げ、満たしているかを、コードとテストを読んで判定する。判定ごとに根拠（ファイルと行、テストの名前）を書く。受入条件に書かれていないが、同じ画面・API の既存の振る舞い（ログインの確認、入力の検証、エラーの形）とそろっているかも見る。
-2. **動かして確かめる**: PR のブランチで `npm run build` と `npm start` を実行し、変更した画面と API を実際に開く（`curl` か Playwright）。ログインが要るものは、初期ユーザー（`docs/architecture.md` を参照）でログインしてから確かめる。開いた URL・状態コード・エラーの有無を結果として書く。
-   - `design-system/` の変更は、アプリを起動する代わりに、`design-system/` で `npm ci`・`npm test`・`npm run build` を実行し、書き出した `storybook-static/` を静的に配って（例: `python3 -m http.server 6006 --directory storybook-static`）、変更した部品の Story を Playwright で開く（`iframe.html?id=<Story の id>&viewMode=story`）。受入条件のキーボード操作を実際に行い、暗い表示（`&globals=theme:dark`）でも開く。あわせて `AGENTS.md` の「design-system/」の規約（トークンだけ・意味のある状態だけ・Docs の使う場面と使わない場面・新しい依存が無い）に反していないかを見る。開いた Story・行った操作・axe とコンソールのエラーの有無を結果として書く。
+2. **動かして確かめる**: PR のブランチで `npm run build` と `npm start` を実行し、変更した画面と API を実際に開く（Playwright の MCP か、Write でスクラッチパッドに書いたスクリプトを `node <ファイル>` で実行する。`curl` は許可に当たらず承認の画面に回るので使わない）。ログインが要るものは、初期ユーザー（`docs/architecture.md` を参照）でログインしてから確かめる。開いた URL・状態コード・エラーの有無を結果として書く。コマンドは 1 回に 1 つ（`README.md` の「どの役にも共通の決まり」）。cd せず、リポジトリの直下で `git <サブコマンド>` をそのまま実行する（`git -C` は使わない。許可に当たらず承認の画面に回るため）。`npm start` は Bash の `run_in_background` で単独で起動し、確かめが複数の手順なら、Write でスクラッチパッドにスクリプト（.mjs など）を書いて `node <ファイル>` で実行する。`;`・`&&`・`&`・リダイレクト（`>`・`<`）・`$` の展開・バッククォートは書かない（フックが断る）。コミットの本文を `git commit -m` で書けないときは、Write でファイルに書いて `git commit -F <ファイル>` で渡す。
+   - `design-system/` の変更は、アプリを起動する代わりに、リポジトリの直下から `npm --prefix design-system ci`・`npm --prefix design-system test`・`npm --prefix design-system run build` を実行し（cd しない）、書き出した `design-system/storybook-static/` を静的に配って（`python3 -m http.server 6006 --directory design-system/storybook-static` を、Bash の `run_in_background` で単独で起動する。`&` や `(... &)` で裏に回さず、ほかのコマンドとつながない）、変更した部品の Story を Playwright で開く（複数の手順は Write でスクリプトにして `node <ファイル>` で実行する）（`iframe.html?id=<Story の id>&viewMode=story`）。受入条件のキーボード操作を実際に行い、暗い表示（`&globals=theme:dark`）でも開く。あわせて `AGENTS.md` の「design-system/」の規約（トークンだけ・意味のある状態だけ・Docs の使う場面と使わない場面・新しい依存が無い）に反していないかを見る。開いた Story・行った操作・axe とコンソールのエラーの有無を結果として書く。
 
 あわせて、PR が `main` と衝突していないか（`mergeable`）を見る。衝突していれば、それを「必須」の指摘にする。
+
+既存の API の応答の項目・受け付ける値が変わる PR では、変わった点（足した・消した・意味の変わった項目、新しく断る・受け付ける値、状態コード）をレビューのコメントに一覧にし、その API を使う画面と `docs/` の説明が合っているかを確かめる。合っていなければ「必須」の指摘にする（外部の利用者に効く変更を、`risk:high` の代わりにレビューで確かめる。台帳 #123 の E26）。
 
 `riskFiles` が空でなければ、PR に `risk:high` を付け、レビューのコメントにどのファイルに当たるかを書く。他人のデータを見せる・変える範囲の変更は、読んで判断する。`risk:high` は verdict には影響させない。`risk:high` は、結果を書く（3.）より前に付ける（ok のレビューを書くと PR は自動でキューに入るので、後から付けると間に合わないことがある）。
 

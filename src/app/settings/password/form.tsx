@@ -1,6 +1,7 @@
 "use client";
 // パスワード変更のフォーム。確認が一致しないときは送信しない。
 // ログインが切れていたら（401）、入力を残したまま、ログインし直す案内を出す（#491）。
+import { useRouter } from "next/navigation";
 import { useState } from "react";
 import type { FormEvent } from "react";
 import {
@@ -13,7 +14,13 @@ import { passwordStrengthText } from "@/lib/password-strength";
 import { isSessionExpired } from "@/lib/session-expired";
 import { SessionExpiredNotice } from "../../session-expired";
 
-export function PasswordForm() {
+/**
+ * afterChangeHref: 変えた後に出す、次の画面へのリンク（仮のパスワードから変えたとき。#523）。
+ * 仮のパスワードから変えたら画面を読み込み直し、仮のパスワードの知らせを消す（#566）。リンクは最初に受け取ったものを残す。
+ */
+export function PasswordForm({ afterChangeHref }: { afterChangeHref?: string } = {}) {
+  const router = useRouter();
+  const [continueHref] = useState(afterChangeHref);
   const [errors, setErrors] = useState<string[]>([]);
   const [expired, setExpired] = useState(false);
   const [done, setDone] = useState(false);
@@ -46,6 +53,7 @@ export function PasswordForm() {
         form.reset();
         setNewPassword("");
         setDone(true);
+        if (continueHref) router.refresh();
       } else if (isSessionExpired(res.status)) {
         setExpired(true);
       } else {
@@ -85,7 +93,17 @@ export function PasswordForm() {
       <button type="submit" disabled={pending}>
         変更
       </button>
-      {done && <p role="status">{PASSWORD_CHANGED_MESSAGE}</p>}
+      {done && (
+        <p role="status">
+          {PASSWORD_CHANGED_MESSAGE}
+          {continueHref && (
+            <>
+              {" "}
+              <a href={continueHref} data-testid="password-continue">タスク一覧へ進む</a>
+            </>
+          )}
+        </p>
+      )}
       {expired && (
         <p role="alert" data-testid="password-session-expired">
           <SessionExpiredNotice />

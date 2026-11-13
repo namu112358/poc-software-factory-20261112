@@ -1,4 +1,11 @@
+import { randomInt } from "node:crypto";
 import { getDb, transaction, type Db } from "./db/index.ts";
+import { hashPassword } from "./password.ts";
+import { unknownFieldErrors } from "./body-fields.ts";
+import type { ValidationResult } from "./task-types.ts";
+import { isUserRole, type UserRole } from "./user-role.ts";
+
+export { USER_ROLE_LABELS, USER_ROLES, isUserRole, type UserRole } from "./user-role.ts";
 
 export type User = { id: string; name: string };
 
@@ -24,14 +31,43 @@ export function listUserOptions(db: Db = getDb()): User[] {
 
 export type UserSummary = User & { suspended: boolean };
 
-/** 利用者の全員と、ログインを停止しているか（GET /api/users）。並びは ID 順。 */
-export function listUserSummaries(db: Db = getDb()): UserSummary[] {
-  const rows = db.prepare("SELECT id, name, suspended_at FROM users ORDER BY id").all() as {
+/** mustChangePassword: 仮のパスワードのままか（#566）。 */
+export type UserListItem = UserSummary & { role: UserRole; mustChangePassword: boolean };
+
+/** 利用者の全員と、ログインを停止しているか・役割・仮のパスワードのままか（GET /api/users。役割は #524、仮のパスワードは #566）。並びは ID 順。 */
+export function listUserSummaries(db: Db = getDb()): UserListItem[] {
+  const rows = db.prepare("SELECT id, name, suspended_at, role, must_change_password FROM users ORDER BY id").all() as {
     id: string;
     name: string;
     suspended_at: string | null;
+    role: string;
+    must_change_password: number;
   }[];
-  return rows.map((r) => ({ id: r.id, name: r.name, suspended: r.suspended_at !== null }));
+  return rows.map((r) => ({
+    id: r.id,
+    name: r.name,
+    suspended: r.suspended_at !== null,
+    role: toRole(r.role),
+    mustChangePassword: r.must_change_password === 1,
+  }));
+}
+
+function toRole(value: string | undefined): UserRole {
+  return value === "coordinator" ? "coordinator" : "member";
+}
+
+/** 利用者の役割。見つからない ID は undefined。 */
+export function getUserRole(userId: string, db: Db = getDb()): UserRole | undefined {
+  const row = db.prepare("SELECT role FROM users WHERE id = ?").get(userId) as { role: string } | undefined;
+  return row ? toRole(row.role) : undefined;
+}
+
+/** 利用者が担当の、未完了・アーカイブしていない・削除していないタスクの件数（停止した後に残ったタスクの案内に使う。#538）。 */
+export function countOpenTasksOf(userId: string, db: Db = getDb()): number {
+  const row = db
+    .prepare("SELECT COUNT(*) AS n FROM tasks WHERE assignee = ? AND status <> 'done' AND archived = 0 AND deleted_at IS NULL")
+    .get(userId) as { n: number };
+  return row.n;
 }
 
 /** ログインを停止している利用者か。見つからない ID は false。 */
@@ -66,8 +102,10 @@ export const SUSPENSION_REFUSAL_MESSAGES: Record<SuspensionRefusal, string> = {
   self: "自分自身のログインは停止・再開できません",
 };
 
+/** 停止・再開の応答の形（id・name・suspended）。役割は含めない（#524 で GET /api/users にだけ足した）。 */
 function summary(userId: string, db: Db): UserSummary {
-  return listUserSummaries(db).find((u) => u.id === userId)!;
+  const { id, name, suspended } = listUserSummaries(db).find((u) => u.id === userId)!;
+  return { id, name, suspended };
 }
 
 /** 操作する人が、停止していない取りまとめる人か。 */
@@ -108,4 +146,246 @@ export function resumeUser(actorId: string, targetId: string, db: Db = getDb()):
     db.prepare("UPDATE users SET suspended_at = NULL WHERE id = ?").run(targetId);
     return { ok: true, user: summary(targetId, db) };
   });
+}
+
+// ---- 役割の付け替え（#524） ----
+
+/** 役割の変更を断った理由。forbidden は 403、invalid は 400（errors を details に）、not_found は 404、suspended と last_coordinator は 409 にする。 */
+export type RoleChangeRefusal = "forbidden" | "invalid" | "not_found" | "suspended" | "last_coordinator";
+
+export const ROLE_CHANGE_REFUSAL_MESSAGES: Record<RoleChangeRefusal, string> = {
+  forbidden: "役割を替えられるのは、取りまとめる人だけです",
+  invalid: "入力内容に誤りがあります",
+  not_found: "利用者が見つかりません",
+  suspended: "ログインを停止しているメンバーは、取りまとめる人にできません。先にログインを再開してください",
+  last_coordinator: "取りまとめる人が 1 人もいなくなるため、メンバーに戻せません。先にほかのメンバーを取りまとめる人にしてください",
+};
+
+/** 役割の変更の本文（`{ role }`）を検証する。 */
+export function validateRoleInput(body: unknown): ValidationResult<{ role: UserRole }> {
+  if (typeof body !== "object" || body === null || Array.isArray(body)) {
+    return { ok: false, errors: ["リクエストの形式が正しくありません。{ \"role\": \"coordinator\" } か { \"role\": \"member\" } の JSON で送ってください"] };
+  }
+  const { role } = body as Record<string, unknown>;
+  const errors: string[] = unknownFieldErrors(body as Record<string, unknown>, ["role"]);
+  if (!isUserRole(role)) errors.push("役割（role）は \"coordinator\"（取りまとめる人）か \"member\"（メンバー）にしてください");
+  if (errors.length > 0) return { ok: false, errors };
+  return { ok: true, value: { role: role as UserRole } };
+}
+
+export type RoleChangeResult =
+  | { ok: true; user: { id: string; name: string; role: UserRole } }
+  | { ok: false; reason: Exclude<RoleChangeRefusal, "invalid"> }
+  | { ok: false; reason: "invalid"; errors: string[] };
+
+/**
+ * 取りまとめる人（actorId）が、利用者（targetId）の役割を替える（PUT /api/users/:id/role の判定。#524）。
+ * 判定の順: 操作する人が停止していない取りまとめる人でなければ forbidden（入力によらない）、本文の誤りは invalid、
+ * 相手がいなければ not_found、今と同じ役割なら何も変えずに成功、停止中の人を取りまとめる人にするなら suspended、
+ * メンバーに戻すと停止していない取りまとめる人が 0 人になるなら last_coordinator。
+ * 数えるのも書き込むのも 1 つのトランザクションの中で行う（同時に自分を戻しても、最後の 1 人は残る）。
+ * 役割は要求のたびに DB から読むので（isCoordinator）、替えた次の要求から、延長の承認などができる人が変わる。
+ */
+export function changeUserRole(actorId: string, targetId: string, body: unknown, db: Db = getDb()): RoleChangeResult {
+  return transaction(db, (): RoleChangeResult => {
+    if (!canManage(actorId, db)) return { ok: false, reason: "forbidden" };
+    const input = validateRoleInput(body);
+    if (!input.ok) return { ok: false, reason: "invalid", errors: input.errors };
+    const target = getUser(targetId, db);
+    if (!target) return { ok: false, reason: "not_found" };
+    const { role } = input.value;
+    const result = { ok: true as const, user: { id: target.id, name: target.name, role } };
+    if (getUserRole(targetId, db) === role) return result;
+    if (role === "coordinator" && isSuspended(targetId, db)) return { ok: false, reason: "suspended" };
+    if (role === "member") {
+      const others = db
+        .prepare("SELECT COUNT(*) AS n FROM users WHERE role = 'coordinator' AND suspended_at IS NULL AND id <> ?")
+        .get(targetId) as { n: number };
+      if (others.n === 0) return { ok: false, reason: "last_coordinator" };
+    }
+    db.prepare("UPDATE users SET role = ? WHERE id = ?").run(role, targetId);
+    return result;
+  });
+}
+
+// ---- メンバーのアカウントの作成と、仮のパスワード（#523） ----
+
+/** ID の決まり: 英小文字・数字・`-`・`_` だけで、3〜32 文字、先頭は英小文字。大文字は小文字にそろえず断る。 */
+export const USER_ID_MIN_LENGTH = 3;
+export const USER_ID_MAX_LENGTH = 32;
+const USER_ID_PATTERN = /^[a-z][a-z0-9_-]*$/;
+/** 名前の決まり: 前後の空白を除いて 1〜50 文字（見た目の文字（コードポイント）で数える）。改行・制御文字は使えない。 */
+export const USER_NAME_MAX_LENGTH = 50;
+const CONTROL_CHARS = /[\p{Cc}\u2028\u2029]/u;
+
+export type NewMemberInput = { userId: string; name: string };
+
+/** アカウントの作成の本文（`{ userId, name }`）を検証する。名前は前後の空白を除いた値にする。誤りは、何が悪いかとどう直すかの文言。 */
+export function validateNewMemberInput(body: unknown): ValidationResult<NewMemberInput> {
+  if (typeof body !== "object" || body === null || Array.isArray(body)) {
+    return { ok: false, errors: ["リクエストの形式が正しくありません。{ \"userId\": ..., \"name\": ... } の JSON で送ってください"] };
+  }
+  const { userId, name } = body as Record<string, unknown>;
+  const errors: string[] = unknownFieldErrors(body as Record<string, unknown>, ["userId", "name"]);
+  if (typeof userId !== "string" || userId === "") {
+    errors.push("ID を入力してください");
+  } else if (userId.length < USER_ID_MIN_LENGTH || userId.length > USER_ID_MAX_LENGTH) {
+    errors.push(`ID は ${USER_ID_MIN_LENGTH}〜${USER_ID_MAX_LENGTH} 文字にしてください（今は ${[...userId].length} 文字）`);
+  } else if (!USER_ID_PATTERN.test(userId)) {
+    errors.push("ID に使えない文字があります。英小文字・数字・「-」・「_」だけを使い、先頭は英小文字にしてください（大文字は小文字に直してください）");
+  }
+  const trimmed = typeof name === "string" ? name.trim() : undefined;
+  if (trimmed === undefined || trimmed === "") {
+    errors.push("名前を入力してください");
+  } else if (CONTROL_CHARS.test(trimmed)) {
+    errors.push("名前に改行や制御文字は使えません。1 行の文字だけにしてください");
+  } else if ([...trimmed].length > USER_NAME_MAX_LENGTH) {
+    errors.push(`名前は ${USER_NAME_MAX_LENGTH} 文字以内にしてください（今は ${[...trimmed].length} 文字）`);
+  }
+  if (errors.length > 0) return { ok: false, errors };
+  return { ok: true, value: { userId: userId as string, name: trimmed as string } };
+}
+
+/** 仮のパスワードの文字数。推測しにくい長さ（16 文字以上）にする。 */
+export const TEMPORARY_PASSWORD_LENGTH = 20;
+// 読み間違えやすい文字（0・O・o・1・l・I）を除いた英数字。
+const TEMPORARY_PASSWORD_CHARS = "abcdefghijkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+
+/** 仮のパスワードを作る（暗号用の乱数で、偏りなく文字を選ぶ）。 */
+export function generateTemporaryPassword(): string {
+  let out = "";
+  for (let i = 0; i < TEMPORARY_PASSWORD_LENGTH; i++) out += TEMPORARY_PASSWORD_CHARS[randomInt(TEMPORARY_PASSWORD_CHARS.length)];
+  return out;
+}
+
+/** 作成を断った理由。forbidden は 403、invalid は 400（errors を details に）、conflict は 409 にする。 */
+export type CreateMemberRefusal = "forbidden" | "invalid" | "conflict";
+
+export const CREATE_MEMBER_REFUSAL_MESSAGES: Record<CreateMemberRefusal, string> = {
+  forbidden: "メンバーを加えられるのは、取りまとめる人だけです",
+  invalid: "入力内容に誤りがあります",
+  conflict: "その ID はすでに使われています",
+};
+
+export type CreatedMember = { id: string; name: string; role: "member" };
+
+export type CreateMemberResult =
+  | { ok: true; user: CreatedMember; temporaryPassword: string }
+  | { ok: false; reason: "forbidden" | "conflict" }
+  | { ok: false; reason: "invalid"; errors: string[] };
+
+/**
+ * 取りまとめる人（actorId）が、メンバーのアカウントを作る（POST /api/users の判定。#523）。役割はメンバー。
+ * 判定の順: 操作する人が停止していない取りまとめる人でなければ forbidden（入力によらない）、本文の誤りは invalid、
+ * ID がすでにある（停止中を含む）なら conflict。断ったときは何も作らない。
+ * パスワードは仮のものを作り、ハッシュだけを保存して、平文は戻り値でだけ返す（あとから取り出せない）。
+ * 作ったアカウントは、本人がパスワードを変えるまで、ほかの画面と API を使えない（must_change_password）。
+ */
+export function createMember(actorId: string, body: unknown, db: Db = getDb()): CreateMemberResult {
+  return transaction(db, (): CreateMemberResult => {
+    if (!canManage(actorId, db)) return { ok: false, reason: "forbidden" };
+    const input = validateNewMemberInput(body);
+    if (!input.ok) return { ok: false, reason: "invalid", errors: input.errors };
+    const { userId, name } = input.value;
+    if (getUser(userId, db)) return { ok: false, reason: "conflict" };
+    const temporaryPassword = generateTemporaryPassword();
+    db.prepare(
+      "INSERT INTO users (id, name, password_hash, role, must_change_password) VALUES (?, ?, ?, 'member', 1)",
+    ).run(userId, name, hashPassword(temporaryPassword));
+    return { ok: true, user: { id: userId, name, role: "member" }, temporaryPassword };
+  });
+}
+
+/** 仮のパスワードのままで、自分のパスワードへの変更が要る利用者か。見つからない ID は false。 */
+export function mustChangePassword(userId: string, db: Db = getDb()): boolean {
+  const row = db.prepare("SELECT must_change_password FROM users WHERE id = ?").get(userId) as
+    | { must_change_password: number }
+    | undefined;
+  return row?.must_change_password === 1;
+}
+
+/** 仮のパスワードの間に、ほかの画面・API を断るときの文言。 */
+export const PASSWORD_CHANGE_REQUIRED_MESSAGE = "仮のパスワードでログインしています。パスワードを変更するまで、ほかの画面と操作は使えません";
+export const PASSWORD_CHANGE_REQUIRED_DETAIL = "パスワード変更の画面（/settings/password）か POST /api/password で、自分のパスワードに変えてください";
+
+// ---- 仮のパスワードの出し直し（#566） ----
+
+/** 出し直しを断った理由。forbidden は 403、invalid と self は 400、not_found は 404、suspended は 409 にする。 */
+export type ReissueRefusal = "forbidden" | "invalid" | "not_found" | "self" | "suspended";
+
+export const REISSUE_REFUSAL_MESSAGES: Record<ReissueRefusal, string> = {
+  forbidden: "仮のパスワードを出し直せるのは、取りまとめる人だけです",
+  invalid: "入力内容に誤りがあります",
+  not_found: "利用者が見つかりません",
+  self: "自分自身には仮のパスワードを出し直せません。自分のパスワードは、パスワード変更の画面で変えてください",
+  suspended: "ログインを停止しているメンバーには、仮のパスワードを出し直せません。先にログインを再開してください",
+};
+
+/** 出し直しの本文を検証する。本文は受け付けない（無い・`{}` だけを通し、項目があれば 400。#527 の決まり）。 */
+export function validateReissueInput(body: unknown): ValidationResult<null> {
+  if (body === undefined) return { ok: true, value: null };
+  if (typeof body !== "object" || body === null || Array.isArray(body)) {
+    return { ok: false, errors: ["本文は送らないでください（送るなら空の {} にしてください）"] };
+  }
+  const errors = Object.keys(body).map((key) => `${key} は受け付けない項目です（この操作は本文の項目を受け付けません）`);
+  if (errors.length > 0) return { ok: false, errors };
+  return { ok: true, value: null };
+}
+
+export type ReissueResult =
+  | { ok: true; user: User; temporaryPassword: string }
+  | { ok: false; reason: Exclude<ReissueRefusal, "invalid"> }
+  | { ok: false; reason: "invalid"; errors: string[] };
+
+/**
+ * 取りまとめる人（actorId）が、利用者（targetId）に仮のパスワードを出し直す（POST /api/users/:id/temporary-password の判定。#566）。
+ * 判定の順: 操作する人が停止していない取りまとめる人でなければ forbidden（入力によらない）、本文の誤りは invalid、
+ * 相手がいなければ not_found、自分自身なら self、相手が停止中なら suspended。断ったときは何も変えない。
+ * パスワードの更新（ハッシュだけを保存）・仮のパスワードの止め（must_change_password を 1）・相手のセッション（期限切れを含む）の削除・
+ * 出し直しの記録（だれが・いつ）は、1 つのトランザクションで行う。平文は戻り値でだけ返す（あとから取り出せない）。
+ * ログインの失敗によるロックは解かない。
+ */
+export function reissueTemporaryPassword(
+  actorId: string,
+  targetId: string,
+  body: unknown,
+  db: Db = getDb(),
+  now: Date = new Date(),
+): ReissueResult {
+  return transaction(db, (): ReissueResult => {
+    if (!canManage(actorId, db)) return { ok: false, reason: "forbidden" };
+    const input = validateReissueInput(body);
+    if (!input.ok) return { ok: false, reason: "invalid", errors: input.errors };
+    const target = getUser(targetId, db);
+    if (!target) return { ok: false, reason: "not_found" };
+    if (targetId === actorId) return { ok: false, reason: "self" };
+    if (isSuspended(targetId, db)) return { ok: false, reason: "suspended" };
+    const temporaryPassword = generateTemporaryPassword();
+    db.prepare("UPDATE users SET password_hash = ?, must_change_password = 1 WHERE id = ?").run(hashPassword(temporaryPassword), targetId);
+    db.prepare("DELETE FROM sessions WHERE user_id = ?").run(targetId);
+    db.prepare("INSERT INTO temporary_password_reissues (user_id, issued_by, issued_at) VALUES (?, ?, ?)").run(
+      targetId,
+      actorId,
+      now.toISOString(),
+    );
+    return { ok: true, user: { id: target.id, name: target.name }, temporaryPassword };
+  });
+}
+
+/** 出し直しの記録（だれが・いつ）。issuedAt は ISO 8601（UTC）。 */
+export type TemporaryPasswordReissue = { issuedBy: User; issuedAt: string };
+
+/**
+ * 仮のパスワードのままの利用者に、いちばん新しい出し直しの記録を返す（パスワード変更の画面の知らせ。#566）。
+ * 仮のパスワードのままでない人・出し直されていない人（作ったばかりの人）は undefined。
+ */
+export function latestPendingReissue(userId: string, db: Db = getDb()): TemporaryPasswordReissue | undefined {
+  if (!mustChangePassword(userId, db)) return undefined;
+  const row = db
+    .prepare(
+      `SELECT r.issued_by, u.name, r.issued_at FROM temporary_password_reissues r JOIN users u ON u.id = r.issued_by
+       WHERE r.user_id = ? ORDER BY r.id DESC LIMIT 1`,
+    )
+    .get(userId) as { issued_by: string; name: string; issued_at: string } | undefined;
+  return row ? { issuedBy: { id: row.issued_by, name: row.name }, issuedAt: row.issued_at } : undefined;
 }

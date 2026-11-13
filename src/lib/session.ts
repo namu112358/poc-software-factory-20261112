@@ -11,7 +11,7 @@ import {
   type LockNotice,
 } from "./auth.ts";
 import { getLoginNotice, type LoginNotice } from "./login-notices.ts";
-import type { User } from "./users.ts";
+import { mustChangePassword, type User } from "./users.ts";
 
 /** ログイン中のユーザーを返し、この端末の「最後に使った日時」を更新する（5 分以内の再利用では更新しない）。 */
 export async function getCurrentUser(): Promise<User | undefined> {
@@ -49,9 +49,16 @@ export async function getCurrentLoginNotice(): Promise<LoginNotice | null | unde
   return getLoginNotice(store.get(SESSION_COOKIE)?.value);
 }
 
-/** ページ用: 未ログインならログイン画面へ移動する。 */
-export async function requireUser(): Promise<User> {
+/** 仮のパスワードの間（#523）に移す、パスワード変更の画面。 */
+export const PASSWORD_CHANGE_PATH = "/settings/password";
+
+/**
+ * ページ用: 未ログインならログイン画面へ移動する。
+ * 仮のパスワードのまま（#523）なら、パスワード変更の画面へ移動する（その画面だけは allowPasswordChangePending で通す）。
+ */
+export async function requireUser(options: { allowPasswordChangePending?: boolean } = {}): Promise<User> {
   const user = await getCurrentUser();
   if (!user) redirect("/login");
+  if (!options.allowPasswordChangePending && mustChangePassword(user.id)) redirect(PASSWORD_CHANGE_PATH);
   return user;
 }

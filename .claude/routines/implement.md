@@ -28,12 +28,16 @@ Issue に `<!-- factory:implement action=start -->` で始まるコメントを�
   - 元に戻しにくい・外部の利用者がいる・テストの無い理由不明の分岐がある・まとめて処理する／同時に更新される・認証／権限／お金が絡む
 - 計画にない DB のスキーマの変更、外部の利用者に影響する変更、`AGENTS.md` の「罠」に当たる変更が要るなら、`status:in-progress` を外して `status:blocked-question` を付け、決めてほしいことを選択肢つきでコメントして終える。
 - `npm run typecheck`・`npm test`・`npm run build` がすべて通るまで直す。
-- `design-system/` を変える Issue は、`AGENTS.md` の「design-system/」の節の規約に従う（上の `tests/` への単体テストの代わりに、受入条件ごとに Story の play で確かめる。axe は全 Story に自動でかかる）。`design-system/` で `npm ci` の後、`npx playwright install chromium`（入っていなければ）、`npm run typecheck`・`npm run lint`・`npm test`・`npm run build` がすべて通るまで直す。リポジトリの直下のコマンドも、上のとおり通す。
+- `design-system/` を変える Issue は、`AGENTS.md` の「design-system/」の節の規約に従う（上の `tests/` への単体テストの代わりに、受入条件ごとに Story の play で確かめる。axe は全 Story に自動でかかる）。リポジトリの直下から `npm --prefix design-system ci` の後、`npm --prefix design-system exec playwright install chromium`（入っていなければ）、`npm --prefix design-system run typecheck`・`npm --prefix design-system run lint`・`npm --prefix design-system test`・`npm --prefix design-system run build` がすべて通るまで直す（cd しない）。リポジトリの直下のコマンドも、上のとおり通す。
 
 ## 4. PR を出す
 
 1. コミットして push し、draft の PR を出す。PR には Issue と同じ `type:` のラベルを付ける（Issue に無ければ、変更の中身から 1 つ選ぶ）。本文は `.github/pull_request_template.md` の見出しに沿い、「関連 Issue」に `Closes #<番号>`、「検証結果」に実行したコマンドと結果と、受入条件ごとの確かめ方（1 条件 1 行。テストの名前か、`npm start` で起動して画面・API を見た結果。表示の位置・見た目など、テストで確かめられない条件は起動して確かめる。`design-system/` の変更は、Story の名前か、書き出した Storybook でその Story を開いた結果）、「注意事項・残課題」に当てはめた `AGENTS.md` の「罠」を 1 行ずつ（無ければ「当てはめた罠: なし」）書く。
-2. CI（`app-check`。`design-system/` を変えたときは `design-system-check` も。以下この 4. では、両方を指す）を待つ。待ち始めを `date -u` で記録し、バックグラウンドの until ループ（CI が終わるか 15 分たつまで）で待つ。待つ前と待つ間に `mergeable` を見て、衝突していれば `main` を取り込んで解消し、push して待ち直す。打ち切る前に、15 分たったことを `date -u` で確かめ、CI をもう一度だけ読み直す。終わっていなければ、待ち始めと打ち切った時刻を Issue に書き、`status:in-progress` を外して終える（PR は draft のまま）。
+2. `node scripts/factory/claim.ts ci-wait --pr <PR>` をバックグラウンドで実行して終わるのを待ち（15 分。1 回の実行は 16 分ほどかかる）、`result` のとおりにする。`design-system/` を変えたときは、`success` の後に `design-system-check` も通っていることを確かめる。
+   - `success`: 4 へ。`failure`: 3 へ。
+   - `conflict`: `main` を取り込んで解消し、push して、もう一度待つ。`head-changed`: PR を読み直してから、もう一度待つ。
+   - `timeout`: `comment` を Issue に書き、`status:in-progress` を外して終える（PR は draft のまま）。
+   - `error`: `status:needs-human` を付け、理由をコメントして終える。
 3. CI（`app-check`）が落ちたら直して push する（draft の間に PR 本文の検査 `pr-body-check` が赤くなっても、ここでは数えない）。同じ失敗の修正は 3 回まで。超えたとき、または `main` の不具合など、この Issue の変更では直せない失敗のときは、`status:in-progress` を外して `status:needs-human` を付け、調べたことをコメントして終える。CI の失敗で終えるときは、何も残さずに終えない（#351 は黙って止まり、52 分気づかれなかった）。
 4. CI が通ったら PR を Ready にし（レビューの合図）、`status:in-progress` を外す。
 

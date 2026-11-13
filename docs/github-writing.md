@@ -60,8 +60,7 @@
 5. まだマージしてはいけない PR は `--draft` を付けて作る（§4）。完了したら `gh pr ready <番号>` で Ready にする。API では `draft: true` を指定する。
 
 ```bash
-gh issue create --title "[Feature]: 差し戻された申請を再提出できるようにする" \
-  --label type:feat --body-file /tmp/issue.md
+gh issue create --title "[Feature]: 差し戻された申請を再提出できるようにする" --label type:feat --body-file /tmp/issue.md
 gh pr create --title "差し戻された申請を再提出できるようにする" --body-file /tmp/pr.md
 # 作業途中の PR
 gh pr create --draft --title "差し戻された申請を再提出できるようにする" --body-file /tmp/pr.md
