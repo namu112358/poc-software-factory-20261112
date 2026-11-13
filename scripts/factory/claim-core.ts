@@ -19,6 +19,7 @@ export const LABEL = {
   kaizen: "kind:kaizen",
   merge: "merge:requested",
   fix: "type:fix",
+  riskHigh: "risk:high",
 } as const;
 
 /** 接頭を付ける前の名前 → 今の名前。過去のイベント（付けたときの名前のまま残る場合がある）を数えるときだけ使う */
@@ -586,6 +587,22 @@ export function ciCheck(runs: { name: string; status: string; conclusion: string
     if (latest.conclusion !== "success") return { ok: false, reason: `${name} が ${latest.conclusion}。直して、CI が通ってから付ける。` };
   }
   return { ok: true, reason: "" };
+}
+
+/**
+ * レビューを通ったことを表すコミットの status（context=factory-review）の値（自動でキューに入れる仕組み）。
+ * 判定は merge-check のレビューの部分と同じ: 最新のコミットが ok のレビューを受けている（ok の後が取り込みだけのコミットなら引き継ぐ）なら success。
+ * 最新のコミットへのレビューが ok でなければ failure。それ以外（レビューの後に中身の変わるコミットがある・レビューが無い）は付けない（null）。
+ * risk:high の PR は人が merge:requested を付けてキューに入れるので、success は付けない（レビューの結果と risk:high の付く順が前後しても、自動で入らないように）。
+ */
+export function reviewStatus(mc: ReturnType<typeof mergeCheck>, headSha: string, labels: string[]): { state: "success" | "failure" | null; description: string } {
+  const onHead = mc.review !== null && (headSha.startsWith(mc.review.commit) || mc.review.commit.startsWith(headSha));
+  if (mc.ok) {
+    if (labels.includes(LABEL.riskHigh)) return { state: null, description: "risk:high の PR は、人が merge:requested を付けてキューに入れる。" };
+    return { state: "success", description: mc.reason };
+  }
+  if (onHead && mc.review !== null && mc.review.verdict !== "ok") return { state: "failure", description: mc.reason };
+  return { state: null, description: mc.reason };
 }
 
 export function mergeCheck(args: {

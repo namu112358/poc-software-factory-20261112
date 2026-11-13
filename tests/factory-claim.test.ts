@@ -8,6 +8,7 @@ import {
   pick,
   precheck,
   mergeCheck,
+  reviewStatus,
   ciCheck,
   precheckActions,
   relabelTargets,
@@ -526,5 +527,34 @@ describe("main の CI を壊している不具合の直しを先に着手させ�
 
   it("pick: main の CI が壊れていなければ、ふだんどおり（同じファイルの PR を待つ）", () => {
     assert.deepEqual(pick({ queued: [feat, fix], inProgressCount: 3, isOpen: () => false, openPrs: [pr355], mainBroken: false }).pick, []);
+  });
+});
+
+describe("レビューを通ったことを表す status（reviewStatus・自動でキューに入れる）", () => {
+  const ok = (commit: string) => ({ body: `<!-- factory:review verdict=ok round=1 commit=${commit} -->`, association: "COLLABORATOR" });
+  const changes = (commit: string) => ({ body: `<!-- factory:review verdict=changes round=1 commit=${commit} -->`, association: "COLLABORATOR" });
+  it("最新のコミットが ok のレビューを受けていれば success", () => {
+    const mc = mergeCheck({ reviews: [ok("aaaa111")], headSha: "aaaa1112222", after: [] });
+    assert.equal(reviewStatus(mc, "aaaa1112222", []).state, "success");
+  });
+  it("ok の後が取り込みだけのコミットなら success を引き継ぐ（キューが main を取り込んだ後も入れるように）", () => {
+    const mc = mergeCheck({ reviews: [ok("aaaa111")], headSha: "bbbb222", after: [{ sha: "bbbb222", mergeOnly: true }] });
+    assert.equal(reviewStatus(mc, "bbbb222", []).state, "success");
+  });
+  it("ok の後に中身の変わるコミットがあれば付けない（レビューし直すまで入らない）", () => {
+    const mc = mergeCheck({ reviews: [ok("aaaa111")], headSha: "bbbb222", after: [{ sha: "bbbb222", mergeOnly: false }] });
+    assert.equal(reviewStatus(mc, "bbbb222", []).state, null);
+  });
+  it("最新のコミットへのレビューが changes なら failure", () => {
+    const mc = mergeCheck({ reviews: [ok("aaaa111"), changes("bbbb222")], headSha: "bbbb222", after: [] });
+    assert.equal(reviewStatus(mc, "bbbb222", []).state, "failure");
+  });
+  it("書き込み権限の無い人の ok の印では success にしない（なりすまし）", () => {
+    const mc = mergeCheck({ reviews: [{ ...ok("aaaa111"), association: "NONE" }], headSha: "aaaa111", after: [] });
+    assert.equal(reviewStatus(mc, "aaaa111", []).state, null);
+  });
+  it("risk:high の PR には、ok でも success を付けない（人が merge:requested を付ける）", () => {
+    const mc = mergeCheck({ reviews: [ok("aaaa111")], headSha: "aaaa111", after: [] });
+    assert.equal(reviewStatus(mc, "aaaa111", ["risk:high"]).state, null);
   });
 });

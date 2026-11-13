@@ -1,0 +1,54 @@
+# レビューの Routine の結果を、PR の最新のコミットの status（context=factory-review）にする。
+# Mergify は、risk:high の付いていない PR を「factory-review が success・app-check・pr-body-check が成功・draft でない」でキューに入れる
+# （merge:requested を人が付けなくてよい。risk:high の PR は今までどおり人が merge:requested を付ける）。
+# - 判定は scripts/factory/claim.ts の review-status（merge-check と同じ判定）。最新のレビューの印 <!-- factory:review verdict=ok ... commit=<SHA> -->
+#   が書き込み権限のある人のもので、SHA が最新のコミット（または、その後が main の取り込みだけのコミット）なら success、
+#   最新のコミットへのレビューが ok でなければ failure、それ以外は付けない。
+# - 判定のスクリプトは main のものを使う（PR の側で判定を書き換えて通すことはできない）。
+# - キューが main を取り込むと最新のコミットが変わるので、PR に push があったときも判定し直して引き継ぐ。
+name: Factory review status
+
+on:
+  pull_request_review:
+    types: [submitted, edited, dismissed]
+  pull_request:
+    types: [opened, reopened, synchronize, ready_for_review, labeled, unlabeled]
+
+permissions:
+  contents: read
+  pull-requests: read
+  statuses: write
+
+concurrency:
+  group: factory-review-status-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+
+jobs:
+  status:
+    name: factory-review-status
+    # フォークからの PR はトークンが読み取りだけなので動かさない
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: レビューの結果を status にする
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+        run: |
+          out=$(node scripts/factory/claim.ts review-status "$PR")
+          echo "$out"
+          state=$(node -e 'const r=JSON.parse(process.argv[1]); process.stdout.write(r.state ?? "")' "$out")
+          sha=$(node -e 'const r=JSON.parse(process.argv[1]); process.stdout.write(r.sha ?? "")' "$out")
+          desc=$(node -e 'const r=JSON.parse(process.argv[1]); process.stdout.write(String(r.description ?? "").slice(0, 140))' "$out")
+          if [ -z "$state" ]; then echo "status は付けない"; exit 0; fi
+          gh api -X POST "repos/$REPO/statuses/$sha" -f state="$state" -f context=factory-review -f description="$desc" >/dev/null
+          echo "factory-review=$state を $sha に付けた"
