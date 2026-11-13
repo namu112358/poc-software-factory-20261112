@@ -1,8 +1,9 @@
 import { formatPageTitle } from "@/lib/page-title";
+import { taskRowAnchorId } from "@/lib/task-list-anchor";
 import { Fragment } from "react";
 import { bulkSelectionKey } from "@/lib/bulk-select";
 import { listCommentersByTask } from "@/lib/comments";
-import { NOTHING_TO_DO_TEXT, listExtensionsAwaitingMe, listMyDueTasks } from "@/lib/my-attention";
+import { NOTHING_TO_DO_TEXT, countMyDueTasks, limitItems, listExtensionsAwaitingMe, listMyDueTasks, myDueTasksHref } from "@/lib/my-attention";
 import { listAssigneeOptions } from "@/lib/members";
 import { BulkBar, BulkCheckbox, BulkSelection } from "./BulkActions";
 import { buildAssigneeFilterOptions, buildCheckboxOptions } from "@/lib/task-filter-form";
@@ -44,6 +45,9 @@ export default async function TasksPage({ searchParams }: Props) {
   const users = listAssigneeOptions();
   const myTasks = listMyDueTasks(user.id, undefined, today);
   const myExtensions = listExtensionsAwaitingMe(user.id);
+  const myTasksView = limitItems(myTasks);
+  const myExtensionsView = limitItems(myExtensions);
+  const myCounts = countMyDueTasks(myTasks);
   const loginWindow = await getCurrentLoginWindow();
   const newlyAssigned = listNewlyAssignedTasks(user.id, loginWindow?.previousLoginAt, loginWindow?.loginAt);
   const selectionKey = bulkSelectionKey({ status, assignees: selectedAssignees, tags, q, due, sort, includeArchived });
@@ -74,25 +78,41 @@ export default async function TasksPage({ searchParams }: Props) {
         {myTasks.length > 0 && (
           <>
             <h3>担当のタスク（期限切れ・期限間近）</h3>
+            <p data-testid="my-task-total">全部で {myTasks.length} 件（期限切れ {myCounts.overdue} 件・期限間近 {myCounts.dueSoon} 件）</p>
             <ul>
-              {myTasks.map((t) => (
+              {myTasksView.shown.map((t) => (
                 <li key={t.id} data-testid="my-task">
                   <strong>{t.kind === "overdue" ? "期限切れ" : "期限間近"}</strong> <a href={`/tasks/${t.id}`}>{t.title}</a>（期限 {t.dueDate}）
                 </li>
               ))}
             </ul>
+            {myTasksView.hidden > 0 && (
+              <p>
+                <a href={myDueTasksHref(user.id)} data-testid="my-task-more">
+                  ほか {myTasksView.hidden} 件
+                </a>
+              </p>
+            )}
           </>
         )}
         {myExtensions.length > 0 && (
           <>
             <h3>承認待ちの期限延長</h3>
+            <p data-testid="my-extension-total">全部で {myExtensions.length} 件</p>
             <ul>
-              {myExtensions.map((e) => (
+              {myExtensionsView.shown.map((e) => (
                 <li key={e.id} data-testid="my-extension">
                   <a href="/extensions">{e.taskTitle}</a>（{e.requesterName}さんの申請: {e.currentDueDate} → {e.newDueDate}）
                 </li>
               ))}
             </ul>
+            {myExtensionsView.hidden > 0 && (
+              <p>
+                <a href="/extensions" data-testid="my-extension-more">
+                  ほか {myExtensionsView.hidden} 件
+                </a>
+              </p>
+            )}
           </>
         )}
       </section>
@@ -203,9 +223,10 @@ export default async function TasksPage({ searchParams }: Props) {
           {tasks.map((task) => (
             <tr
               key={task.id}
+              id={taskRowAnchorId(task.id)}
               data-testid="task-row"
+              style={{ scrollMarginTop: 16, ...(task.status === "done" ? { color: "#8a8a8a" } : {}) }}
               {...taskRowDoneAttr(task.status)}
-              style={task.status === "done" ? { color: "#8a8a8a" } : undefined}
             >
               <td>
                 <BulkCheckbox id={task.id} title={task.title} />
