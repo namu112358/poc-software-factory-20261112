@@ -1,6 +1,7 @@
 import { getDb, savepoint, transaction, type Db } from "./db/index.ts";
 import { addDays, DUE_SOON_DAYS, RESTORE_DAYS, todayInJapan } from "./task-dates.ts";
 import type { Assignee, Task, TaskFilter, TaskInput, TaskPriority, TaskStatus } from "./task-types.ts";
+import { isSuspended } from "./users.ts";
 
 /** タスクに登場する担当者（重複なし）。 */
 export function listAssignees(db: Db = getDb()): Assignee[] {
@@ -204,6 +205,20 @@ export function duplicateTask(id: number, db: Db = getDb()): Task | undefined {
     db.prepare("INSERT INTO task_tags (task_id, name) SELECT ?, name FROM task_tags WHERE task_id = ? ORDER BY id").run(copy.id, id);
     return copy;
   });
+}
+
+export type DuplicateTaskResult = { ok: true; task: Task } | { ok: false; reason: "not_found" | "suspended_assignee" };
+
+/**
+ * タスクを複製する（POST /api/tasks/:id/duplicate）。元のタスクの担当者がログインを停止していれば複製しない
+ * （停止した利用者を担当者にするタスクを作らない。#522）。それ以外は `duplicateTask` と同じ。
+ */
+export function duplicateTaskForRequest(id: number, db: Db = getDb()): DuplicateTaskResult {
+  const source = getTask(id, db);
+  if (!source) return { ok: false, reason: "not_found" };
+  if (isSuspended(source.assignee, db)) return { ok: false, reason: "suspended_assignee" };
+  const task = duplicateTask(id, db);
+  return task ? { ok: true, task } : { ok: false, reason: "not_found" };
 }
 
 export type BulkCompleteResult = { ok: true; tasks: Task[] } | { ok: false; missingIds: number[] };

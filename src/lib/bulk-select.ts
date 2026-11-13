@@ -188,7 +188,7 @@ type UndoDeps = {
 export function bulkUndoDoneMessage(restored: number, skipped: number): string {
   const done = `${restored} 件を元に戻しました。`;
   if (skipped === 0) return done;
-  return `${done}${skipped} 件は、変えた後にほかの変更があった（または削除された）ため、戻していません。`;
+  return `${done}${skipped} 件は、変えた後にほかの変更があった（または削除された・担当者のログインが停止された）ため、戻していません。`;
 }
 
 /** POST /api/tasks/bulk-update/undo を 1 回送る。断られたら API のエラー文言を、通信に失敗したら決まった文言を返す。 */
