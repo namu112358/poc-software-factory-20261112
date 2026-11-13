@@ -1,7 +1,9 @@
 import { getDb, transaction, type Db } from "./db/index.ts";
 import type { ValidationResult } from "./tasks.ts";
 
-export const TAG_MAX_LENGTH = 20;
+import { TAG_MAX_LENGTH } from "./tag-limits.ts";
+
+export { TAG_MAX_LENGTH };
 
 /** タグの名前を検証する。前後の空白を取り除き、1〜20 文字で、空白・`,`・`/` を含まなければ有効。 */
 export function validateTagInput(body: unknown): ValidationResult<{ name: string }> {

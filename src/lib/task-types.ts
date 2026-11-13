@@ -55,10 +55,13 @@ export const SORT_LABELS: Record<TaskSort, string> = {
 export const TASK_DUE_FILTERS = ["overdue", "today", "soon", "week", "none"] as const;
 export type TaskDueFilter = (typeof TASK_DUE_FILTERS)[number];
 
+/** 「期限が近い」とみなす日数。期限の 3 日前から当日まで（暦の日数。土日も数える）。「対応が必要なもの」・期限の絞り込みの「N 日以内」・その表示がすべてこの値から作られる。 */
+export const DUE_SOON_DAYS = 3;
+
 export const DUE_FILTER_LABELS: Record<TaskDueFilter, string> = {
   overdue: "期限切れ",
   today: "今日まで",
-  soon: "3 日以内",
+  soon: `${DUE_SOON_DAYS} 日以内`,
   week: "7 日以内",
   none: "期限なし",
 };
