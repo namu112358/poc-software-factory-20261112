@@ -553,6 +553,13 @@ describe("レビューを通ったことを表す status（reviewStatus・自動
     const mc = mergeCheck({ reviews: [{ ...ok("aaaa111"), association: "NONE" }], headSha: "aaaa111", after: [] });
     assert.equal(reviewStatus(mc, "aaaa111", []).state, null);
   });
+  it("品質のゲート（.mergify.yml・.github/・.claude/・scripts/factory/・AGENTS.md・CLAUDE.md・docs/rulesets/）を変える PR には、ok でも success を付けない", () => {
+    const mc = mergeCheck({ reviews: [ok("aaaa111")], headSha: "aaaa111", after: [] });
+    for (const f of [".mergify.yml", ".github/workflows/ci.yml", ".claude/routines/review.md", "scripts/factory/claim.ts", "AGENTS.md", "CLAUDE.md", "docs/rulesets/main.json"]) {
+      assert.equal(reviewStatus(mc, "aaaa111", [], ["src/app/page.tsx", f]).state, null, f);
+    }
+    assert.equal(reviewStatus(mc, "aaaa111", [], ["src/app/page.tsx", "docs/product.md", "tests/a.test.ts"]).state, "success");
+  });
   it("risk:high の PR には、ok でも success を付けない（人が merge:requested を付ける）", () => {
     const mc = mergeCheck({ reviews: [ok("aaaa111")], headSha: "aaaa111", after: [] });
     assert.equal(reviewStatus(mc, "aaaa111", ["risk:high"]).state, null);

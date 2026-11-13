@@ -594,11 +594,20 @@ export function ciCheck(runs: { name: string; status: string; conclusion: string
  * 判定は merge-check のレビューの部分と同じ: 最新のコミットが ok のレビューを受けている（ok の後が取り込みだけのコミットなら引き継ぐ）なら success。
  * 最新のコミットへのレビューが ok でなければ failure。それ以外（レビューの後に中身の変わるコミットがある・レビューが無い）は付けない（null）。
  * risk:high の PR は人が merge:requested を付けてキューに入れるので、success は付けない（レビューの結果と risk:high の付く順が前後しても、自動で入らないように）。
+ * 品質のゲート（CI・Mergify・Routine の手順書・判定のスクリプト・エージェントの規約・Ruleset）を変える PR も、success は付けない（人が確かめてマージする）。
  */
-export function reviewStatus(mc: ReturnType<typeof mergeCheck>, headSha: string, labels: string[]): { state: "success" | "failure" | null; description: string } {
+export const GATE_PATHS = [".mergify.yml", ".github/", ".claude/", "scripts/factory/", "AGENTS.md", "CLAUDE.md", "docs/rulesets/"];
+
+export function touchesGate(files: string[]): string[] {
+  return files.filter((f) => GATE_PATHS.some((g) => (g.endsWith("/") ? f.startsWith(g) : f === g || f.endsWith(`/${g}`))));
+}
+
+export function reviewStatus(mc: ReturnType<typeof mergeCheck>, headSha: string, labels: string[], files: string[] = []): { state: "success" | "failure" | null; description: string } {
   const onHead = mc.review !== null && (headSha.startsWith(mc.review.commit) || mc.review.commit.startsWith(headSha));
   if (mc.ok) {
     if (labels.includes(LABEL.riskHigh)) return { state: null, description: "risk:high の PR は、人が merge:requested を付けてキューに入れる。" };
+    const gate = touchesGate(files);
+    if (gate.length > 0) return { state: null, description: `品質のゲートを変える PR（${gate.slice(0, 3).join("、")}）は、人が確かめて merge:requested を付ける。` };
     return { state: "success", description: mc.reason };
   }
   if (onHead && mc.review !== null && mc.review.verdict !== "ok") return { state: "failure", description: mc.reason };

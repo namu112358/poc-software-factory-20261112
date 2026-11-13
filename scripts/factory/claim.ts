@@ -252,7 +252,9 @@ async function main(): Promise<unknown> {
     case "review-status": {
       if (!Number.isInteger(n)) throw new Error("PR の番号を指定する");
       const { headSha, labels, review } = await reviewCheck(n);
-      return { pr: n, sha: headSha, ...reviewStatus(review, headSha, labels) };
+      // 判定のよりどころは GitHub の変更ファイル（PR の側の記述は読まない）
+      const files = (await getAll<{ filename: string; previous_filename?: string }>(`/repos/${REPO}/pulls/${n}/files`)).flatMap((f) => [f.filename, ...(f.previous_filename ? [f.previous_filename] : [])]);
+      return { pr: n, sha: headSha, ...reviewStatus(review, headSha, labels, files) };
     }
     case "relabel": {
       const minutes = Number(arg("minutes") ?? "15");
