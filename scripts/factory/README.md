@@ -35,4 +35,4 @@ PR に `merge:requested` を付ける前に、必ず `node scripts/factory/claim
 
 ## 人の手順: 最初に動かすとき
 
-割り当ての Routine は PR が閉じたときにしか動かない。作業中が 0 件のときは、人（有人のセッション）が `pick` を実行し、`.claude/routines/dispatch.md` の「2.」と同じ手順で `status:in-progress`（`status:in-progress-hard`）を付ける。その後は、PR が閉じるたびに割り当てが、1 時間ごとに巡回が着手させる。
+割り当ての Routine は、PR が閉じたときと、Issue に `status:ready` が付いたとき（#357。トリガーの設定はユーザー）に動く。承認のトリガーがまだ無い環境で作業中が 0 件のときは、人（有人のセッション）が `pick` を実行し、`.claude/routines/dispatch.md` の「2.」と同じ手順で `status:in-progress`（`status:in-progress-hard`）を付ける。その後は、PR が閉じるたびに割り当てが、1 時間ごとに巡回が着手させる。
