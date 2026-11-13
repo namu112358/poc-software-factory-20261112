@@ -8,7 +8,7 @@ import { TASK_CREATE_FAILED_MESSAGE, buildTaskBody, taskDetailHref, taskFormErro
 describe("タスク作成画面の入力", () => {
   it("入力した値をそのまま API の本文にし、既存の検証を通る", () => {
     const db = openDb();
-    const body = buildTaskBody({ title: "資料を作る", assignee: "sato", dueDate: "2026-12-01", status: "todo" });
+    const body = buildTaskBody({ title: "資料を作る", assignee: "sato", dueDate: "2026-12-01", status: "todo", priority: "medium", memo: "" });
     const r = validateTaskInput(body, {}, db);
     assert.equal(r.ok, true);
   });
@@ -17,12 +17,12 @@ describe("タスク作成画面の入力", () => {
     db.prepare("UPDATE tasks SET assignee = 'sato'").run();
     const ids = listUserOptions(db).map((u) => u.id);
     assert.deepEqual(ids, ["sato", "suzuki", "tanaka"]);
-    const r = validateTaskInput(buildTaskBody({ title: "x", assignee: "tanaka", dueDate: "2026-12-01", status: "todo" }), {}, db);
+    const r = validateTaskInput(buildTaskBody({ title: "x", assignee: "tanaka", dueDate: "2026-12-01", status: "todo", priority: "medium", memo: "" }), {}, db);
     assert.equal(r.ok, true);
   });
   it("タイトルが空・期限が日付でないと、検証で日本語の理由が返る", () => {
     const db = openDb();
-    const r = validateTaskInput(buildTaskBody({ title: "", assignee: "sato", dueDate: "あした", status: "todo" }), {}, db);
+    const r = validateTaskInput(buildTaskBody({ title: "", assignee: "sato", dueDate: "あした", status: "todo", priority: "medium", memo: "" }), {}, db);
     assert.equal(r.ok, false);
     if (!r.ok) assert.equal(r.errors.length, 2);
   });
@@ -33,5 +33,29 @@ describe("タスク作成画面の入力", () => {
   });
   it("作成したタスクの詳細画面へ移る", () => {
     assert.equal(taskDetailHref(7), "/tasks/7");
+  });
+  it("優先度とメモを入れて作ると、その値でタスクが作られる", () => {
+    const db = openDb();
+    const body = buildTaskBody({ title: "x", assignee: "sato", dueDate: "2026-12-01", status: "todo", priority: "high", memo: "詳しい説明" });
+    const r = validateTaskInput(body, {}, db);
+    assert.equal(r.ok, true);
+    if (r.ok) assert.equal(r.value.priority, "high");
+    if (r.ok) assert.equal(r.value.memo, "詳しい説明");
+  });
+  it("優先度とメモを入れないときは、優先度は「中」・メモは空で作られる", () => {
+    const db = openDb();
+    const r = validateTaskInput({ title: "x", assignee: "sato", dueDate: "2026-12-01", status: "todo" }, {}, db);
+    assert.equal(r.ok, true);
+    const body = buildTaskBody({ title: "x", assignee: "sato", dueDate: "2026-12-01", status: "todo", priority: "medium", memo: "" });
+    const r2 = validateTaskInput(body, {}, db);
+    assert.equal(r2.ok, true);
+    if (r2.ok) assert.equal(r2.value.memo, "");
+  });
+  it("優先度とメモの検証は編集と同じ（不正な優先度・長すぎるメモは断る）", () => {
+    const db = openDb();
+    const base = { title: "x", assignee: "sato", dueDate: "2026-12-01", status: "todo", priority: "medium", memo: "" };
+    assert.equal(validateTaskInput({ ...base, priority: "urgent" }, {}, db).ok, false);
+    assert.equal(validateTaskInput({ ...base, memo: "あ".repeat(2001) }, {}, db).ok, false);
+    assert.equal(validateTaskInput({ ...base, memo: "あ".repeat(2000) }, {}, db).ok, true);
   });
 });
