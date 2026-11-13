@@ -1,7 +1,15 @@
 // Cookie からログイン中のユーザーを取り出す（Server Component・Route Handler 用）。
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
-import { SESSION_COOKIE, getFailedLoginsBefore, getLoginWindow, getPreviousLogin, getSessionUserAndTouch } from "./auth.ts";
+import {
+  SESSION_COOKIE,
+  getFailedLoginsBefore,
+  getLockNotice,
+  getLoginWindow,
+  getPreviousLogin,
+  getSessionUserAndTouch,
+  type LockNotice,
+} from "./auth.ts";
 import { getLoginNotice, type LoginNotice } from "./login-notices.ts";
 import type { User } from "./users.ts";
 
@@ -21,6 +29,12 @@ export async function getCurrentPreviousLogin(): Promise<string | null | undefin
 export async function getCurrentFailedLoginsBefore(): Promise<number | undefined> {
   const store = await cookies();
   return getFailedLoginsBefore(store.get(SESSION_COOKIE)?.value);
+}
+
+/** ログイン中のセッションで、ログインした時点の「前回のログインのあとにロックされた回数と最後の日時」。無ければ null、未ログインなら undefined。 */
+export async function getCurrentLockNotice(): Promise<LockNotice | null | undefined> {
+  const store = await cookies();
+  return getLockNotice(store.get(SESSION_COOKIE)?.value);
 }
 
 /** ログイン中のセッションの、ログインした時点の前回・今回のログインの日時。 */
