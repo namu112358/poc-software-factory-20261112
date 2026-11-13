@@ -1,6 +1,6 @@
 import { notFound } from "next/navigation";
 import { formatAssigneeChange, listAssigneeChanges } from "@/lib/assignee-history";
-import { commentEditedLabel, listComments, listDeletedComments, splitCommentBody } from "@/lib/comments";
+import { commentEditedLabel, listCommentRevisions, listComments, listDeletedComments, splitCommentBody } from "@/lib/comments";
 import { commentPreview } from "@/lib/comment-delete";
 import { requireUser } from "@/lib/session";
 import { listTags, listTagSuggestions } from "@/lib/tags";
@@ -29,6 +29,7 @@ export default async function TaskDetailPage({ params }: Props) {
   const assignee = getUser(task.assignee);
   const comments = listComments(task.id);
   const deletedComments = listDeletedComments(task.id);
+  const commentRevisions = listCommentRevisions(task.id);
   const tags = listTags(task.id);
   const tagSuggestions = listTagSuggestions(task.id);
   const assigneeChanges = listAssigneeChanges(task.id);
@@ -177,6 +178,19 @@ export default async function TaskDetailPage({ params }: Props) {
                     ),
                   )}
                 </p>
+                {(commentRevisions.get(c.id)?.length ?? 0) > 0 && (
+                  <details data-testid="comment-revisions">
+                    <summary>編集の前の本文（{commentRevisions.get(c.id)!.length} 件）</summary>
+                    <ol>
+                      {commentRevisions.get(c.id)!.map((r, i) => (
+                        <li key={i} data-testid="comment-revision">
+                          <time dateTime={r.editedAt}>{formatJstDateTime(r.editedAt)}</time> に編集する前
+                          <p style={{ whiteSpace: "pre-wrap" }}>{r.body}</p>
+                        </li>
+                      ))}
+                    </ol>
+                  </details>
+                )}
                 {c.author === user.id && (
                   <>
                     <EditCommentForm taskId={task.id} commentId={c.id} body={c.body} />{" "}
