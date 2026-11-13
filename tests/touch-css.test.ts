@@ -24,3 +24,11 @@ describe("狭い画面の押せる範囲（#486）", () => {
     assert.doesNotMatch(TOUCH_CSS, /outline/);
   });
 });
+
+describe("狭い画面ではみ出さない（#502）", () => {
+  it("入力欄・メモ欄は、画面の幅を超えて広がらない", () => {
+    const rule = TOUCH_CSS.split("}").find((r) => r.includes("textarea"));
+    assert.ok(rule);
+    assert.match(rule, /max-width:100%/);
+  });
+});

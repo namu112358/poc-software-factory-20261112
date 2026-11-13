@@ -10,7 +10,7 @@ export const TOUCH_TARGET_PX = 44;
  * 広い画面には効かない。フォーカスの枠は変えない。
  */
 export const TOUCH_CSS = `@media (max-width:${NARROW_MAX_WIDTH}px){` +
-  `button,input:not([type=checkbox]):not([type=radio]),select,textarea{font-size:16px;min-height:${TOUCH_TARGET_PX}px;min-width:${TOUCH_TARGET_PX}px;box-sizing:border-box}` +
+  `button,input:not([type=checkbox]):not([type=radio]),select,textarea{font-size:16px;min-height:${TOUCH_TARGET_PX}px;min-width:${TOUCH_TARGET_PX}px;max-width:100%;box-sizing:border-box}` +
   `input[type=checkbox],input[type=radio]{width:${TOUCH_TARGET_PX}px;height:${TOUCH_TARGET_PX}px;margin:0}` +
   `nav a,td a,th a,li a,p>a:only-child,form>a{display:inline-flex;align-items:center;min-height:${TOUCH_TARGET_PX}px;min-width:${TOUCH_TARGET_PX}px}` +
   `header{gap:12px 12px!important}` +
