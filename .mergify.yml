@@ -34,6 +34,14 @@ queue_rules:
               - -label = risk:high
               - status-success = factory-review
 
+# 不具合の直し（type:fix）を、ほかの PR より先にキューで確かめる（main を壊した直しが、ほかの PR の後ろで待たないように。#363）。
+# キューは 1 つのままなので、その場方式は変わらない。どれにも当たらない PR は medium。
+priority_rules:
+  - name: 不具合の直しを先に
+    conditions:
+      - label = type:fix
+    priority: high
+
 pull_request_rules:
   - name: レビューを通った PR（risk:high 以外）と、merge:requested のラベルが付いた PR をキューに入れる
     conditions:
