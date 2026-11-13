@@ -12,6 +12,7 @@ import {
 } from "@/lib/session";
 import { TOUCH_CSS } from "@/lib/touch-css";
 import { LoginNoticeBanner } from "./login-notice";
+import { getUserRole, USER_ROLE_LABELS } from "@/lib/users";
 
 export const metadata = { title: `PoC ${APP_TITLE}` };
 
@@ -34,6 +35,7 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
   const failedLoginNotice = user ? formatFailedLoginNotice(await getCurrentFailedLoginsBefore()) : undefined;
   const lockNotice = user ? formatLockNotice(await getCurrentLockNotice()) : undefined;
   const loginNotice = user ? await getCurrentLoginNotice() : undefined;
+  const role = user ? getUserRole(user.id) : undefined;
   return (
     <html lang="ja">
       <body style={{ fontFamily: "system-ui, sans-serif", margin: 24 }}>
@@ -56,6 +58,7 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
               ))}
             </nav>
             <span data-testid="header-user">{user.name}（{user.id}）</span>
+            {role && <span data-testid="header-role">役割: {USER_ROLE_LABELS[role]}</span>}
             <span data-testid="previous-login">{formatPreviousLogin(previousLogin ?? null)}</span>
             <form method="post" action="/api/logout">
               <button type="submit">ログアウト</button>

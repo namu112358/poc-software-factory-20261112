@@ -62,7 +62,7 @@ flowchart LR
 - 起動のラベル（`status:in-progress`・`status:in-progress-hard`）は、その Issue のほかのラベルを付け外ししてから 30 秒以上あけて付ける（同じ数秒にほかのラベルも付くと、実装が重ねて起動した。#429）。
 - push するのは `claude/` で始まるブランチだけ。force push はしない。
 - コマンドは 1 回に 1 つ実行する。`&&`・`;`・`||` でつながない、`cd` してから git を実行しない（git は `git -C <ディレクトリ>` で）、スクリプトをヒアドキュメントで python・node に流さない（ファイルに書いてから実行する）、`rm -rf` を使わない。つないだコマンドは承認の画面で止まり、Routine はそこから進めない（05:43・05:50 UTC のレビューの Routine）。`.claude/settings.json` にフック（`.claude/hooks/bash-guard.mjs`）が登録された後は、フックもこれらを断る。
-- `claude/issue-` 以外の `claude/` の PR（有人のセッションが出した手順書・スクリプトの PR など）は、出したセッションが直す。修正・巡回の役は扱わない（衝突や指摘で `status:needs-human` を付けない）。レビューと、割り当ての衝突の知らせは同じように行う。
+- `claude/issue-` 以外の `claude/` の PR（有人のセッションが出した手順書・スクリプトの PR など）は、出したセッションが直す。修正の役は扱わず、衝突や必須の指摘で `status:needs-human` を付けない。レビューと、割り当ての衝突の知らせ、割り当て・巡回のレビューの起こし直し（Ready のまま 10 分レビューが無いとき。同じコミットで 2 回目は `status:needs-human`）は同じように行う。
 - PR の draft と Ready の切り替えは、GitHub MCP の `update_pull_request`（`draft: true` / `false`）で行う。
 - 実装の着手の鍵は、ブランチ `claude/issue-<番号>` の作成（同じ名前は 2 度作れない）。
 - 「取り込みだけのコミット」（`main` を取り込んだマージのコミットで、`git show --remerge-diff <コミット>` の差分が空のもの。ただの `git show` は、手の入っていない取り込みでも差分を出すことがある）は、レビュー済みかを判定するときに数えない。

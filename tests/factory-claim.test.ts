@@ -33,6 +33,7 @@ import {
   normalizeLabel,
   START_LABELS,
   isOwnClaudePr,
+  stalledLoadPlan,
 } from "../scripts/factory/claim-core.ts";
 
 const touch = (files: string, at: string) => ({ body: `<!-- factory:touch files=${files} -->\n着手します。`, createdAt: at });
@@ -784,10 +785,37 @@ describe("stalled: 止まった実装・PR の片付け", () => {
     assert.equal(run([], [iss({ labels: ["status:in-progress", "status:needs-human"], updatedAt: ago(99) })]).actions.length, 0);
   });
 
-  it("claude/issue- 以外の PR は衝突の行だけ", () => {
-    const other = pr({ headRef: "claude/hand-made", draft: false, readyAt: ago(99), updatedAt: ago(99), appCheck: "none" });
-    assert.equal(run([other], []).actions.length, 0); // レビューが無くても rereview しない
-    assert.equal(only(run([{ ...other, mergeable: false }], [])).action, "conflict");
+  it("claude/issue- 以外の PR は、衝突とレビューの起こし直しの行だけ", () => {
+    const other = pr({ headRef: "claude/hand-made", draft: true, readyAt: null, updatedAt: ago(99), appCheck: "success", mergeable: true });
+    assert.equal(run([other], []).actions.length, 0); // CI が通ったまま止まった draft でも、Ready にしない（出したセッションが扱う）
+    assert.equal(only(run([{ ...other, draft: false, mergeable: false }], [])).action, "conflict");
+  });
+
+  it("入力の読み込み: claude/issue- 以外の PR でも、レビューと（Ready なら）Ready の時刻を読む。mergeable が null でも読む", () => {
+    for (const mergeable of [true, false, null]) {
+      const other = stalledLoadPlan({ own: false, mergeable, draft: false });
+      assert.equal(other.reviews, true, String(mergeable));
+      assert.equal(other.readyAt, true, String(mergeable));
+      assert.equal(other.checks, false, String(mergeable)); // CI などは claude/issue- の PR のほかの行だけが使う
+    }
+    assert.equal(stalledLoadPlan({ own: false, mergeable: true, draft: true }).readyAt, false);
+    assert.deepEqual(stalledLoadPlan({ own: true, mergeable: true, draft: false }), { reviews: true, readyAt: true, checks: true });
+    assert.equal(stalledLoadPlan({ own: true, mergeable: null, draft: false }).checks, false);
+  });
+
+  it("claude/issue- 以外の PR（claude/ci- など）も、Ready のまま 10 分レビューが無ければ起こし直し、同じコミットで 2 回目は人に回す（#482・#518）", () => {
+    const ci = pr({ headRef: "claude/ci-flaky", draft: false, readyAt: ago(12), updatedAt: ago(12), appCheck: "success", mergeable: true });
+    for (const role of ["dispatch", "patrol"] as const) {
+      const first = stalledActions({ role, now: NOW, sessionUrl: null, prs: [ci], issues: [], closedStarted: [] }).actions;
+      assert.equal(first.length, 1, role);
+      assert.equal(first[0].action, "rereview", role);
+      assert.equal(first[0].draft, "draft-then-ready", role);
+      const second = stalledActions({ role, now: NOW, sessionUrl: null, prs: [{ ...ci, priorMarks: [{ action: "rereview", commit: "aaaaaaa" }] }], issues: [], closedStarted: [] }).actions;
+      assert.equal(second[0].draft, null, role);
+      assert.deepEqual(second[0].addLabels, ["status:needs-human"], role);
+    }
+    // 10 分たっていなければ起こさない
+    assert.equal(run([{ ...ci, readyAt: ago(5) }], []).actions.length, 0);
   });
 
   it("コメントの印は役の名前になり、セッションが無ければ行を省く", () => {

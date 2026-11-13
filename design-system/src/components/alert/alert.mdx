@@ -1,0 +1,36 @@
+import { Meta, Canvas, Controls, Stories } from "@storybook/addon-docs/blocks";
+import * as AlertStories from "./alert.stories";
+
+<Meta of={AlertStories} />
+
+# Alert
+
+画面の中に置く、注記・完了・注意・誤りの知らせの欄。種類は `note`・`ok`・`warn`・`err` の 4 つ。
+
+- `err` は `role="alert"` で、画面の読み上げがすぐに読む。
+- それ以外は `role="status"` で、読み上げが落ち着いて読む。
+- 種類は色だけで伝えず、見出し（`AlertTitle`）か先頭の語（`AlertLead`）でも書く。
+
+<Canvas of={AlertStories.WithTitle} />
+<Controls of={AlertStories.WithTitle} />
+
+## 使う場面
+
+- 画面や区切り全体に関わる注記・完了・注意・誤りを、その場に残して知らせるとき。
+- 保存に失敗したなど、利用者がすぐ気づく必要がある誤りには `err` を使う。
+- 補足や前提を、落ち着いて読んでもらいたいときは `note` を使う。
+
+## 使わない場面
+
+- 数秒で消える一時的な知らせ（トースト）には使わない。この部品は閉じる・自動で消える動きを持たない。
+- 入力欄ごとの誤りには使わない。Input の誤りの文言を使う。
+- 画面の読み込みのたびに必ず出る、読み上げで邪魔になる固定の説明には使わない。
+
+## 書き方の決まり
+
+- 見出しか先頭の語で種類が分かる文言にする（「完了:」「注意:」「誤り:」）。
+- 見出しを置かないときは `AlertLead` で先頭の語を包む。
+
+## すべての状態
+
+<Stories />

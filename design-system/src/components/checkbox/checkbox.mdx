@@ -1,0 +1,32 @@
+import { Meta, Canvas, Controls, Stories } from "@storybook/addon-docs/blocks";
+import * as CheckboxStories from "./checkbox.stories";
+
+<Meta of={CheckboxStories} />
+
+# Checkbox
+
+オンとオフを選ぶ箱。名前は Label で付け、名前を押しても切り替わるようにする。
+
+<Canvas of={CheckboxStories.Off} />
+<Controls of={CheckboxStories.Off} />
+
+## 使う場面
+
+- 複数の項目から、当てはまるものをいくつでも選ぶとき。
+- 設定の「する・しない」を、送信ボタンを押してから反映するとき。
+- 一覧の「すべて選ぶ」のように、中の選択が一部だけのときも示したいとき（`checked="indeterminate"`）。
+
+## 使わない場面
+
+- 1 つだけ選ぶ選択肢には使わない。Radio を使う。
+- 押した瞬間に反映する設定には使わない。Switch を使う。
+- 名前を付けずに置かない。Label を `htmlFor` と箱の `id` で結び付ける（`useId` で作ると、同じ画面に並べても重ならない）。
+
+## 書き方の決まり
+
+- 名前は、オンのときに何が起こるかが分かる短い言葉にする（「通知を受け取る」）。
+- 押せないときは `disabled` を箱に付け、Label にも `disabled` を付けて名前を薄くする。
+
+## すべての状態
+
+<Stories />
