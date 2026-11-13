@@ -6,6 +6,8 @@ import { requireUser } from "@/lib/session";
 import { isCoordinator } from "@/lib/users";
 import { showSuspensionControl } from "@/lib/member-suspension";
 import { SuspensionButton } from "./suspension-button";
+import { showAddMemberControl } from "@/lib/member-create";
+import { AddMemberForm } from "./add-member-form";
 
 export const metadata = { title: formatPageTitle("メンバー一覧") };
 
@@ -78,6 +80,7 @@ export default async function MembersPage() {
           })}
         </tbody>
       </table>
+      {showAddMemberControl(viewer) && <AddMemberForm />}
     </main>
   );
 }

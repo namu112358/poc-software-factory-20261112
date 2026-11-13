@@ -27,6 +27,9 @@ import {
   stalledActions,
   gateDecision,
   settleMergeable,
+  ciWaitStep,
+  type CiWaitState,
+  type CiWaitRead,
   type GateInput,
   type StalledPr,
   type StalledIssue,
@@ -1155,6 +1158,60 @@ describe("ゲートの監査（gate-review。台帳 #123 の E27）", () => {
       assert.equal(a[0].draft, null);
       assert.deepEqual(a[0].addLabels, ["status:needs-human"]);
     });
+  });
+});
+
+describe("CI の待ち（ciWaitStep）", () => {
+  const start: CiWaitState = { sha: null, deadlineMs: 900_000, failures: 0 };
+  const at: CiWaitState = { sha: "aaa", deadlineMs: 900_000, failures: 0 };
+  const read = (o: Partial<CiWaitRead> = {}): CiWaitRead => ({ ok: true, sha: "aaa", appCheck: null, mergeable: true, ...o });
+  const done = (r: ReturnType<typeof ciWaitStep>) => (r.done ? { result: r.result, conclusion: r.conclusion } : null);
+
+  it("app-check がまだ無い・実行中なら、待ち始めの head を覚えて続ける", () => {
+    const r = ciWaitStep(start, read({ appCheck: { status: "in_progress", conclusion: null } }), 30_000);
+    assert.deepEqual(r, { done: false, state: { sha: "aaa", deadlineMs: 900_000, failures: 0 } });
+    assert.equal(ciWaitStep(at, read(), 30_000).done, false);
+  });
+  it("app-check が success なら success、それ以外の conclusion はすべて failure（conclusion も返す）", () => {
+    assert.deepEqual(done(ciWaitStep(at, read({ appCheck: { status: "completed", conclusion: "success" } }), 1)), { result: "success", conclusion: "success" });
+    for (const c of ["failure", "cancelled", "timed_out", "skipped", null])
+      assert.deepEqual(done(ciWaitStep(at, read({ appCheck: { status: "completed", conclusion: c } }), 1)), { result: "failure", conclusion: c });
+  });
+  it("mergeable が false なら conflict。null は計算中なので待つ", () => {
+    assert.deepEqual(done(ciWaitStep(at, read({ mergeable: false }), 1)), { result: "conflict", conclusion: null });
+    assert.equal(ciWaitStep(at, read({ mergeable: null }), 1).done, false);
+  });
+  it("終わった CI は、衝突していても先に結果を返す（閉じた PR の mergeable に左右されない）", () => {
+    assert.equal(done(ciWaitStep(at, read({ mergeable: false, appCheck: { status: "completed", conclusion: "success" } }), 1))?.result, "success");
+  });
+  it("head が待ち始めと変わったら head-changed（app-check が終わっていても）", () => {
+    assert.equal(done(ciWaitStep(at, read({ sha: "bbb", appCheck: { status: "completed", conclusion: "success" } }), 1))?.result, "head-changed");
+  });
+  it("時間切れの回の読み直しで終わっていれば、その結果。終わっていなければ timeout", () => {
+    assert.equal(done(ciWaitStep(at, read({ appCheck: { status: "completed", conclusion: "success" } }), 900_000))?.result, "success");
+    assert.equal(done(ciWaitStep(at, read({ mergeable: false }), 900_000))?.result, "conflict");
+    assert.equal(done(ciWaitStep(at, read({ appCheck: { status: "queued", conclusion: null } }), 900_000))?.result, "timeout");
+    assert.equal(ciWaitStep(at, read(), 899_999).done, false);
+  });
+  it("読み取りの失敗はその回を飛ばし、続けて 5 回で error。成功すれば数え直す", () => {
+    let s = at;
+    for (let i = 1; i < 5; i++) {
+      const r = ciWaitStep(s, { ok: false }, i * 30_000);
+      assert.equal(r.done, false);
+      if (!r.done) s = r.state;
+    }
+    assert.equal(s.failures, 4);
+    assert.equal(done(ciWaitStep(s, { ok: false }, 150_000))?.result, "error");
+    const ok = ciWaitStep(s, read(), 150_000);
+    assert.equal(ok.done === false && ok.state.failures, 0);
+  });
+  it("時間切れの回に読めなかったときは timeout（5 回目なら error）", () => {
+    assert.equal(done(ciWaitStep(at, { ok: false }, 900_000))?.result, "timeout");
+    assert.equal(done(ciWaitStep({ ...at, failures: 4 }, { ok: false }, 900_000))?.result, "error");
+  });
+  it("最初の読み取りが失敗しても head を覚えていないだけで、次の成功で覚える", () => {
+    const r = ciWaitStep(start, { ok: false }, 1);
+    assert.equal(r.done === false && r.state.sha, null);
   });
 });
 
