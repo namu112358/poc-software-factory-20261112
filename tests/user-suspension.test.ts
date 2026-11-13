@@ -10,6 +10,7 @@ import { MIGRATIONS } from "../src/lib/db/migrations.ts";
 import { SEED_PASSWORD } from "../src/lib/db/seed.ts";
 import { createSession, getSessionUser, login } from "../src/lib/auth.ts";
 import {
+  countOpenTasksOf,
   isSuspended,
   listUserOptions,
   listUserSummaries,
@@ -18,7 +19,9 @@ import {
   suspendUser,
   SUSPENSION_REFUSAL_MESSAGES,
 } from "../src/lib/users.ts";
-import { listAssigneeOptions, listMemberWorkload } from "../src/lib/members.ts";
+import { SUSPENDED_MARK, listAssigneeOptions, listMemberWorkload, listSuspendedUserIds, withSuspendedMark } from "../src/lib/members.ts";
+import { listSuspendedBacklog } from "../src/lib/my-attention.ts";
+import { listOverdueTasks } from "../src/lib/overdue.ts";
 import { buildAssigneeFilterOptions } from "../src/lib/task-filter-form.ts";
 import { updateTasks, validateBulkUpdateInput } from "../src/lib/bulk-update.ts";
 import { undoBulkUpdate } from "../src/lib/bulk-undo.ts";
@@ -34,7 +37,7 @@ import {
 import { createComment, listComments } from "../src/lib/comments.ts";
 import { formatAssigneeChange, listAssigneeChanges } from "../src/lib/assignee-history.ts";
 import { createExtension, listPendingExtensions } from "../src/lib/extensions.ts";
-import { setMemberSuspended, showSuspensionControl } from "../src/lib/member-suspension.ts";
+import { setMemberSuspended, showSuspensionControl, suspendedNotice, memberTasksHref } from "../src/lib/member-suspension.ts";
 
 type Db = ReturnType<typeof openDb>;
 const NOW = new Date("2026-11-13T04:00:00.000Z");
@@ -223,9 +226,9 @@ describe("停止したメンバーは、担当者の選択肢に出ず、一覧�
     const db = openDb();
     suspend(db, "suzuki");
     assert.deepEqual(listUserSummaries(db), [
-      { id: "sato", name: "佐藤", suspended: false },
-      { id: "suzuki", name: "鈴木", suspended: true },
-      { id: "tanaka", name: "田中", suspended: false },
+      { id: "sato", name: "佐藤", suspended: false, role: "member" },
+      { id: "suzuki", name: "鈴木", suspended: true, role: "member" },
+      { id: "tanaka", name: "田中", suspended: false, role: "coordinator" },
     ]);
     const rows = listMemberWorkload(db, "2026-11-13");
     assert.deepEqual(rows.map((r) => [r.id, r.suspended]), [["sato", false], ["suzuki", true], ["tanaka", false]]);
@@ -234,7 +237,7 @@ describe("停止したメンバーは、担当者の選択肢に出ず、一覧�
   it("GET /api/users はパスワードのハッシュなどを含めない", () => {
     const db = openDb();
     suspend(db, "suzuki");
-    for (const u of listUserSummaries(db)) assert.deepEqual(Object.keys(u).sort(), ["id", "name", "suspended"]);
+    for (const u of listUserSummaries(db)) assert.deepEqual(Object.keys(u).sort(), ["id", "name", "role", "suspended"]);
   });
 
   it("一覧の絞り込みには残り、名前に（停止中）が付く（引き継ぐタスクを探せる）", () => {
@@ -386,5 +389,66 @@ describe("マイグレーション", () => {
     old.exec("INSERT INTO users (id, name) VALUES ('sato', '佐藤'), ('yamada', '山田')");
     migrate(old);
     assert.deepEqual(listUserSummaries(old).map((u) => u.suspended), [false, false]);
+  });
+});
+
+describe("停止した後に残ったタスクへの気づき（#538）", () => {
+  const add = (db: Db, title: string, assignee: string, extra: Record<string, unknown> = {}) =>
+    createTask({ title, status: "todo", assignee, dueDate: "2026-11-01", priority: "medium", estimateMinutes: null, memo: "", ...extra }, db);
+
+  it("停止した人ごとの未完了の件数が取りまとめる人だけに出る。完了・アーカイブ・削除は数えない", () => {
+    const db = openDb();
+    db.prepare("DELETE FROM tasks").run();
+    add(db, "a", "suzuki");
+    add(db, "b", "suzuki", { status: "in_progress" });
+    add(db, "完了", "suzuki", { status: "done" });
+    add(db, "アーカイブ", "suzuki", { archived: true });
+    const gone = add(db, "削除", "suzuki");
+    db.prepare("UPDATE tasks SET deleted_at = ? WHERE id = ?").run(NOW.toISOString(), (gone as { id: number }).id);
+    assert.deepEqual(listSuspendedBacklog("tanaka", db), []); // まだ停止していない
+    suspend(db, "suzuki");
+    assert.deepEqual(listSuspendedBacklog("tanaka", db), [{ id: "suzuki", name: "鈴木", count: 2 }]);
+    assert.deepEqual(listSuspendedBacklog("sato", db), []); // 取りまとめる人ではない
+    assert.equal(countOpenTasksOf("suzuki", db), 2);
+    assert.equal(memberTasksHref("suzuki"), "/tasks?assignee=suzuki");
+  });
+
+  it("担当を替える・再開すると消える。タスクの無い停止した人は出ない", () => {
+    const db = openDb();
+    db.prepare("DELETE FROM tasks").run();
+    const t = add(db, "a", "suzuki") as { id: number };
+    suspend(db, "suzuki");
+    suspend(db, "sato");
+    assert.deepEqual(listSuspendedBacklog("tanaka", db).map((r) => r.id), ["suzuki"]);
+    db.prepare("UPDATE tasks SET assignee = 'tanaka' WHERE id = ?").run(t.id);
+    assert.deepEqual(listSuspendedBacklog("tanaka", db), []);
+    db.prepare("UPDATE tasks SET assignee = 'suzuki' WHERE id = ?").run(t.id);
+    assert.equal(resumeUser("tanaka", "suzuki", db).ok, true);
+    assert.deepEqual(listSuspendedBacklog("tanaka", db), []);
+  });
+
+  it("期限切れの一覧の担当者に「（停止中）」が付き、再開すると外れる。停止していない人には付かない", () => {
+    const db = openDb();
+    db.prepare("DELETE FROM tasks").run();
+    add(db, "鈴木の", "suzuki");
+    add(db, "佐藤の", "sato");
+    const names = () => listOverdueTasks(db, "2026-11-12").map((r) => r.assigneeName);
+    assert.deepEqual(names(), ["鈴木", "佐藤"]);
+    suspend(db, "suzuki");
+    assert.deepEqual(names(), [`鈴木${SUSPENDED_MARK}`, "佐藤"]);
+    resumeUser("tanaka", "suzuki", db);
+    assert.deepEqual(names(), ["鈴木", "佐藤"]);
+    assert.deepEqual([...listSuspendedUserIds(db)], []);
+    suspend(db, "sato");
+    assert.deepEqual([...listSuspendedUserIds(db)], ["sato"]);
+    assert.equal(withSuspendedMark("佐藤", true), `佐藤${SUSPENDED_MARK}`);
+    assert.equal(withSuspendedMark("佐藤", false), "佐藤");
+  });
+
+  it("停止のボタンは、応答の件数から案内を出す", async () => {
+    const res = await setMemberSuspended("suzuki", true, { fetch: async () => ({ ok: true, json: async () => ({ openTaskCount: 3 }) }) });
+    assert.deepEqual(res, { status: "done", suspended: true, openTaskCount: 3 });
+    assert.match(suspendedNotice("鈴木", 3), /3 件残っています/);
+    assert.match(suspendedNotice("鈴木", 0), /残っていません/);
   });
 });

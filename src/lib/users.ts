@@ -3,6 +3,9 @@ import { getDb, transaction, type Db } from "./db/index.ts";
 import { hashPassword } from "./password.ts";
 import { unknownFieldErrors } from "./body-fields.ts";
 import type { ValidationResult } from "./task-types.ts";
+import { isUserRole, type UserRole } from "./user-role.ts";
+
+export { USER_ROLE_LABELS, USER_ROLES, isUserRole, type UserRole } from "./user-role.ts";
 
 export type User = { id: string; name: string };
 
@@ -28,14 +31,35 @@ export function listUserOptions(db: Db = getDb()): User[] {
 
 export type UserSummary = User & { suspended: boolean };
 
-/** 利用者の全員と、ログインを停止しているか（GET /api/users）。並びは ID 順。 */
-export function listUserSummaries(db: Db = getDb()): UserSummary[] {
-  const rows = db.prepare("SELECT id, name, suspended_at FROM users ORDER BY id").all() as {
+export type UserListItem = UserSummary & { role: UserRole };
+
+/** 利用者の全員と、ログインを停止しているか・役割（GET /api/users。役割は #524）。並びは ID 順。 */
+export function listUserSummaries(db: Db = getDb()): UserListItem[] {
+  const rows = db.prepare("SELECT id, name, suspended_at, role FROM users ORDER BY id").all() as {
     id: string;
     name: string;
     suspended_at: string | null;
+    role: string;
   }[];
-  return rows.map((r) => ({ id: r.id, name: r.name, suspended: r.suspended_at !== null }));
+  return rows.map((r) => ({ id: r.id, name: r.name, suspended: r.suspended_at !== null, role: toRole(r.role) }));
+}
+
+function toRole(value: string | undefined): UserRole {
+  return value === "coordinator" ? "coordinator" : "member";
+}
+
+/** 利用者の役割。見つからない ID は undefined。 */
+export function getUserRole(userId: string, db: Db = getDb()): UserRole | undefined {
+  const row = db.prepare("SELECT role FROM users WHERE id = ?").get(userId) as { role: string } | undefined;
+  return row ? toRole(row.role) : undefined;
+}
+
+/** 利用者が担当の、未完了・アーカイブしていない・削除していないタスクの件数（停止した後に残ったタスクの案内に使う。#538）。 */
+export function countOpenTasksOf(userId: string, db: Db = getDb()): number {
+  const row = db
+    .prepare("SELECT COUNT(*) AS n FROM tasks WHERE assignee = ? AND status <> 'done' AND archived = 0 AND deleted_at IS NULL")
+    .get(userId) as { n: number };
+  return row.n;
 }
 
 /** ログインを停止している利用者か。見つからない ID は false。 */
@@ -70,8 +94,10 @@ export const SUSPENSION_REFUSAL_MESSAGES: Record<SuspensionRefusal, string> = {
   self: "自分自身のログインは停止・再開できません",
 };
 
+/** 停止・再開の応答の形（id・name・suspended）。役割は含めない（#524 で GET /api/users にだけ足した）。 */
 function summary(userId: string, db: Db): UserSummary {
-  return listUserSummaries(db).find((u) => u.id === userId)!;
+  const { id, name, suspended } = listUserSummaries(db).find((u) => u.id === userId)!;
+  return { id, name, suspended };
 }
 
 /** 操作する人が、停止していない取りまとめる人か。 */
@@ -111,6 +137,66 @@ export function resumeUser(actorId: string, targetId: string, db: Db = getDb()):
     if (targetId === actorId) return { ok: false, reason: "self" };
     db.prepare("UPDATE users SET suspended_at = NULL WHERE id = ?").run(targetId);
     return { ok: true, user: summary(targetId, db) };
+  });
+}
+
+// ---- 役割の付け替え（#524） ----
+
+/** 役割の変更を断った理由。forbidden は 403、invalid は 400（errors を details に）、not_found は 404、suspended と last_coordinator は 409 にする。 */
+export type RoleChangeRefusal = "forbidden" | "invalid" | "not_found" | "suspended" | "last_coordinator";
+
+export const ROLE_CHANGE_REFUSAL_MESSAGES: Record<RoleChangeRefusal, string> = {
+  forbidden: "役割を替えられるのは、取りまとめる人だけです",
+  invalid: "入力内容に誤りがあります",
+  not_found: "利用者が見つかりません",
+  suspended: "ログインを停止しているメンバーは、取りまとめる人にできません。先にログインを再開してください",
+  last_coordinator: "取りまとめる人が 1 人もいなくなるため、メンバーに戻せません。先にほかのメンバーを取りまとめる人にしてください",
+};
+
+/** 役割の変更の本文（`{ role }`）を検証する。 */
+export function validateRoleInput(body: unknown): ValidationResult<{ role: UserRole }> {
+  if (typeof body !== "object" || body === null || Array.isArray(body)) {
+    return { ok: false, errors: ["リクエストの形式が正しくありません。{ \"role\": \"coordinator\" } か { \"role\": \"member\" } の JSON で送ってください"] };
+  }
+  const { role } = body as Record<string, unknown>;
+  const errors: string[] = unknownFieldErrors(body as Record<string, unknown>, ["role"]);
+  if (!isUserRole(role)) errors.push("役割（role）は \"coordinator\"（取りまとめる人）か \"member\"（メンバー）にしてください");
+  if (errors.length > 0) return { ok: false, errors };
+  return { ok: true, value: { role: role as UserRole } };
+}
+
+export type RoleChangeResult =
+  | { ok: true; user: { id: string; name: string; role: UserRole } }
+  | { ok: false; reason: Exclude<RoleChangeRefusal, "invalid"> }
+  | { ok: false; reason: "invalid"; errors: string[] };
+
+/**
+ * 取りまとめる人（actorId）が、利用者（targetId）の役割を替える（PUT /api/users/:id/role の判定。#524）。
+ * 判定の順: 操作する人が停止していない取りまとめる人でなければ forbidden（入力によらない）、本文の誤りは invalid、
+ * 相手がいなければ not_found、今と同じ役割なら何も変えずに成功、停止中の人を取りまとめる人にするなら suspended、
+ * メンバーに戻すと停止していない取りまとめる人が 0 人になるなら last_coordinator。
+ * 数えるのも書き込むのも 1 つのトランザクションの中で行う（同時に自分を戻しても、最後の 1 人は残る）。
+ * 役割は要求のたびに DB から読むので（isCoordinator）、替えた次の要求から、延長の承認などができる人が変わる。
+ */
+export function changeUserRole(actorId: string, targetId: string, body: unknown, db: Db = getDb()): RoleChangeResult {
+  return transaction(db, (): RoleChangeResult => {
+    if (!canManage(actorId, db)) return { ok: false, reason: "forbidden" };
+    const input = validateRoleInput(body);
+    if (!input.ok) return { ok: false, reason: "invalid", errors: input.errors };
+    const target = getUser(targetId, db);
+    if (!target) return { ok: false, reason: "not_found" };
+    const { role } = input.value;
+    const result = { ok: true as const, user: { id: target.id, name: target.name, role } };
+    if (getUserRole(targetId, db) === role) return result;
+    if (role === "coordinator" && isSuspended(targetId, db)) return { ok: false, reason: "suspended" };
+    if (role === "member") {
+      const others = db
+        .prepare("SELECT COUNT(*) AS n FROM users WHERE role = 'coordinator' AND suspended_at IS NULL AND id <> ?")
+        .get(targetId) as { n: number };
+      if (others.n === 0) return { ok: false, reason: "last_coordinator" };
+    }
+    db.prepare("UPDATE users SET role = ? WHERE id = ?").run(role, targetId);
+    return result;
   });
 }
 

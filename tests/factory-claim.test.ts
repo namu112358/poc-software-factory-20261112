@@ -9,6 +9,7 @@ import {
   precheck,
   mergeCheck,
   reviewStatus,
+  reviewedStatus,
   ciCheck,
   combineChecks,
   precheckActions,
@@ -595,6 +596,21 @@ describe("レビューを通ったことを表す status（reviewStatus・自動
       assert.equal(reviewStatus(mc, "aaaa111", [], ["src/app/page.tsx", f]).state, null, f);
     }
     assert.equal(reviewStatus(mc, "aaaa111", [], ["src/app/page.tsx", "docs/product.md", "tests/a.test.ts"]).state, "success");
+  });
+  it("factory-reviewed は、risk:high・品質のゲートでも、最新のコミットが ok なら success（人が merge:requested で入れる PR にも要る。#499）", () => {
+    const mc = mergeCheck({ reviews: [ok("aaaa111")], headSha: "aaaa111", after: [] });
+    assert.equal(reviewedStatus(mc, "aaaa111").state, "success");
+    const carried = mergeCheck({ reviews: [ok("aaaa111")], headSha: "bbbb222", after: [{ sha: "bbbb222", mergeOnly: true }] });
+    assert.equal(reviewedStatus(carried, "bbbb222").state, "success");
+  });
+  it("factory-reviewed は、ok の後に中身の変わるコミットがあれば付けず（#499 の再現）、最新のコミットへの changes なら failure", () => {
+    // #499: レビュー（ok）の後に push があり、未レビューの版のままマージされた
+    const pushed = mergeCheck({ reviews: [ok("aaaa111")], headSha: "bbbb222", after: [{ sha: "bbbb222", mergeOnly: false }] });
+    assert.equal(reviewedStatus(pushed, "bbbb222").state, null);
+    const ch = mergeCheck({ reviews: [ok("aaaa111"), changes("bbbb222")], headSha: "bbbb222", after: [] });
+    assert.equal(reviewedStatus(ch, "bbbb222").state, "failure");
+    const spoof = mergeCheck({ reviews: [{ ...ok("aaaa111"), association: "NONE" }], headSha: "aaaa111", after: [] });
+    assert.equal(reviewedStatus(spoof, "aaaa111").state, null);
   });
   it("risk:high の PR には、ok でも success を付けない（人が merge:requested を付ける）", () => {
     const mc = mergeCheck({ reviews: [ok("aaaa111")], headSha: "aaaa111", after: [] });

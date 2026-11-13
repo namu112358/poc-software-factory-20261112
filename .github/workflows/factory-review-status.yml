@@ -1,4 +1,5 @@
-# レビューの Routine の結果を、PR の最新のコミットの status（context=factory-review）にする。
+# レビューの Routine の結果を、PR の最新のコミットの status にする。factory-review は「自動でキューに入ってよい」（risk:high・品質のゲートを変える PR には付かない）、
+# factory-reviewed は「最新のコミットがレビューを通った」（risk:high・品質のゲートでも付く。merge:requested で人が入れる PR にも要る。#499）。
 # Mergify は、risk:high の付いていない PR を「factory-review が success・app-check・design-system-check・pr-body-check が成功・draft でない」でキューに入れる
 # （merge:requested を人が付けなくてよい。risk:high の PR は今までどおり人が merge:requested を付ける）。
 # - 判定は scripts/factory/claim.ts の review-status（merge-check と同じ判定）。最新のレビューの印 <!-- factory:review verdict=ok ... commit=<SHA> -->
@@ -71,15 +72,23 @@ jobs:
           PRS: ${{ steps.pr.outputs.numbers }}
           REPO: ${{ github.repository }}
         run: |
+          # 1 つの status を、今の値と違うときだけ付ける（失敗しても次へ進む）
+          post() {
+            local pr="$1" sha="$2" context="$3" state="$4" desc="$5"
+            if [ -z "$state" ]; then echo "PR $pr: $context は付けない"; return 0; fi
+            local current
+            current=$(gh api "repos/$REPO/commits/$sha/statuses" --jq "[.[] | select(.context == \"$context\")][0].state // \"\"") || { echo "PR $pr: $context の今の値を読めなかった（付けずに次へ）"; return 0; }
+            if [ "$current" = "$state" ]; then echo "PR $pr: $context は $state のまま"; return 0; fi
+            gh api -X POST "repos/$REPO/statuses/$sha" -f state="$state" -f context="$context" -f description="$desc" >/dev/null || { echo "PR $pr: $context を付けられなかった（次の回にやり直す）"; return 0; }
+            echo "PR $pr: $context=$state を $sha に付けた"
+          }
+          field() { node -e 'const r=JSON.parse(process.argv[1]); const v=process.argv[2].split(".").reduce((o,k)=>o?.[k],r); process.stdout.write(String(v ?? "").slice(0, 140))' "$1" "$2"; }
           for PR in $PRS; do
-            out=$(node scripts/factory/claim.ts review-status "$PR") || { echo "#$PR: 判定に失敗した（付けずに次へ）"; echo "$out"; continue; }
+            out=$(node scripts/factory/claim.ts review-status "$PR") || { echo "PR $PR: 判定に失敗した（付けずに次へ）"; echo "$out"; continue; }
             echo "$out"
-            state=$(node -e 'const r=JSON.parse(process.argv[1]); process.stdout.write(r.state ?? "")' "$out")
-            sha=$(node -e 'const r=JSON.parse(process.argv[1]); process.stdout.write(r.sha ?? "")' "$out")
-            desc=$(node -e 'const r=JSON.parse(process.argv[1]); process.stdout.write(String(r.description ?? "").slice(0, 140))' "$out")
-            if [ -z "$state" ]; then echo "PR $PR: status は付けない"; continue; fi
-            current=$(gh api "repos/$REPO/commits/$sha/statuses" --jq '[.[] | select(.context == "factory-review")][0].state // ""') || { echo "PR $PR: 今の status を読めなかった（付けずに次へ）"; continue; }
-            if [ "$current" = "$state" ]; then echo "PR $PR: factory-review は $state のまま"; continue; fi
-            gh api -X POST "repos/$REPO/statuses/$sha" -f state="$state" -f context=factory-review -f description="$desc" >/dev/null || { echo "PR $PR: status を付けられなかった（次の回にやり直す）"; continue; }
-            echo "PR $PR: factory-review=$state を $sha に付けた"
+            sha=$(field "$out" sha)
+            # factory-review: 自動でキューに入ってよいか（risk:high・品質のゲートを変える PR には付かない）
+            post "$PR" "$sha" factory-review "$(field "$out" state)" "$(field "$out" description)"
+            # factory-reviewed: 最新のコミットがレビューを通ったか（merge:requested で人が入れる PR にも要る。#499）
+            post "$PR" "$sha" factory-reviewed "$(field "$out" reviewed.state)" "$(field "$out" reviewed.description)"
           done
