@@ -2,6 +2,7 @@ import { getDb, type Db } from "./db/index.ts";
 import { getTask, type Task } from "./tasks.ts";
 import type { ValidationResult } from "./tasks.ts";
 import { isCoordinator } from "./users.ts";
+import { isValidDate } from "./valid-date.ts";
 
 export type ExtensionStatus = "pending" | "approved" | "rejected";
 
@@ -47,15 +48,6 @@ function toExtension(row: ExtensionRow): Extension {
 }
 
 export const EXTENSION_REASON_MAX_LENGTH = 500;
-
-const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
-
-/** YYYY-MM-DD 形式で、実在する日付か。 */
-function isValidDate(value: string): boolean {
-  if (!DATE_RE.test(value)) return false;
-  const date = new Date(`${value}T00:00:00.000Z`);
-  return !Number.isNaN(date.getTime()) && date.toISOString().slice(0, 10) === value;
-}
 
 export const EXTENSION_NOT_AFTER_MESSAGE = "希望の期限は、今の期限より後の日付にしてください";
 
