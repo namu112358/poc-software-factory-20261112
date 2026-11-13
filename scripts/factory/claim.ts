@@ -298,6 +298,20 @@ async function loadStalled(role: string) {
   return { ...r, unknown: [...r.unknown, ...unknown] };
 }
 
+/** merge-check・review-status に共通のレビューの判定（人の merge-check と自動の判定が食い違わないよう、1 か所にする） */
+async function reviewCheck(n: number, headSha: string): Promise<ReturnType<typeof mergeCheck>> {
+  const reviews = (await getAll<{ body: string | null; submitted_at: string; author_association: string }>(`/repos/${REPO}/pulls/${n}/reviews`))
+    .sort((a, b) => (a.submitted_at < b.submitted_at ? -1 : 1))
+    .map((r) => ({ body: r.body ?? "", association: r.author_association }));
+  const commitOf = /<!--\s*factory:review\s+verdict=\w+[^>]*?commit=([0-9a-f]+)/;
+  const last = reviews
+    .filter((r) => TRUSTED_ASSOCIATIONS.includes(r.association))
+    .map((r) => commitOf.exec(r.body)?.[1])
+    .filter(Boolean)
+    .at(-1);
+  return mergeCheck({ reviews, headSha, after: last ? commitsAfter(n, last, headSha) : [] });
+}
+
 async function main(): Promise<unknown> {
   const [cmd, num] = process.argv.slice(2);
   const n = Number(num);
@@ -321,17 +335,7 @@ async function main(): Promise<unknown> {
     case "merge-check": {
       if (!Number.isInteger(n)) throw new Error("PR の番号を指定する");
       const pr = (await get<{ head: { sha: string } }>(`/repos/${REPO}/pulls/${n}`)).data;
-      const reviews = (await getAll<{ body: string | null; submitted_at: string; author_association: string }>(`/repos/${REPO}/pulls/${n}/reviews`))
-        .sort((a, b) => (a.submitted_at < b.submitted_at ? -1 : 1))
-        .map((r) => ({ body: r.body ?? "", association: r.author_association }));
-      const commitOf = /<!--\s*factory:review\s+verdict=\w+[^>]*?commit=([0-9a-f]+)/;
-      const last = reviews
-        .filter((r) => TRUSTED_ASSOCIATIONS.includes(r.association))
-        .map((r) => commitOf.exec(r.body)?.[1])
-        .filter(Boolean)
-        .at(-1);
-      const after = last ? commitsAfter(n, last, pr.head.sha) : [];
-      const review = mergeCheck({ reviews, headSha: pr.head.sha, after });
+      const review = await reviewCheck(n, pr.head.sha);
       if (!review.ok) return { pr: n, ...review };
       // レビューが ok でも、キューに入る条件のチェックが落ちていればキューに入らない（#364）
       const runs = (
@@ -343,16 +347,7 @@ async function main(): Promise<unknown> {
     case "review-status": {
       if (!Number.isInteger(n)) throw new Error("PR の番号を指定する");
       const pr = (await get<{ head: { sha: string }; labels: { name: string }[] }>(`/repos/${REPO}/pulls/${n}`)).data;
-      const reviews = (await getAll<{ body: string | null; submitted_at: string; author_association: string }>(`/repos/${REPO}/pulls/${n}/reviews`))
-        .sort((a, b) => (a.submitted_at < b.submitted_at ? -1 : 1))
-        .map((r) => ({ body: r.body ?? "", association: r.author_association }));
-      const commitOf = /<!--\s*factory:review\s+verdict=\w+[^>]*?commit=([0-9a-f]+)/;
-      const last = reviews
-        .filter((r) => TRUSTED_ASSOCIATIONS.includes(r.association))
-        .map((r) => commitOf.exec(r.body)?.[1])
-        .filter(Boolean)
-        .at(-1);
-      const review = mergeCheck({ reviews, headSha: pr.head.sha, after: last ? commitsAfter(n, last, pr.head.sha) : [] });
+      const review = await reviewCheck(n, pr.head.sha);
       const raw = await getAll<{ filename: string; previous_filename?: string }>(`/repos/${REPO}/pulls/${n}/files`);
       // 一覧が途中で切れた・判定の間に head が変わったときは、付けない（安全側に倒す）
       const now = (await get<{ head: { sha: string }; changed_files: number }>(`/repos/${REPO}/pulls/${n}`)).data;

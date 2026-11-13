@@ -14,4 +14,9 @@ jobs:
     name: factory-review-trigger
     runs-on: ubuntu-latest
     steps:
-      - run: echo "PR #${{ github.event.pull_request.number }} にレビューが書かれた"
+      # 値は環境変数で渡す（run に直接書くと「 #」以降が YAML のコメントとして読まれ、コマンドが切れた）
+      - name: レビューが書かれたことを記録する
+        env:
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          echo "PR ${PR} にレビューが書かれた"
