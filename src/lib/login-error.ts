@@ -1,5 +1,6 @@
 // ログインの画面に出す誤りの文言（#479）。ログインの API が画面へ戻すときのクエリ（error・minutes）から作る。
 import { LOCK_MS } from "./login-throttle.ts";
+import { safeNextPath } from "./session-expired.ts";
 
 /** ロックで試せない残りの分の上限（ロックの長さ）。 */
 const MAX_RETRY_AFTER_MINUTES = Math.ceil(LOCK_MS / 60_000);
@@ -11,12 +12,18 @@ export function parseRetryAfterMinutes(value: unknown): number | undefined {
   return minutes >= 1 && minutes <= MAX_RETRY_AFTER_MINUTES ? minutes : undefined;
 }
 
-/** ログインに失敗したときに画面へ戻す先。ロックのときは、あと何分かも渡す。 */
+/**
+ * ログインに失敗したときに画面へ戻す先。ロックのときは、あと何分かも渡す。
+ * ログインした後の戻り先（next）が正しければ、それも渡す（誤ってもう一度ログインしても、元の画面に戻れるように。#491）。
+ */
 export function loginErrorPath(
   result: { reason: "invalid" } | { reason: "locked" | "lock-started"; retryAfterMinutes: number },
+  next?: unknown,
 ): string {
-  if (result.reason === "invalid") return "/login?error=1";
-  return `/login?error=${result.reason}&minutes=${result.retryAfterMinutes}`;
+  const path = safeNextPath(next);
+  const nextParam = path === undefined ? "" : `&next=${encodeURIComponent(path)}`;
+  if (result.reason === "invalid") return `/login?error=1${nextParam}`;
+  return `/login?error=${result.reason}&minutes=${result.retryAfterMinutes}${nextParam}`;
 }
 
 /**

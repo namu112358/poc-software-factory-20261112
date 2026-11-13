@@ -1,0 +1,22 @@
+# PR にレビューが書かれたことを、Factory review status（main の定義で動く）に伝えるだけのワークフロー。
+# 書き込みの権限は持たず、何も判定しない。status を付けるのは、workflow_run で起動する factory-review-status.yml（main の定義）だけ。
+# （pull_request_review のワークフローは PR の側の定義で動くので、ここで status を付けると、ワークフローを書き換えた PR が自分で ok にできてしまう）
+name: Factory review trigger
+
+on:
+  pull_request_review:
+    types: [submitted, edited, dismissed]
+
+permissions: {}
+
+jobs:
+  notify:
+    name: factory-review-trigger
+    runs-on: ubuntu-latest
+    steps:
+      # 値は環境変数で渡す（run に直接書くと「 #」以降が YAML のコメントとして読まれ、コマンドが切れた）
+      - name: レビューが書かれたことを記録する
+        env:
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          echo "PR ${PR} にレビューが書かれた"

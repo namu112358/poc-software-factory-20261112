@@ -18,24 +18,38 @@ const input = { taskId: 3, requester: "sato", newDueDate: "2026-11-20", reason: 
 
 describe("validateExtensionInput", () => {
   it("accepts a valid date and a 1-500 character reason (trimmed)", () => {
-    assert.deepEqual(validateExtensionInput({ newDueDate: "2026-11-20", reason: " 理由 " }), {
+    assert.deepEqual(validateExtensionInput({ newDueDate: "2026-11-20", reason: " 理由 " }, "2026-11-10"), {
       ok: true,
       value: { newDueDate: "2026-11-20", reason: "理由" },
     });
-    assert.equal(validateExtensionInput({ newDueDate: "2026-11-20", reason: "a".repeat(500) }).ok, true);
+    assert.equal(validateExtensionInput({ newDueDate: "2026-11-20", reason: "a".repeat(500) }, "2026-11-10").ok, true);
   });
 
   it("rejects bad dates", () => {
     for (const newDueDate of ["2026/11/20", "2026-1-2", "2026-02-30", "2026-13-01", "", 20261120, null, undefined]) {
-      assert.equal(validateExtensionInput({ newDueDate, reason: "x" }).ok, false, String(newDueDate));
+      assert.equal(validateExtensionInput({ newDueDate, reason: "x" }, "2026-11-10").ok, false, String(newDueDate));
     }
   });
 
   it("rejects bad reasons and non-object bodies", () => {
     for (const reason of ["", "  ", "a".repeat(501), 1, null, undefined]) {
-      assert.equal(validateExtensionInput({ newDueDate: "2026-11-20", reason }).ok, false, String(reason));
+      assert.equal(validateExtensionInput({ newDueDate: "2026-11-20", reason }, "2026-11-10").ok, false, String(reason));
     }
-    for (const body of [null, undefined, "x", []]) assert.equal(validateExtensionInput(body).ok, false);
+    for (const body of [null, undefined, "x", []]) assert.equal(validateExtensionInput(body, "2026-11-10").ok, false);
+  });
+});
+
+describe("validateExtensionInput: 今の期限との比べ", () => {
+  const ok = (newDueDate: string, due: string) => validateExtensionInput({ newDueDate, reason: "x" }, due).ok;
+  it("rejects a date before or equal to the current due date, accepts a later one", () => {
+    assert.equal(ok("2026-11-10", "2026-11-20"), false);
+    assert.equal(ok("2026-11-20", "2026-11-20"), false);
+    assert.equal(ok("2026-11-21", "2026-11-20"), true);
+    assert.equal(ok("2027-01-01", "2026-12-31"), true); // 月・年をまたぐ
+  });
+  it("explains what to do", () => {
+    const r = validateExtensionInput({ newDueDate: "2026-11-10", reason: "x" }, "2026-11-20");
+    assert.deepEqual(r, { ok: false, errors: ["希望の期限は、今の期限より後の日付にしてください"] });
   });
 });
 

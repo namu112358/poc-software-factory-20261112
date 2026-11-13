@@ -57,8 +57,10 @@ function isValidDate(value: string): boolean {
   return !Number.isNaN(date.getTime()) && date.toISOString().slice(0, 10) === value;
 }
 
-/** 申請の本文（newDueDate・reason）を検証する。理由は前後の空白を除いて 1〜500 文字。 */
-export function validateExtensionInput(body: unknown): ValidationResult<{ newDueDate: string; reason: string }> {
+export const EXTENSION_NOT_AFTER_MESSAGE = "希望の期限は、今の期限より後の日付にしてください";
+
+/** 申請の本文（newDueDate・reason）を検証する。希望の期限は、タスクの今の期限より後の日付だけ。理由は前後の空白を除いて 1〜500 文字。 */
+export function validateExtensionInput(body: unknown, currentDueDate: string): ValidationResult<{ newDueDate: string; reason: string }> {
   if (typeof body !== "object" || body === null || Array.isArray(body)) {
     return { ok: false, errors: ["リクエストの形式が正しくありません"] };
   }
@@ -66,6 +68,8 @@ export function validateExtensionInput(body: unknown): ValidationResult<{ newDue
   const errors: string[] = [];
   if (typeof b.newDueDate !== "string" || !isValidDate(b.newDueDate)) {
     errors.push("新しい期限は YYYY-MM-DD 形式で入力してください");
+  } else if (b.newDueDate <= currentDueDate) {
+    errors.push(EXTENSION_NOT_AFTER_MESSAGE);
   }
   const reason = typeof b.reason === "string" ? b.reason.trim() : "";
   if (typeof b.reason !== "string" || reason.length < 1 || reason.length > EXTENSION_REASON_MAX_LENGTH) {
