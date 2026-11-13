@@ -25,9 +25,10 @@ type Props = {
 const TASK_LIST_CSS = `@media (max-width:599px){
 .task-list,.task-list thead,.task-list tbody{display:block}
 .task-list thead tr{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
-.task-list tbody tr{display:flex;flex-wrap:wrap;align-items:baseline;gap:2px 12px;padding:8px 0 8px 32px;border-bottom:1px solid #ddd}
+.task-list tbody tr{display:flex;flex-wrap:wrap;align-items:baseline;gap:2px 12px;padding:6px 0 6px 32px;border-bottom:1px solid #ddd}
 .task-list td{display:block;padding:0}
-.task-list td.c-select{flex:0 0 20px;margin-left:-32px;margin-right:-12px}
+.task-list td.c-select{flex:0 0 20px;margin-left:-32px;margin-right:-12px;align-self:center;line-height:0}
+.task-list td.c-select input{display:block}
 .task-list td.c-title{flex:1 1 calc(100% - 44px);min-width:0;overflow-wrap:anywhere}
 .task-list td.c-tags{flex:1 0 100%}
 .task-list td.c-tags:empty,.task-list td.c-created,.task-list td.c-estimate,.task-list td.c-commenters{display:none}
