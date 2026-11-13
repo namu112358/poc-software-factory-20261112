@@ -128,6 +128,45 @@ describe("Bash のフック（承認の画面で止まりやすい形を断る�
     ]) assert.equal(denied(c), false, c);
   });
 
+  it("git diff・log・show・checkout と npm test・run の引数に引用符・バックスラッシュがあれば断る", () => {
+    for (const c of [
+      'git diff "--output=x"',
+      "git diff --out\\put=x",
+      "git log '--output=x'",
+      'git show "HEAD"',
+      'git checkout "claude/x"',
+      "npm run build '--script-shell=sh'",
+      'npm test "--userconfig=x"',
+      "npm run build -- --grep 'a b'",
+      "npm run-script b\\uild",
+    ]) assert.equal(denied(c), true, c);
+    for (const c of ["git diff --stat", "git log --oneline -5", "npm run build -- --foo", "npm test"]) assert.equal(denied(c), false, c);
+  });
+
+  it("npm test・run は、`--` より前の `-` で始まる引数をすべて断る（空白区切り・--prefix・-C を含む）。`npm run <名前>` と `-- <引数>` は通す", () => {
+    for (const c of [
+      "npm run build --userconfig x",
+      "npm test --prefix /tmp/x",
+      "npm run build -C /tmp/x",
+      "npm --prefix /tmp/x run build",
+      "npm t --ignore-scripts",
+      "npm run-script build --silent",
+      "npm run build --foo -- --bar",
+    ]) assert.equal(denied(c), true, c);
+    for (const c of ["npm run build", "npm run build -- --foo", "npm run build -- --userconfig x", "npm test -- --test-name-pattern=x", "npm test 2>&1", "npm run build 2>&1 | tail -3", "npm ci", "npm install"]) assert.equal(denied(c), false, c);
+  });
+
+  it("git checkout claude/<ブランチ> の後ろの引数は、リダイレクトを挟んでも断る。リダイレクトだけなら通す", () => {
+    for (const c of [
+      "git checkout claude/x 2>/dev/null src/a.ts",
+      "git checkout claude/x >/dev/null package.json",
+      "git checkout claude/x 2>&1 src/a.ts",
+      "git -C /x checkout claude/x > /tmp/o src/a.ts",
+      "git checkout claude/x src/a.ts 2>&1",
+    ]) assert.equal(denied(c), true, c);
+    for (const c of ["git checkout claude/x 2>&1", "git checkout claude/x > /tmp/o", "git checkout claude/x 2>/dev/null"]) assert.equal(denied(c), false, c);
+  });
+
   it("フックとして動かすと、断るときだけ deny の JSON を返し、終了コードは 0", () => {
     const run = (command: string, tool = "Bash") =>
       spawnSync(process.execPath, [".claude/hooks/bash-guard.mjs"], { input: JSON.stringify({ tool_name: tool, tool_input: { command } }), encoding: "utf8" });
