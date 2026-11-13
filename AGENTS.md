@@ -39,7 +39,6 @@ GitHub のイベントで起動する Claude Code の Routines（scheduled tasks
 8. SQL に値を埋め込むときは必ずプレースホルダ（`?` / `:name`）を使い、文字列連結で組み立てない。
 9. API Route は最初にログインを確認し、リクエスト本文は `src/lib/` の検証関数（例: `validateTaskInput`）を通してから使う。入力誤りは 400、未ログインは 401、対象が無いときは 404 を返す。
 
-<!-- 共通規約ここから: 正本は skills-poc-20261109 の templates/agents/AGENTS.md。このブロックは直接編集せず、正本を直してから写す。 -->
 ## design-system/
 
 Storybook で部品を作るデザインシステムの見本（本採用は未定）。React + Vite + Tailwind v4、部品は shadcn/ui の作り方（`cva`・`cn`・`data-slot`、振る舞いのある部品は Radix の `radix-ui` を包む）。アプリとは別の npm プロジェクトで、アプリのコードからは使わない。手本の部品は `design-system/src/components/button/`。
@@ -66,6 +65,7 @@ Storybook で部品を作るデザインシステムの見本（本採用は未�
 7. 新しい外部ライブラリは追加しない（アプリの規約 4 の読み替え）。土台で入れた依存（`design-system/package.json`）の範囲で作る。足す必要があれば、`status:blocked-question` を付けて Issue で人に聞く。
 8. 見た目の正は、試作のモックを写したトークンと対応表（`design-system/docs/tokens.md`）。
 
+<!-- 共通規約ここから: 正本は skills-poc-20261109 の templates/agents/AGENTS.md。このブロックは直接編集せず、正本を直してから写す。 -->
 ## 規約
 
 - 応答・ドキュメントは日本語で書く。
