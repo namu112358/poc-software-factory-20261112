@@ -19,6 +19,7 @@ queue_rules:
     queue_conditions:
       - -draft
       - check-success = app-check
+      - check-success = design-system-check
       - check-success = pr-body-check
       - or:
           - label = merge:requested

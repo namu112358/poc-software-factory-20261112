@@ -33,6 +33,8 @@ import {
   mergeCheck,
   reviewStatus,
   ciCheck,
+  CI_CHECKS,
+  combineChecks,
   TRUSTED_ASSOCIATIONS,
   precheck,
   precheckActions,
@@ -268,7 +270,7 @@ async function loadStalled(role: string) {
           const latest = runs.sort((a, b) => (a.started_at < b.started_at ? -1 : 1)).at(-1);
           return !latest ? "none" : latest.status !== "completed" ? "pending" : latest.conclusion === "success" ? "success" : "failure";
         };
-        appCheck = await checkState("app-check");
+        appCheck = combineChecks(await Promise.all(CI_CHECKS.map((name) => checkState(name))));
         bodyCheck = await checkState("pr-body-check");
         reviews = (await getAll<{ body: string | null; submitted_at: string; author_association: string }>(`/repos/${REPO}/pulls/${n}/reviews`))
           .sort((a, b) => (a.submitted_at < b.submitted_at ? -1 : 1))

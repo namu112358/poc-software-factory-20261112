@@ -10,6 +10,7 @@ import {
   mergeCheck,
   reviewStatus,
   ciCheck,
+  combineChecks,
   precheckActions,
   relabelTargets,
   readyBudget,
@@ -458,30 +459,55 @@ describe("ラベルの名前（接頭を付けた名前への切り替え）", (
 describe("キューに入る条件のチェック（ciCheck。#364）", () => {
   const run = (name: string, conclusion: string | null, startedAt = "2026-11-12T18:00:00Z", status = "completed") => ({ name, status, conclusion, startedAt });
 
-  it("app-check と pr-body-check が両方 success なら ok", () => {
-    assert.equal(ciCheck([run("app-check", "success"), run("pr-body-check", "success"), run("Summary", "failure")]).ok, true);
+  const ds = run("design-system-check", "success");
+
+  it("app-check・design-system-check・pr-body-check がすべて success なら ok", () => {
+    assert.equal(ciCheck([run("app-check", "success"), ds, run("pr-body-check", "success"), run("Summary", "failure")]).ok, true);
   });
 
   it("app-check が落ちていれば ok にしない（#364 の形）", () => {
-    const r = ciCheck([run("app-check", "failure"), run("pr-body-check", "success")]);
+    const r = ciCheck([run("app-check", "failure"), ds, run("pr-body-check", "success")]);
     assert.equal(r.ok, false);
     assert.match(r.reason, /app-check が failure/);
   });
 
+  it("design-system-check が落ちている・無いときは ok にしない（.mergify.yml のキューの条件と同じ）", () => {
+    const r = ciCheck([run("app-check", "success"), run("design-system-check", "failure"), run("pr-body-check", "success")]);
+    assert.equal(r.ok, false);
+    assert.match(r.reason, /design-system-check が failure/);
+    assert.match(ciCheck([run("app-check", "success"), run("pr-body-check", "success")]).reason, /design-system-check が無い/);
+  });
+
   it("本文の検査が skipped のまま残っていれば ok にしない（#258 の形）", () => {
-    assert.equal(ciCheck([run("app-check", "success"), run("pr-body-check", "skipped")]).ok, false);
+    assert.equal(ciCheck([run("app-check", "success"), ds, run("pr-body-check", "skipped")]).ok, false);
   });
 
   it("まだ終わっていない・まだ無いチェックがあれば ok にしない", () => {
-    assert.equal(ciCheck([run("app-check", null, "2026-11-12T18:00:00Z", "in_progress"), run("pr-body-check", "success")]).ok, false);
-    assert.equal(ciCheck([run("app-check", "success")]).ok, false);
+    assert.equal(ciCheck([run("app-check", null, "2026-11-12T18:00:00Z", "in_progress"), ds, run("pr-body-check", "success")]).ok, false);
+    assert.equal(ciCheck([run("app-check", "success"), ds]).ok, false);
   });
 
   it("同じ名前のチェックが何度も動いたときは、最後に始まったものを見る", () => {
     const old = run("pr-body-check", "failure", "2026-11-12T17:00:00Z");
     const now = run("pr-body-check", "success", "2026-11-12T18:00:00Z");
-    assert.equal(ciCheck([run("app-check", "success"), now, old]).ok, true);
-    assert.equal(ciCheck([run("app-check", "success"), old, run("pr-body-check", "failure", "2026-11-12T19:00:00Z")]).ok, false);
+    assert.equal(ciCheck([run("app-check", "success"), ds, now, old]).ok, true);
+    assert.equal(ciCheck([run("app-check", "success"), ds, old, run("pr-body-check", "failure", "2026-11-12T19:00:00Z")]).ok, false);
+  });
+});
+
+describe("巡回の CI の状態（combineChecks。app-check と design-system-check をまとめる）", () => {
+  it("どちらかが落ちていれば failure（design-system-check だけが落ちた PR を「CI が通った」と扱わない）", () => {
+    assert.equal(combineChecks(["success", "failure"]), "failure");
+    assert.equal(combineChecks(["failure", "pending"]), "failure");
+  });
+
+  it("落ちたものが無く、動いているものがあれば pending、まだ無いものがあれば none", () => {
+    assert.equal(combineChecks(["success", "pending"]), "pending");
+    assert.equal(combineChecks(["success", "none"]), "none");
+  });
+
+  it("すべて成功なら success", () => {
+    assert.equal(combineChecks(["success", "success"]), "success");
   });
 });
 
