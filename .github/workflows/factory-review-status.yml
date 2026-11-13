@@ -4,44 +4,60 @@
 # - 判定は scripts/factory/claim.ts の review-status（merge-check と同じ判定）。最新のレビューの印 <!-- factory:review verdict=ok ... commit=<SHA> -->
 #   が書き込み権限のある人のもので、SHA が最新のコミット（または、その後が main の取り込みだけのコミット）なら success、
 #   最新のコミットへのレビューが ok でなければ failure、それ以外は付けない。
-# - 判定のスクリプトは main のものを使う（PR の側で判定を書き換えて通すことはできない）。
+# - このワークフローは、必ず main の定義で動くきっかけ（pull_request_target・workflow_run）だけで起動する。PR の側でワークフローや
+#   判定のスクリプトを書き換えても、status は付けられない。PR のコードは実行しない（main を取り出し、PR は git で差分を読むだけ）。
+# - レビューが書かれたときは factory-review-trigger.yml（権限なし）が終わったのをきっかけに動く。
 # - キューが main を取り込むと最新のコミットが変わるので、PR に push があったときも判定し直して引き継ぐ。
 name: Factory review status
 
 on:
-  pull_request_review:
-    types: [submitted, edited, dismissed]
-  pull_request:
+  pull_request_target:
     types: [opened, reopened, synchronize, ready_for_review, labeled, unlabeled]
+  workflow_run:
+    workflows: ["Factory review trigger"]
+    types: [completed]
 
 permissions:
   contents: read
   pull-requests: read
   statuses: write
 
-concurrency:
-  group: factory-review-status-${{ github.event.pull_request.number }}
-  cancel-in-progress: false
-
 jobs:
   status:
     name: factory-review-status
-    # フォークからの PR はトークンが読み取りだけなので動かさない
-    if: github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     steps:
+      - name: 対象の PR を決める
+        id: pr
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          PR_FROM_TARGET: ${{ github.event.pull_request.number }}
+          HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name || github.event.workflow_run.head_repository.full_name }}
+          RUN_HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          # フォークからの PR は対象にしない（このリポジトリのブランチの PR だけ）
+          if [ "$HEAD_REPO" != "$REPO" ]; then echo "フォークの PR は対象にしない"; exit 0; fi
+          pr="$PR_FROM_TARGET"
+          if [ -z "$pr" ]; then
+            pr=$(gh api "repos/$REPO/commits/$RUN_HEAD_SHA/pulls" --jq '[.[] | select(.state == "open")][0].number // empty')
+          fi
+          echo "number=$pr" >> "$GITHUB_OUTPUT"
       - uses: actions/checkout@v4
+        if: steps.pr.outputs.number != ''
         with:
           ref: main
           fetch-depth: 0
       - uses: actions/setup-node@v4
+        if: steps.pr.outputs.number != ''
         with:
           node-version: "22"
       - name: レビューの結果を status にする
+        if: steps.pr.outputs.number != ''
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          PR: ${{ github.event.pull_request.number }}
+          PR: ${{ steps.pr.outputs.number }}
           REPO: ${{ github.repository }}
         run: |
           out=$(node scripts/factory/claim.ts review-status "$PR")
