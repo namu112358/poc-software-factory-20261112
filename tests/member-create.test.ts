@@ -288,7 +288,7 @@ describe("作ったメンバーは、ほかの入口からもすぐに使える"
     const row = listMemberWorkload(db, "2026-11-13").find((m) => m.id === "yamada");
     assert.equal(row?.openCount, 0);
     assert.equal(row?.suspended, false);
-    assert.deepEqual(listUserSummaries(db).find((u) => u.id === "yamada"), { id: "yamada", name: "山田", suspended: false, role: "member" });
+    assert.deepEqual(listUserSummaries(db).find((u) => u.id === "yamada"), { id: "yamada", name: "山田", suspended: false, role: "member", mustChangePassword: true });
   });
 
   it("タスクの担当者にでき、まとめての変更でも担当者にできる", () => {

@@ -10,6 +10,8 @@ import { showAddMemberControl } from "@/lib/member-create";
 import { AddMemberForm } from "./add-member-form";
 import { roleControlFor, roleLabel } from "@/lib/member-role";
 import { RoleButton } from "./role-button";
+import { TEMPORARY_PASSWORD_PENDING_LABEL, showReissueControl } from "@/lib/member-temporary-password";
+import { TemporaryPasswordButton } from "./temporary-password-button";
 
 export const metadata = { title: formatPageTitle("メンバー一覧") };
 
@@ -72,10 +74,22 @@ export default async function MembersPage() {
               </td>
               <td data-testid="member-login">
                 {m.suspended ? "停止中" : "利用中"}
+                {m.mustChangePassword && (
+                  <>
+                    {"、"}
+                    <span data-testid="member-temporary-password-pending">{TEMPORARY_PASSWORD_PENDING_LABEL}</span>
+                  </>
+                )}
                 {showSuspensionControl(viewer, m.id) && (
                   <>
                     {" "}
                     <SuspensionButton memberId={m.id} name={m.name} suspended={m.suspended} />
+                  </>
+                )}
+                {showReissueControl(viewer, m) && (
+                  <>
+                    {" "}
+                    <TemporaryPasswordButton memberId={m.id} name={m.name} />
                   </>
                 )}
               </td>
