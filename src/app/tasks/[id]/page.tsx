@@ -8,6 +8,7 @@ import { listTags, listTagSuggestions } from "@/lib/tags";
 import { PRIORITY_LABELS, RESTORE_DAYS, STATUS_LABELS, formatCompletedAt, formatEstimate, formatJstDateTime, formatTaskNumber, getTask, isDueSoon, isOverdue, parseTaskId, todayInJapan } from "@/lib/tasks";
 import { listAssigneeOptions } from "@/lib/members";
 import { getUser } from "@/lib/users";
+import { backToTaskListHref } from "@/lib/task-list-anchor";
 import { ArchiveButton } from "./archive";
 import { DeleteTaskButton } from "./delete";
 import { DuplicateButton } from "./duplicate";
@@ -47,7 +48,7 @@ export default async function TaskDetailPage({ params }: Props) {
   return (
     <main id="main-content" tabIndex={-1}>
       <p>
-        <a href="/tasks">← タスク一覧へ戻る</a>
+        <a href={backToTaskListHref(task.id)}>← タスク一覧へ戻る</a>
       </p>
       <h1>
         <span data-testid="task-title">{task.title}</span>{" "}

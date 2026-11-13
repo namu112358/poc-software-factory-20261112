@@ -1,4 +1,5 @@
 import { formatPageTitle } from "@/lib/page-title";
+import { taskRowAnchorId } from "@/lib/task-list-anchor";
 import { Fragment } from "react";
 import { bulkSelectionKey } from "@/lib/bulk-select";
 import { listCommentersByTask } from "@/lib/comments";
@@ -222,9 +223,10 @@ export default async function TasksPage({ searchParams }: Props) {
           {tasks.map((task) => (
             <tr
               key={task.id}
+              id={taskRowAnchorId(task.id)}
               data-testid="task-row"
+              style={{ scrollMarginTop: 16, ...(task.status === "done" ? { color: "#8a8a8a" } : {}) }}
               {...taskRowDoneAttr(task.status)}
-              style={task.status === "done" ? { color: "#8a8a8a" } : undefined}
             >
               <td>
                 <BulkCheckbox id={task.id} title={task.title} />
