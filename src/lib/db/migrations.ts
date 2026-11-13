@@ -329,4 +329,17 @@ export const MIGRATIONS: readonly Migration[] = [
       ALTER TABLE sessions ADD COLUMN login_notices_seen_through INTEGER NOT NULL DEFAULT 0;
     `,
   },
+  {
+    version: 27,
+    name: "locks_since_login",
+    sql: `
+      -- 前回のログインのあとに、その利用者の ID でログインがロックされた回数と、最後にロックされた日時（ISO 8601（UTC））。
+      -- ロックをかけたとき（続けて誤った回数が上限に達したとき）に増やし、ログインに成功したら 0 と NULL に戻す。
+      ALTER TABLE users ADD COLUMN locks_since_login INTEGER NOT NULL DEFAULT 0;
+      ALTER TABLE users ADD COLUMN last_locked_at TEXT;
+      -- ログインした時点で、前回のログインのあとにロックされた回数と最後の日時。ログイン後に知らせる。既存のセッションは 0（知らせない）。
+      ALTER TABLE sessions ADD COLUMN locks_before INTEGER NOT NULL DEFAULT 0;
+      ALTER TABLE sessions ADD COLUMN last_locked_at_before TEXT;
+    `,
+  },
 ];
