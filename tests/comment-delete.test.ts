@@ -32,7 +32,7 @@ describe("commentPreview", () => {
 describe("deleteCommentConfirmMessage", () => {
   it("確かめの文言とコメントの先頭が入る", () => {
     const m = deleteCommentConfirmMessage("先方と決めた納期");
-    assert.ok(m.includes("このコメントを削除します。元に戻せません。よろしいですか？"));
+    assert.ok(m.includes("このコメントを削除します。削除してから 30 日のあいだは元に戻せます。よろしいですか？"));
     assert.ok(m.includes("先方と決めた納期"));
   });
 });

@@ -1,8 +1,8 @@
 "use client";
-// コメントの投稿フォームと削除ボタン。操作のあと、サーバー側の一覧を読み直す。
+// コメントの投稿フォーム・編集・削除・元に戻すボタン。操作のあと、サーバー側の一覧を読み直す。
 import { useRouter } from "next/navigation";
 import { useState, type FormEvent } from "react";
-import { confirmAndDeleteComment } from "@/lib/comment-delete";
+import { confirmAndDeleteComment, requestRestoreComment } from "@/lib/comment-delete";
 
 export function CommentForm({ taskId }: { taskId: number }) {
   const router = useRouter();
@@ -130,5 +130,29 @@ export function EditCommentForm({ taskId, commentId, body }: { taskId: number; c
         やめる
       </button>
     </form>
+  );
+}
+
+export function RestoreCommentButton({ taskId, commentId }: { taskId: number; commentId: number }) {
+  const router = useRouter();
+  const [error, setError] = useState<string>();
+  const [pending, setPending] = useState(false);
+
+  async function onClick() {
+    setPending(true);
+    setError(undefined);
+    const result = await requestRestoreComment(taskId, commentId, (url, init) => fetch(url, init));
+    setPending(false);
+    if (result.status === "error") setError(result.message);
+    else router.refresh();
+  }
+
+  return (
+    <>
+      <button type="button" onClick={onClick} disabled={pending}>
+        元に戻す
+      </button>
+      {error && <span role="alert"> {error}</span>}
+    </>
   );
 }

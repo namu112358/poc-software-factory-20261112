@@ -1,4 +1,5 @@
 import { getDb, type Db } from "./db/index.ts";
+import { restoreCutoff, restoreDeadline } from "./task-store.ts";
 import type { ValidationResult } from "./tasks.ts";
 
 export type Comment = {
@@ -21,8 +22,10 @@ type CommentRow = {
   edited_at: string | null;
 };
 
-const SELECT =
+const COLUMNS =
   "SELECT c.id, c.task_id, c.author, u.name AS author_name, c.body, c.created_at, c.edited_at FROM comments c JOIN users u ON u.id = c.author";
+// 削除していないコメントだけ。一覧・検索・編集の対象はこれ。
+const SELECT = `${COLUMNS} WHERE c.deleted_at IS NULL`;
 
 function toComment(row: CommentRow): Comment {
   return {
@@ -52,14 +55,15 @@ export function validateCommentInput(body: unknown): ValidationResult<{ body: st
   return { ok: true, value: { body: trimmed } };
 }
 
-/** タスクのコメントを投稿の古い順に返す。 */
+/** タスクのコメント（削除したものを除く）を投稿の古い順に返す。 */
 export function listComments(taskId: number, db: Db = getDb()): Comment[] {
-  const rows = db.prepare(`${SELECT} WHERE c.task_id = ? ORDER BY c.id`).all(taskId) as CommentRow[];
+  const rows = db.prepare(`${SELECT} AND c.task_id = ? ORDER BY c.created_at, c.id`).all(taskId) as CommentRow[];
   return rows.map(toComment);
 }
 
+/** 削除していないコメントを 1 件返す。削除したコメントは undefined。 */
 export function getComment(id: number, db: Db = getDb()): Comment | undefined {
-  const row = db.prepare(`${SELECT} WHERE c.id = ?`).get(id) as CommentRow | undefined;
+  const row = db.prepare(`${SELECT} AND c.id = ?`).get(id) as CommentRow | undefined;
   return row && toComment(row);
 }
 
@@ -76,13 +80,83 @@ export function createComment(
 
 export type DeleteResult = "deleted" | "not_found" | "forbidden";
 
-/** コメントを削除する。投稿者本人だけが削除できる。 */
-export function deleteComment(taskId: number, commentId: number, userId: string, db: Db = getDb()): DeleteResult {
+/**
+ * コメントを削除する。投稿者本人だけが削除できる。行は残して削除した日時を記録し、一覧・検索から見えなくする
+ * （RESTORE_DAYS 日のあいだは `restoreComment` で戻せる）。削除済みのコメントをもう一度消そうとすると not_found。
+ * 判定と書き込みを 1 つの文で行い、読んでから書くまでにほかの操作が入っても、他人のコメントを消さない。
+ */
+export function deleteComment(
+  taskId: number,
+  commentId: number,
+  userId: string,
+  db: Db = getDb(),
+  now: Date = new Date(),
+): DeleteResult {
+  const { changes } = db
+    .prepare("UPDATE comments SET deleted_at = ? WHERE id = ? AND task_id = ? AND author = ? AND deleted_at IS NULL")
+    .run(now.toISOString(), commentId, taskId, userId);
+  if (Number(changes) > 0) return "deleted";
   const comment = getComment(commentId, db);
   if (!comment || comment.taskId !== taskId) return "not_found";
-  if (comment.author !== userId) return "forbidden";
-  db.prepare("DELETE FROM comments WHERE id = ?").run(commentId);
-  return "deleted";
+  return "forbidden";
+}
+
+export type DeletedComment = {
+  id: number;
+  taskId: number;
+  author: string; // 書いた人の ID（元に戻せるのはこの人だけ）
+  authorName: string;
+  body: string;
+  createdAt: string; // ISO 8601（UTC）
+  deletedAt: string; // ISO 8601（UTC）
+  restoreDeadline: string; // 元に戻せる最後の時刻。ISO 8601（UTC）
+};
+
+/** `now` の時点で元に戻せる（削除してから RESTORE_DAYS 日たっていない）、タスクの削除したコメント。削除した日時の新しい順（同じなら ID の大きい順）。 */
+export function listDeletedComments(taskId: number, db: Db = getDb(), now: Date = new Date()): DeletedComment[] {
+  const rows = db
+    .prepare(
+      `SELECT c.id, c.task_id, c.author, u.name AS author_name, c.body, c.created_at, c.deleted_at
+         FROM comments c JOIN users u ON u.id = c.author
+        WHERE c.task_id = ? AND c.deleted_at IS NOT NULL AND c.deleted_at > ?
+        ORDER BY c.deleted_at DESC, c.id DESC`,
+    )
+    .all(taskId, restoreCutoff(now)) as (Omit<CommentRow, "edited_at"> & { deleted_at: string })[];
+  return rows.map((r) => ({
+    id: r.id,
+    taskId: r.task_id,
+    author: r.author,
+    authorName: r.author_name,
+    body: r.body,
+    createdAt: r.created_at,
+    deletedAt: r.deleted_at,
+    restoreDeadline: restoreDeadline(r.deleted_at),
+  }));
+}
+
+export type RestoreCommentResult = { status: "restored"; comment: Comment } | { status: "not_found" } | { status: "forbidden" };
+
+/**
+ * 削除したコメントを元に戻す。戻せるのは、削除してから RESTORE_DAYS 日たっていないコメントを書いた本人だけ。
+ * 削除していない・期間を過ぎた・別のタスクの・存在しないコメントは not_found。戻したコメントは、本文・書いた日時・編集した日時が削除の前のまま。
+ * 期間と本人の確認と書き込みは 1 つの UPDATE 文の条件で行う。
+ */
+export function restoreComment(
+  taskId: number,
+  commentId: number,
+  userId: string,
+  db: Db = getDb(),
+  now: Date = new Date(),
+): RestoreCommentResult {
+  const cutoff = restoreCutoff(now);
+  const { changes } = db
+    .prepare("UPDATE comments SET deleted_at = NULL WHERE id = ? AND task_id = ? AND author = ? AND deleted_at IS NOT NULL AND deleted_at > ?")
+    .run(commentId, taskId, userId, cutoff);
+  if (Number(changes) > 0) return { status: "restored", comment: getComment(commentId, db)! };
+  const restorable = db
+    .prepare("SELECT 1 FROM comments WHERE id = ? AND task_id = ? AND deleted_at IS NOT NULL AND deleted_at > ?")
+    .get(commentId, taskId, cutoff);
+  return restorable ? { status: "forbidden" } : { status: "not_found" };
 }
 
 export type UpdateCommentResult =
@@ -106,7 +180,7 @@ export function updateComment(
   // 判定と書き込みを 1 つの文で行い、読んでから書くまでに削除などが入っても、他人のコメントを書き換えない。
   const { changes } = db
     .prepare(
-      "UPDATE comments SET edited_at = CASE WHEN body = :body THEN edited_at ELSE :now END, body = :body WHERE id = :id AND task_id = :taskId AND author = :userId",
+      "UPDATE comments SET edited_at = CASE WHEN body = :body THEN edited_at ELSE :now END, body = :body WHERE id = :id AND task_id = :taskId AND author = :userId AND deleted_at IS NULL",
     )
     .run({ body, now: now.toISOString(), id: commentId, taskId, userId });
   if (Number(changes) === 0) {
@@ -122,14 +196,14 @@ export function commentEditedLabel(comment: Pick<Comment, "editedAt">): string {
   return comment.editedAt === null ? "" : "（編集済み）";
 }
 
-/** 複数のタスクについて、コメントした人の名前を、最初にコメントした古い順・重複なしでまとめて返す。コメントの無いタスクは含まない。 */
+/** 複数のタスクについて、コメントした人の名前を、最初にコメントした古い順・重複なしでまとめて返す。削除したコメントは数えない。コメントの無いタスクは含まない。 */
 export function listCommentersByTask(taskIds: number[], db: Db = getDb()): Map<number, string[]> {
   const result = new Map<number, string[]>();
   if (taskIds.length === 0) return result;
   const placeholders = taskIds.map(() => "?").join(", ");
   const rows = db
     .prepare(
-      `SELECT c.task_id, u.name FROM comments c JOIN users u ON u.id = c.author WHERE c.task_id IN (${placeholders}) GROUP BY c.task_id, c.author ORDER BY MIN(c.id)`,
+      `SELECT c.task_id, u.name FROM comments c JOIN users u ON u.id = c.author WHERE c.deleted_at IS NULL AND c.task_id IN (${placeholders}) GROUP BY c.task_id, c.author ORDER BY MIN(c.id)`,
     )
     .all(...taskIds) as { task_id: number; name: string }[];
   for (const r of rows) {

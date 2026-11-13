@@ -283,4 +283,13 @@ export const MIGRATIONS: readonly Migration[] = [
       UPDATE users SET role = 'coordinator' WHERE id = 'tanaka';
     `,
   },
+  {
+    version: 24,
+    name: "comment_soft_delete",
+    sql: `
+      -- コメントを削除した日時。ISO 8601（UTC）。削除していなければ NULL（既存のコメントは NULL から始まる）。
+      -- 削除したコメントは行を残したまま一覧・検索から見えなくし、一定の期間のうちは書いた本人が元に戻せる。
+      ALTER TABLE comments ADD COLUMN deleted_at TEXT;
+    `,
+  },
 ];
