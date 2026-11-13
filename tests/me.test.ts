@@ -12,7 +12,7 @@ describe("GET /api/me の応答", () => {
     const db = openDb();
     const user = getSessionUser(createSession("sato", db, now), db, now);
     assert.ok(user);
-    assert.deepEqual(toMeResponse(user), { user: { id: "sato", name: "佐藤" } });
+    assert.deepEqual(toMeResponse(user), { user: { id: "sato", name: "佐藤" }, loginNotice: null });
   });
 
   it("パスワードのハッシュやトークンが混ざっていても、id と name 以外は返さない", () => {
@@ -21,7 +21,7 @@ describe("GET /api/me の応答", () => {
     const row = db.prepare("SELECT id, name, password_hash FROM users WHERE id = 'sato'").get() as Record<string, string>;
     const leaky = { ...row, token } as unknown as User;
     const body = toMeResponse(leaky);
-    assert.deepEqual(Object.keys(body), ["user"]);
+    assert.deepEqual(Object.keys(body), ["user", "loginNotice"]);
     assert.deepEqual(Object.keys(body.user).sort(), ["id", "name"]);
     const text = JSON.stringify(body);
     assert.ok(!text.includes(row.password_hash));

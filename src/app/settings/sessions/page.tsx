@@ -2,6 +2,7 @@ import { formatPageTitle } from "@/lib/page-title";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { SESSION_COOKIE } from "@/lib/auth";
+import { acknowledgeAllLoginNotices } from "@/lib/login-notices";
 import { formatLastUsedAt, formatLoggedInAt, listDeviceSessions } from "@/lib/device-sessions";
 import { requireUser } from "@/lib/session";
 import { RevokeDeviceButton } from "./revoke";
@@ -13,6 +14,8 @@ export default async function SessionsPage() {
   const store = await cookies();
   const sessions = listDeviceSessions(store.get(SESSION_COOKIE)?.value);
   if (!sessions) redirect("/login");
+  // この画面を開いたら、ほかの端末での新しいログインの知らせは確かめた扱いにする（#478）。
+  acknowledgeAllLoginNotices(store.get(SESSION_COOKIE)?.value);
   return (
     <main id="main-content" tabIndex={-1}>
       <h1>ログイン中の端末</h1>

@@ -308,4 +308,25 @@ export const MIGRATIONS: readonly Migration[] = [
       CREATE INDEX comment_revisions_comment ON comment_revisions(comment_id);
     `,
   },
+  {
+    version: 26,
+    name: "login_events",
+    sql: `
+      -- ログインに成功した記録。成功 1 回につき 1 行。ログイン中のほかの端末に「新しいログインがあった」と知らせるのに使う。
+      -- セッション（端末）がログアウト・切られても記録は残す。利用者を消すと一緒に消える。
+      -- logged_in_at は ISO 8601（UTC）。user_agent は保存した User-Agent（無ければ NULL）。
+      -- failed_logins_before は、そのログインの前（1 つ前のログインのあと）にパスワードを誤ったログインの回数。
+      CREATE TABLE login_events (
+        id                   INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id              TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        logged_in_at         TEXT NOT NULL,
+        user_agent           TEXT,
+        failed_logins_before INTEGER NOT NULL DEFAULT 0
+      );
+      CREATE INDEX login_events_user ON login_events(user_id, id);
+      -- そのセッションで、どのログインの記録（login_events.id）までを確かめたか。これより後の記録を知らせる。
+      -- 作ったときは、その時点の自分の最新の記録（自分のログインを含む）にする。既存のセッションは 0（記録は空から始まる）。
+      ALTER TABLE sessions ADD COLUMN login_notices_seen_through INTEGER NOT NULL DEFAULT 0;
+    `,
+  },
 ];

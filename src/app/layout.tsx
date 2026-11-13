@@ -2,7 +2,9 @@ import type { ReactNode } from "react";
 import { APP_TITLE } from "@/lib/page-title";
 import { HEADER_NAV_LINKS } from "@/lib/nav";
 import { formatFailedLoginNotice, formatPreviousLogin } from "@/lib/auth";
-import { getCurrentFailedLoginsBefore, getCurrentPreviousLogin, getCurrentUser } from "@/lib/session";
+import { formatLoginNotice } from "@/lib/login-notices";
+import { getCurrentFailedLoginsBefore, getCurrentLoginNotice, getCurrentPreviousLogin, getCurrentUser } from "@/lib/session";
+import { LoginNoticeBanner } from "./login-notice";
 
 export const metadata = { title: `PoC ${APP_TITLE}` };
 
@@ -13,6 +15,7 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
   const user = await getCurrentUser();
   const previousLogin = user ? await getCurrentPreviousLogin() : undefined;
   const failedLoginNotice = user ? formatFailedLoginNotice(await getCurrentFailedLoginsBefore()) : undefined;
+  const loginNotice = user ? await getCurrentLoginNotice() : undefined;
   return (
     <html lang="ja">
       <body style={{ fontFamily: "system-ui, sans-serif", margin: 24 }}>
@@ -59,6 +62,7 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
             {failedLoginNotice}
           </p>
         )}
+        {user && loginNotice && <LoginNoticeBanner throughId={loginNotice.throughId} lines={formatLoginNotice(loginNotice)} />}
         {children}
       </body>
     </html>

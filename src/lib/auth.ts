@@ -36,6 +36,7 @@ export type LoginResult =
  * 作ったセッションには、ログインした日時（now）と User-Agent を記録する（ログイン中の端末の一覧で使う）。
  * パスワードの誤りとロック中の試行は、その ID の利用者の「前回のログインのあとの失敗の回数」に数える。
  * 成功したら、その回数をセッションに写して 0 に戻す（ログイン後に知らせる）。
+ * 成功したら、ログインの記録（login_events）も 1 行残す（ログイン中のほかの端末に知らせる。login-notices.ts）。
  */
 export function login(
   userId: unknown,
@@ -69,6 +70,10 @@ export function login(
       now.toISOString(),
       user.id,
     );
+    // ログインの記録は、セッションを作る前に残す（作ったセッションが自分のログインを「確かめた」扱いにするため）。
+    db.prepare(
+      "INSERT INTO login_events (user_id, logged_in_at, user_agent, failed_logins_before) VALUES (?, ?, ?, ?)",
+    ).run(user.id, now.toISOString(), normalizeUserAgent(userAgent), row?.failed_logins_since_login ?? 0);
     return createSession(
       user.id,
       db,
@@ -91,8 +96,10 @@ export function createSession(
 ): string {
   const token = randomBytes(32).toString("hex");
   const expiresAt = new Date(now.getTime() + SESSION_TTL_MS).toISOString();
+  // その時点までの自分のログインの記録は、このセッションには知らせない（自分より前のログインは知らせない）。
   db.prepare(
-    "INSERT INTO sessions (token, user_id, expires_at, previous_login_at, created_at, last_used_at, user_agent, device_id, failed_logins_before) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+    `INSERT INTO sessions (token, user_id, expires_at, previous_login_at, created_at, last_used_at, user_agent, device_id, failed_logins_before, login_notices_seen_through)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, (SELECT COALESCE(MAX(id), 0) FROM login_events WHERE user_id = ?))`,
   ).run(
     token,
     userId,
@@ -103,6 +110,7 @@ export function createSession(
     normalizeUserAgent(userAgent),
     newDeviceId(),
     failedLoginsBefore,
+    userId,
   );
   return token;
 }
