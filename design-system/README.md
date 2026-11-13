@@ -2,6 +2,8 @@
 
 業務アプリの画面で使う部品を、Storybook で見ながら作るためのライブラリです。本採用は決まっておらず、Software Factory の PoC で部品を作らせる見本として置いています。タスク管理アプリ（リポジトリの直下）とは別の npm プロジェクトです。
 
+公開先: https://namu112358.github.io/poc-software-factory-20261112/ （`main` の Storybook。マージの後、数分で更新される）
+
 ## 使い方
 
 ```bash
