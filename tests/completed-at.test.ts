@@ -70,12 +70,11 @@ describe("完了日時: 1 件の更新", () => {
     assert.equal(updateTask(2, { title: "ログイン画面のデザイン（改）" }, db)!.completedAt, null);
   });
 
-  it("本文の completedAt は検証で捨てられ、利用者が完了日時を書き換えられない", () => {
+  it("本文に completedAt があれば検証で誤りになり、利用者が完了日時を書き換えられない（#527）", () => {
     const db = openDb();
     const r = validateTaskInput({ memo: "x", completedAt: "2000-01-01T00:00:00.000Z" }, { partial: true }, db);
-    assert.ok(r.ok);
-    assert.ok(r.ok && !("completedAt" in r.value));
-    assert.equal(updateTask(2, r.ok ? r.value : {}, db)!.completedAt, null);
+    assert.deepEqual(r, { ok: false, errors: ["completedAt はサーバーが付ける項目のため、送れません"] });
+    assert.equal(getTask(2, db)!.completedAt, null);
   });
 });
 
