@@ -633,6 +633,11 @@ export const HUMAN_GATE_PATHS = [
   "scripts/factory/claim.ts",
   ".claude/routines/review.md",
   ".claude/routines/README.md",
+  // Routine・エージェントの権限と、毎回自動で動く処理（自分で権限を広げられる変更。AGENTS.md の「セキュリティ上重要な設定の変更」）
+  ".claude/settings.json",
+  ".claude/settings.local.json",
+  ".claude/hooks/",
+  ".mcp.json",
 ];
 
 export const touchesHumanGate = (files: string[]): string[] => matchPaths(files, HUMAN_GATE_PATHS);
@@ -701,6 +706,7 @@ export function gateAuditStatus(headSha: string, ctx: GateContext | undefined): 
   const first = latestOkReview(headSha, ctx);
   if (!audit.session) return { state: null, description: "監査のレビューにセッションの行が無いので、別のセッションか確かめられない。人が確かめる。" };
   if (!first?.session) return { state: null, description: "1 回目のレビューにセッションの行が無いので、監査が別のセッションか確かめられない。人が確かめる。" };
+  if (ctx.authorSessions.length === 0) return { state: null, description: "PR を出したセッションが PR 本文・コミットから読めないので、監査が別のセッションか確かめられない。人が確かめる。" };
   if (audit.session === first.session || ctx.authorSessions.includes(audit.session))
     return { state: null, description: "監査が 1 回目のレビュー・PR を出したセッションと同じなので数えない。別のセッションの監査を待つ。" };
   return { state: "success", description: "1 回目のレビューが ok で、別のセッションのゲートの監査も ok。" };

@@ -819,10 +819,12 @@ describe("ゲートの監査（gate-review。台帳 #123 の E27）", () => {
     assert.equal(status([rv("ok", "session_R1"), au("ok", "session_AUTH")]).state, null);
     assert.equal(status([rv("ok", "session_R1"), au("ok", null)]).state, null);
     assert.equal(status([rv("ok", null), au("ok", "session_A1")]).state, null);
+    // PR を出したセッションが読めなければ、別のセッションか確かめられないので付けない
+    assert.equal(status([rv("ok", "session_R1"), au("ok", "session_A1")], AUDIT_FILES, [], { authorSessions: [] }).state, null);
   });
   it("reviewStatus: 人が見るパス（.github・Mergify・Ruleset・監査の仕組み自身の 4 ファイル）を含めば、監査が ok でも付けない", () => {
     const marks = [rv("ok", "session_R1"), au("ok", "session_A1")];
-    for (const f of [".github/workflows/ci.yml", ".mergify.yml", ".mergify/x.yml", "docs/rulesets/main.json", "scripts/factory/claim-core.ts", "scripts/factory/claim.ts", ".claude/routines/review.md", ".claude/routines/README.md"]) {
+    for (const f of [".github/workflows/ci.yml", ".mergify.yml", ".mergify/x.yml", "docs/rulesets/main.json", "scripts/factory/claim-core.ts", "scripts/factory/claim.ts", ".claude/routines/review.md", ".claude/routines/README.md", ".claude/settings.json", ".claude/settings.local.json", ".claude/hooks/x.sh", ".mcp.json"]) {
       assert.equal(status(marks, [...AUDIT_FILES, f]).state, null, f);
     }
     // ほかのスクリプト・手順書・規約・設定は、監査で通る
