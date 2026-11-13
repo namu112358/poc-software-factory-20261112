@@ -12,6 +12,18 @@ function stripQuotes(s) {
   return s.replace(/'[^']*'/g, "''").replace(/"(?:\\.|[^"\\])*"/g, '""');
 }
 
+/** `rm` に、再帰（-r・-R・--recursive）と強制（-f・--force）の両方が付いているか（並びと書き方を問わない） */
+function isRecursiveForceRm(head) {
+  for (const m of head.matchAll(/(?:^|[\s;&|(])rm((?:\s+-{1,2}[a-zA-Z-]+)+)/g)) {
+    const flags = m[1].trim().split(/\s+/);
+    const short = flags.filter((f) => /^-[a-zA-Z]+$/.test(f)).join("");
+    const recursive = /[rR]/.test(short) || flags.includes("--recursive");
+    const force = /f/.test(short) || flags.includes("--force");
+    if (recursive && force) return true;
+  }
+  return false;
+}
+
 const HINT = "1 コマンドずつに分けて実行してください。git は `git -C <ディレクトリ>` かフルパスで実行し、`cd` とつながないでください。";
 
 /**
@@ -28,16 +40,22 @@ export function check(command) {
     return { deny: true, reason: `ヒアドキュメントで python・node にスクリプトを流す形は、承認の画面で止まりやすいので実行しません。スクリプトをファイルに書いてから \`python3 <ファイル>\` で実行してください。${HINT}` };
   }
 
+  // `bash -c '...'`・`sh -c "..."` の中身も、同じ決まりで見る（引用符を消す前に取り出す）
+  for (const m of (hasHeredoc ? firstLine : cmd).matchAll(/(?:^|[\s;&|(])(?:bash|sh|zsh)\s+(?:-[a-zA-Z]*\s+)*-[a-zA-Z]*c\s+(?:'([^']*)'|"((?:\\.|[^"\\])*)")/g)) {
+    const inner = check(m[1] ?? m[2] ?? "");
+    if (inner.deny) return inner;
+  }
+
   // ヒアドキュメントの本文は判定しない（本文の ; などで断らない）。それ以外は全体を見る
   const head = stripQuotes(hasHeredoc ? firstLine : cmd);
 
-  if (/(^|[\s;&|(])rm\s+(-[a-zA-Z]*r[a-zA-Z]*f|-[a-zA-Z]*f[a-zA-Z]*r|-r\s+-f|-f\s+-r)\b/.test(head)) {
+  if (isRecursiveForceRm(head)) {
     return { deny: true, reason: `\`rm -rf\` は実行しません。消すファイルを 1 つずつ確かめてから \`rm <ファイル>\` で消すか、人に頼んでください。${HINT}` };
   }
 
-  // 手元の変更を捨てる形（`git checkout ... -- <パス>`・`git checkout .`・`git restore`）。許可の `git checkout claude/*` に紛れないように
-  if (/(^|[\s;&|(])git\s+(checkout\s+(.*\s)?(--(\s|$)|\.(\s|$))|restore(\s|$))/.test(head)) {
-    return { deny: true, reason: `手元の変更を捨てる形（\`git checkout -- <パス>\`・\`git checkout .\`・\`git restore\`）は実行しません。捨ててよいか確かめてから、人に頼んでください。${HINT}` };
+  // 手元の変更を捨てる形（`git checkout ... -- <パス>`・`git checkout .`・`git restore`・`git reset --hard`・`git clean -f`）。許可の `git checkout claude/*` に紛れないように
+  if (/(^|[\s;&|(])git\s+(checkout\s+(.*\s)?(--(\s|$)|\.(\s|$))|restore(\s|$)|reset\s+(.*\s)?--hard\b|clean\s+(.*\s)?(-[a-zA-Z]*f[a-zA-Z]*|--force)(\s|$))/.test(head)) {
+    return { deny: true, reason: `手元の変更を捨てる形（\`git checkout -- <パス>\`・\`git checkout .\`・\`git restore\`・\`git reset --hard\`・\`git clean -f\`）は実行しません。捨ててよいか確かめてから、人に頼んでください。${HINT}` };
   }
 
   // git を含み、`&&`・`||`・`;`・改行でほかのコマンドとつないでいる

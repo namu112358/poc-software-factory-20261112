@@ -27,6 +27,21 @@ describe("Bash のフック（承認の画面で止まりやすい形を断る�
     for (const c of ["git checkout claude/issue-1", "git checkout -b claude/kaizen-x", "git checkout main"]) assert.equal(denied(c), false, c);
   });
 
+  it("rm の再帰と強制は、書き方を問わず断る（-Rf・--recursive --force・-r --force）。-f だけ・-r だけは通す", () => {
+    for (const c of ["rm -Rf x", "rm --recursive --force x", "rm -r --force x", "rm --force -R x"]) assert.equal(denied(c), true, c);
+    for (const c of ["rm -f x", "rm -r emptydir"]) assert.equal(denied(c), false, c);
+  });
+
+  it("git reset --hard・git clean -f も、手元の変更を捨てる形として断る。git reset（--hard なし）・git clean -n は通す", () => {
+    for (const c of ["git reset --hard", "git reset --hard origin/main", "git clean -f", "git clean -fd", "git clean --force"]) assert.equal(denied(c), true, c);
+    for (const c of ["git reset HEAD~1", "git clean -n", "git clean -nd"]) assert.equal(denied(c), false, c);
+  });
+
+  it("bash -c・sh -c の中身も同じ決まりで見る", () => {
+    for (const c of ['bash -c "cd x && git status"', "sh -c 'git add . ; git commit -m x'", 'bash -lc "cd x && git log"', "bash -c 'rm -rf x'"]) assert.equal(denied(c), true, c);
+    for (const c of ['bash -c "npm test"', "sh -c 'git status'"]) assert.equal(denied(c), false, c);
+  });
+
   it("ヒアドキュメントで python・node に流す形は断る", () => {
     for (const c of ["python3 - <<'EOF'\nprint(1)\nEOF", "node <<EOF\nconsole.log(1)\nEOF", "cat <<'EOF' | python3\nprint(1)\nEOF"]) assert.equal(denied(c), true, c);
   });
