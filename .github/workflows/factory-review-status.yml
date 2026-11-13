@@ -1,5 +1,5 @@
 # レビューの Routine の結果を、PR の最新のコミットの status（context=factory-review）にする。
-# Mergify は、risk:high の付いていない PR を「factory-review が success・app-check・pr-body-check が成功・draft でない」でキューに入れる
+# Mergify は、risk:high の付いていない PR を「factory-review が success・app-check・design-system-check・pr-body-check が成功・draft でない」でキューに入れる
 # （merge:requested を人が付けなくてよい。risk:high の PR は今までどおり人が merge:requested を付ける）。
 # - 判定は scripts/factory/claim.ts の review-status（merge-check と同じ判定）。最新のレビューの印 <!-- factory:review verdict=ok ... commit=<SHA> -->
 #   が書き込み権限のある人のもので、SHA が最新のコミット（または、その後が main の取り込みだけのコミット）なら success、
