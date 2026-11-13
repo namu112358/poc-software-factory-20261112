@@ -382,4 +382,13 @@ export const MIGRATIONS: readonly Migration[] = [
       );
     `,
   },
+  {
+    version: 30,
+    name: "must_change_password",
+    sql: `
+      -- 仮のパスワードのままか（1: 本人が自分のパスワードに変えるまで、ほかの画面と API を使えない。0: ふつう）。#523
+      -- 取りまとめる人がアカウントを作ったときに 1 にし、本人がパスワードを変えたら 0 に戻す。既存の利用者は 0 から始まる。
+      ALTER TABLE users ADD COLUMN must_change_password INTEGER NOT NULL DEFAULT 0 CHECK (must_change_password IN (0, 1));
+    `,
+  },
 ];

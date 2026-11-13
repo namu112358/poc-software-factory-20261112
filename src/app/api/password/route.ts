@@ -1,12 +1,14 @@
 // POST /api/password — ログイン中の本人のパスワードを変える（{ currentPassword, newPassword }）。
 // 変えると、同じ利用者のほかのセッションはすべて無効になり、今のセッションだけが残る。
+// 仮のパスワードの利用者（#523）は、仮のパスワードを currentPassword にして変える。変えると、ほかの画面と API が使えるようになる。
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 import { jsonError, readJson, requireApiUser } from "@/lib/api";
 import { SESSION_COOKIE, changePassword, validatePasswordChangeInput } from "@/lib/auth";
 
 export async function POST(request: Request) {
-  const user = await requireApiUser();
+  // 仮のパスワードの間（#523）も、この API だけは使える。
+  const user = await requireApiUser({ allowPasswordChangePending: true });
   if (user instanceof NextResponse) return user;
   const token = (await cookies()).get(SESSION_COOKIE)?.value;
   if (!token) return jsonError(401, "ログインしてください");
