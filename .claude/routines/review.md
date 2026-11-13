@@ -4,22 +4,16 @@ PR が Ready for review になったときに起動します。実装した役�
 
 ## 1. 起動してよいかを確かめる
 
-最初に `node scripts/factory/claim.ts review-mode <PR>` を実行する。`mode` が `stop` なら何もせず終える。`gate-review` なら下の「ゲートの監査」だけを行う。`review` なら次へ進む。あわせて、次のどれかに当たれば何もせずに終える。
-
-- PR が閉じている、draft である。
-- head のブランチが `claude/` で始まらない。
-- PR に `status:needs-human` が付いている。
-- PR の最新のコミットに対するレビュー（`<!-- factory:review ... commit=<最新のコミット> -->`）が、もうある（同じ版を二度レビューしない）。
-- 最新の `verdict=ok` のレビューの後に入ったコミットが、すべて「取り込みだけのコミット」（`README.md` の「どの役にも共通の決まり」）である（中身は変わっていない）。
+`node scripts/factory/claim.ts gate --role review --number <番号>` を実行し、`decision` が `stop` なら何もせずに終える。`gate-review` なら、下の「ゲートの監査」だけを行う。`go` で `light` が `true` なら、次の「軽い再レビュー」だけを行う。
 
 ### 軽い再レビュー
 
-前回のレビューが `verdict=ok` で、その後に PR に入ったコミットが「`main` の取り込み（マージのコミット）」と、その衝突の解消だけなら、2 段の確かめはせず、次だけを行う。
+前回のレビューが `verdict=ok` で、その後に PR に入ったコミットが「`main` の取り込み（マージのコミット）」と、その衝突の解消だけのとき（`light`）は、2 段の確かめはせず、次だけを行う。
 
 - 衝突を解消した箇所（マージのコミットで、`main` の側とも PR の側とも違う行）を読み、両方の変更の意図が残っているかを見る。
-- `npm run typecheck`・`npm test`・`npm run build` が通るかを見る。
+- `npm run typecheck`・`npm test`・`npm run build` が通るかを見る（`design-system/` を変えた PR は、`design-system/` でも `npm run typecheck`・`npm run lint`・`npm test`・`npm run build`）。
 
-問題が無ければ verdict=ok にする（コメントに「軽い再レビュー」と書く）。少しでも PR の側の変更（機能の変更）が入っていれば、通常のレビューをする。
+問題が無ければ verdict=ok にする（コメントに「軽い再レビュー」と書く）。
 
 ## 2. 確かめる
 
@@ -27,10 +21,11 @@ PR が `Closes #<番号>` で参照する Issue を読み、次の 2 段を順�
 
 1. **要件の照合**: Issue の受入条件を 1 つずつ取り上げ、満たしているかを、コードとテストを読んで判定する。判定ごとに根拠（ファイルと行、テストの名前）を書く。受入条件に書かれていないが、同じ画面・API の既存の振る舞い（ログインの確認、入力の検証、エラーの形）とそろっているかも見る。
 2. **動かして確かめる**: PR のブランチで `npm run build` と `npm start` を実行し、変更した画面と API を実際に開く（`curl` か Playwright）。ログインが要るものは、初期ユーザー（`docs/architecture.md` を参照）でログインしてから確かめる。開いた URL・状態コード・エラーの有無を結果として書く。
+   - `design-system/` の変更は、アプリを起動する代わりに、`design-system/` で `npm ci`・`npm test`・`npm run build` を実行し、書き出した `storybook-static/` を静的に配って（例: `python3 -m http.server 6006 --directory storybook-static`）、変更した部品の Story を Playwright で開く（`iframe.html?id=<Story の id>&viewMode=story`）。受入条件のキーボード操作を実際に行い、暗い表示（`&globals=theme:dark`）でも開く。あわせて `AGENTS.md` の「design-system/」の規約（トークンだけ・意味のある状態だけ・Docs の使う場面と使わない場面・新しい依存が無い）に反していないかを見る。開いた Story・行った操作・axe とコンソールのエラーの有無を結果として書く。
 
 あわせて、PR が `main` と衝突していないか（`mergeable`）を見る。衝突していれば、それを「必須」の指摘にする。
 
-PR が高リスクの変更（DB のスキーマ `src/lib/db/migrations.ts`／ログイン・セッション・権限の判定 `src/lib/auth.ts`・`src/lib/session.ts`・`src/lib/api.ts` の `requireApiUser` など／他人のデータを見せる・変える範囲が変わる変更）に当たれば、PR に `risk:high` を付け、レビューのコメントにどれに当たるかを書く。verdict には影響させない。`risk:high` は、結果を書く（3.）より前に付ける（ok のレビューを書くと PR は自動でキューに入るので、後から付けると間に合わないことがある）。
+`riskFiles` が空でなければ、PR に `risk:high` を付け、レビューのコメントにどのファイルに当たるかを書く。他人のデータを見せる・変える範囲の変更は、読んで判断する。`risk:high` は verdict には影響させない。`risk:high` は、結果を書く（3.）より前に付ける（ok のレビューを書くと PR は自動でキューに入るので、後から付けると間に合わないことがある）。
 
 ## 3. 結果を書く
 
@@ -43,11 +38,11 @@ PR が高リスクの変更（DB のスキーマ `src/lib/db/migrations.ts`／�
 - 直すべき指摘には、それぞれ「必須」を付け、どの受入条件・どの確かめた結果に反するかを書く。好みの問題は「任意」にし、verdict には数えない。
 - 「必須」が 1 つでもあれば verdict=changes にし、PR を draft に戻す（これが修正の起動の合図）。
 - 無ければ verdict=ok にし、Ready のままにする。それ以上は何もしない（`risk:high` 以外は、GitHub Actions がレビューの結果を status にして、自動でキューに入る。`risk:high` は人が `merge:requested` を付ける）。
-- ok を書いた後、`review-mode` の出力の `gatePaths` が空でなく、人が見るパスに当たらず `risk:high` も無ければ、PR を draft にしてから Ready に戻す（ゲートの監査を別のセッションで起こす）。コメントに「ゲートの監査を起こした」と書く。
+- ok を書いた後、`gate` の出力の `gatePaths` が空でなく、人が見るパスに当たらず `risk:high` も無ければ、PR を draft にしてから Ready に戻す（ゲートの監査を別のセッションで起こす）。コメントに「ゲートの監査を起こした」と書く。
 
 ## ゲートの監査
 
-`mode` が `gate-review` のときだけ行う（1 回目のレビューの後、別のセッションが「ゲートを緩めていないか」を確かめる）。最新のコミットの差分のうち、`gatePaths` の変更だけを読み、次の 3 つだけを見る。動作の確かめ（ビルド・起動）はしない。
+`gate` の `decision` が `gate-review` のときだけ行う（1 回目のレビューの後、別のセッションが「ゲートを緩めていないか」を確かめる）。最新のコミットの差分のうち、`gatePaths` の変更だけを読み、次の 3 つだけを見る。動作の確かめ（ビルド・起動）はしない。
 
 - (a) チェック・テスト・レビューの条件を緩めていないか（CI の手順、テストの削除や緩和、`claim.ts` の判定の条件、手順書の止まる条件）。
 - (b) 人の確認の範囲を狭めていないか（`HUMAN_GATE_PATHS`、`risk:high` の基準、`status:needs-human` に回す条件）。
