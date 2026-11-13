@@ -1,29 +1,31 @@
 // POST /api/login — JSON（{ userId, password }）またはフォーム送信でログインする。
 // フォーム送信のときは画面遷移（303）、JSON のときは JSON で応答する。
+// JSON でもフォームでもない送り方は 415、読めないフォームは 400 を JSON で返す（#513）。
+// ログインの失敗は、ID と接続元（X-Forwarded-For のいちばん右の IP アドレス）の組と、アカウント全体で数える（#526）。
 // フォーム送信の next（ログインした後の戻り先。#491）は、このアプリの中の画面のときだけ使い、それ以外はタスク一覧へ移す。
 import { NextResponse } from "next/server";
-import { jsonError, readJson } from "@/lib/api";
+import { jsonError } from "@/lib/api";
 import { SESSION_COOKIE, SESSION_TTL_MS, login } from "@/lib/auth";
 import { loginErrorPath } from "@/lib/login-error";
+import { loginSourceFromHeaders } from "@/lib/login-source";
+import { readLoginRequest } from "@/lib/login-request";
 import { afterLoginPath } from "@/lib/session-expired";
 
 export async function POST(request: Request) {
-  const isJson = (request.headers.get("content-type") ?? "").includes("application/json");
-  let userId: unknown;
-  let password: unknown;
-  let next: unknown;
-  if (isJson) {
-    const body = (await readJson(request)) as Record<string, unknown> | undefined;
-    userId = body?.userId;
-    password = body?.password;
-  } else {
-    const form = await request.formData();
-    userId = form.get("userId");
-    password = form.get("password");
-    next = form.get("next");
-  }
+  const body = await readLoginRequest(request);
+  // 読めない送り方は、ログインの判定（誤りの回数・ロック）の前に 4xx で返す（#513）
+  if (!body.ok) return jsonError(body.status, body.error, body.details);
+  const isJson = body.kind === "json";
+  const { userId, password, next } = body;
 
-  const result = login(userId, password, undefined, undefined, request.headers.get("user-agent"));
+  const result = login(
+    userId,
+    password,
+    undefined,
+    undefined,
+    request.headers.get("user-agent"),
+    loginSourceFromHeaders(request.headers),
+  );
   if (!result.ok) {
     if (!isJson) return NextResponse.redirect(new URL(loginErrorPath(result, next), request.url), 303);
     if (result.reason === "invalid") return jsonError(401, "ID またはパスワードが正しくありません");

@@ -12,6 +12,7 @@ GitHub のイベントで起動する Claude Code の Routines（scheduled tasks
 | 何を Issue にするかを決める | [docs/product.md](docs/product.md)（だれが何のために使うか、次の 1 か月で良くしたいこと） |
 | Routine として動く（実装・レビュー・修正・巡回） | [.claude/routines/README.md](.claude/routines/README.md) と、各役の手順書 |
 | アプリの構成（DB・ログイン・初期ユーザー）を知る | [docs/architecture.md](docs/architecture.md) |
+| デザインシステム（`design-system/`）の部品を作る・直す | 下の「design-system/」の節と [design-system/README.md](design-system/README.md) |
 
 タスク管理アプリ。Next.js（App Router）+ TypeScript + SQLite（Node 標準の `node:sqlite`）。
 
@@ -37,6 +38,32 @@ GitHub のイベントで起動する Claude Code の Routines（scheduled tasks
 7. スキーマを変えるときは `src/lib/db/migrations.ts` の末尾に新しい番号のマイグレーションを追加する。既存のマイグレーションは書き換えない。
 8. SQL に値を埋め込むときは必ずプレースホルダ（`?` / `:name`）を使い、文字列連結で組み立てない。
 9. API Route は最初にログインを確認し、リクエスト本文は `src/lib/` の検証関数（例: `validateTaskInput`）を通してから使う。入力誤りは 400、未ログインは 401、対象が無いときは 404 を返す。
+
+## design-system/
+
+Storybook で部品を作るデザインシステムの見本（本採用は未定）。React + Vite + Tailwind v4、部品は shadcn/ui の作り方（`cva`・`cn`・`data-slot`、振る舞いのある部品は Radix の `radix-ui` を包む）。アプリとは別の npm プロジェクトで、アプリのコードからは使わない。手本の部品は `design-system/src/components/button/`。
+
+### コマンド（`design-system/` で実行する）
+
+- `npm run typecheck` — 型チェック
+- `npm run lint` — 部品にトークン以外の色・任意の値（`p-[13px]` など）・`style` 属性が無いかを確かめる
+- `npm test` — Stories をテストとして Chromium で動かす（play の確かめと axe の検査）。Storybook の Vitest 連携
+- `npm run build` — Storybook を書き出す
+- `npm run storybook` — 手元で Storybook を開く（http://localhost:6006）
+
+### 規約
+
+上の「コーディング規約」はアプリのためのもの。`design-system/` では、次に置き換える。
+
+1. 色・余白・角丸・文字の大きさは、トークン（`design-system/src/styles/globals.css` の `@theme`）だけで書く。`#hex`・`rgb()`・任意の値（`-[...]`）・`style` 属性は書かない。足りないトークンがあれば、部品の中で作らずに Issue で人に聞く。
+   - 理由: トークンの外の値が 1 つ入ると、暗い表示やモックの変更に追いつかない部品になるため。
+2. 部品は `src/components/<名前>/` に、`<名前>.tsx`・`<名前>.stories.tsx`・`<名前>.mdx` の 3 つをそろえて置く。
+3. Stories は意味のある状態だけを置く（主な使い方・押せない・誤り・暗い表示 など、利用者や読み上げから見て違う状態）。色や大きさの組み合わせを総当たりにしない。
+4. Docs（`.mdx`）には「使う場面」と「使わない場面」を必ず書く。
+5. テストは、Stories の play で確かめる振る舞い（操作・キーボード・フォーカス・読み上げの名前）と、axe の検査だけにする。スクリーンショットの比較・Chromatic などの外部サービスは入れない。
+6. 画面の文言・例文は日本語の、架空の中立な文言にする。会社名・人名など実在しうる固有名詞は入れない（公開リポジトリのため）。
+7. 新しい外部ライブラリは追加しない（アプリの規約 4 の読み替え）。土台で入れた依存（`design-system/package.json`）の範囲で作る。足す必要があれば、`status:blocked-question` を付けて Issue で人に聞く。
+8. 見た目の正は、試作のモックを写したトークンと対応表（`design-system/docs/tokens.md`）。
 
 <!-- 共通規約ここから: 正本は skills-poc-20261109 の templates/agents/AGENTS.md。このブロックは直接編集せず、正本を直してから写す。 -->
 ## 規約

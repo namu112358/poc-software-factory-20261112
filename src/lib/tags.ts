@@ -1,16 +1,21 @@
 import { getDb, transaction, type Db } from "./db/index.ts";
 import type { ValidationResult } from "./tasks.ts";
+import { checkBodyFields } from "./body-fields.ts";
 
 import { TAG_MAX_LENGTH } from "./tag-limits.ts";
 
 export { TAG_MAX_LENGTH };
 
-/** タグの名前を検証する。前後の空白を取り除き、1〜20 文字で、空白・`,`・`/` を含まなければ有効。 */
+/** タグを付ける本文を検証する。名前の規則は checkTagName。`name` のほかの項目があれば誤り（#527）。 */
 export function validateTagInput(body: unknown): ValidationResult<{ name: string }> {
   if (typeof body !== "object" || body === null || Array.isArray(body)) {
     return { ok: false, errors: ["リクエストの形式が正しくありません"] };
   }
-  const name = (body as Record<string, unknown>).name;
+  return checkBodyFields(body as Record<string, unknown>, ["name"], (b) => checkTagName(b.name));
+}
+
+/** タグの名前を検証する。前後の空白を取り除き、1〜20 文字で、空白・`,`・`/` を含まなければ有効。 */
+function checkTagName(name: unknown): ValidationResult<{ name: string }> {
   if (typeof name !== "string") return { ok: false, errors: ["タグの名前を文字列で入力してください"] };
   const trimmed = name.trim();
   // 絵文字なども 1 文字と数えるため、UTF-16 の長さではなくコードポイントの数で数える。
@@ -124,22 +129,25 @@ export type TagRenameInput = { from: string; to: string };
 
 /**
  * タグの付け替え（POST /api/tags/rename）の本文を検証する。`from`・`to` はどちらも、タグを付けるときと同じ規則
- * （`validateTagInput`）で確かめ、前後の空白を除いた値を使う。除いた後で `from` と `to` が同じなら誤り。
+ * （`checkTagName`）で確かめ、前後の空白を除いた値を使う。除いた後で `from` と `to` が同じなら誤り。
+ * `from`・`to` のほかの項目があれば誤り（#527）。
  */
 export function validateTagRenameInput(body: unknown): ValidationResult<TagRenameInput> {
   if (typeof body !== "object" || body === null || Array.isArray(body)) {
     return { ok: false, errors: ["リクエストの形式が正しくありません"] };
   }
-  const errors: string[] = [];
-  const names: Partial<TagRenameInput> = {};
-  for (const key of ["from", "to"] as const) {
-    const r = validateTagInput({ name: (body as Record<string, unknown>)[key] });
-    if (r.ok) names[key] = r.value.name;
-    else errors.push(...r.errors.map((e) => `${key}: ${e}`));
-  }
-  if (errors.length > 0) return { ok: false, errors };
-  if (names.from === names.to) return { ok: false, errors: ["from と to に同じタグの名前は指定できません"] };
-  return { ok: true, value: { from: names.from!, to: names.to! } };
+  return checkBodyFields(body as Record<string, unknown>, ["from", "to"], (b): ValidationResult<TagRenameInput> => {
+    const errors: string[] = [];
+    const names: Partial<TagRenameInput> = {};
+    for (const key of ["from", "to"] as const) {
+      const r = checkTagName(b[key]);
+      if (r.ok) names[key] = r.value.name;
+      else errors.push(...r.errors.map((e) => `${key}: ${e}`));
+    }
+    if (errors.length > 0) return { ok: false, errors };
+    if (names.from === names.to) return { ok: false, errors: ["from と to に同じタグの名前は指定できません"] };
+    return { ok: true, value: { from: names.from!, to: names.to! } };
+  });
 }
 
 export type TagRenameResult = { ok: true; count: number } | { ok: false; reason: "not_found" };

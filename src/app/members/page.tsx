@@ -3,11 +3,15 @@ import { formatMonthDay } from "@/lib/absence";
 import { listMemberWorkload, sortMembersByOverdue } from "@/lib/members";
 import { VISIBLE_TASK_LIMIT, memberMoreHref, splitVisible } from "@/lib/task-overflow";
 import { requireUser } from "@/lib/session";
+import { isCoordinator } from "@/lib/users";
+import { showSuspensionControl } from "@/lib/member-suspension";
+import { SuspensionButton } from "./suspension-button";
 
 export const metadata = { title: formatPageTitle("メンバー一覧") };
 
 export default async function MembersPage() {
-  await requireUser();
+  const user = await requireUser();
+  const viewer = { id: user.id, isCoordinator: isCoordinator(user.id) };
   const members = sortMembersByOverdue(listMemberWorkload());
 
   return (
@@ -20,6 +24,7 @@ export default async function MembersPage() {
             <th>休み</th>
             <th>未完了のタスク数</th>
             <th>未完了のタスク</th>
+            <th>ログイン</th>
           </tr>
         </thead>
         <tbody>
@@ -56,6 +61,15 @@ export default async function MembersPage() {
                       ほか {hiddenCount} 件
                     </a>
                     <small>（リンク先は、完了したタスクも含めた {m.name} さんの担当の一覧です）</small>
+                  </>
+                )}
+              </td>
+              <td data-testid="member-login">
+                {m.suspended ? "停止中" : "利用中"}
+                {showSuspensionControl(viewer, m.id) && (
+                  <>
+                    {" "}
+                    <SuspensionButton memberId={m.id} name={m.name} suspended={m.suspended} />
                   </>
                 )}
               </td>

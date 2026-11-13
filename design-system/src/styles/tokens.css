@@ -1,0 +1,124 @@
+/*
+ * デザイントークン（値の正本）。
+ * 値は試作のモックの :root から写した。名前もモックに合わせている（対応表は docs/tokens.md）。
+ * ライトが既定。ダークは OS の設定（prefers-color-scheme）か、data-theme="dark" で切り替える。
+ * data-theme="light" は OS がダークでもライトに固定する。
+ * data-theme は <html> にも、ページの一部の要素にも付けられる（その要素の中だけが切り替わる）。
+ */
+
+:root,
+[data-theme="light"] {
+  color-scheme: light;
+
+  /* 面 */
+  --bg: #ffffff;
+  --surface: #f6f5f4;
+  --surface-soft: #fafaf9;
+  --hover: #f0eeec;
+
+  /* 文字 */
+  --fg: #1a1a1a;
+  --fg-2: #37352f;
+  --muted: #5d5b54;
+  --faint: #787671;
+
+  /* 線 */
+  --border: #e5e3df;
+  --border-strong: #c8c4be;
+
+  /* ブランド（主ボタン・フォーカス・選択中だけに使う） */
+  --brand: #2563eb;
+  --brand-fg: #ffffff;
+  --brand-soft: #e8effd;
+  --link: #005bab;
+
+  /* 状態 */
+  --ok: #146c2e;
+  --ok-soft: #d9f3e1;
+  --warn: #793400;
+  --warn-soft: #ffe8d4;
+  --warn-line: #dd5b00;
+  --err: #b42318;
+  --err-soft: #fde0ec;
+
+  /* 図の色 */
+  --viz-now: #2b2925;
+  --viz-next: #0f766e;
+  --viz-r1: #e8e5e0;
+  --viz-r2: #d6d0c7;
+  --viz-r3: #c4bcaf;
+  --viz-track: #f6f5f4;
+  --viz-prev: #65625b;
+
+  /* 形・文字・影 */
+  --shadow: 0 8px 24px rgba(0, 0, 0, 0.12); /* 浮く要素（ダイアログ・ツールチップ・メニュー）だけ */
+  --r: 8px;
+  --r-lg: 12px;
+  --font: "Noto Sans JP", -apple-system, "Hiragino Sans", "Yu Gothic UI", system-ui, sans-serif;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --bg: #191918;
+    --surface: #22211f;
+    --surface-soft: #1e1d1c;
+    --hover: #2b2a28;
+    --fg: #efede9;
+    --fg-2: #dcd9d3;
+    --muted: #a8a49c;
+    --faint: #8f8b83;
+    --border: #34322f;
+    --border-strong: #4a4743;
+    --brand: #356ee9; /* モックは #3b74f0。白い文字とのコントラストが 4.25 で AA に届かないため変えた */
+    --brand-fg: #ffffff;
+    --brand-soft: #1d2a45;
+    --link: #7fb0ef;
+    --ok: #7dd99a;
+    --ok-soft: #173523;
+    --warn: #f6b37a;
+    --warn-soft: #3a2614;
+    --warn-line: #f08a3c;
+    --err: #ff9a90;
+    --err-soft: #3d1c1f;
+    --viz-now: #efede9;
+    --viz-next: #4bbfae;
+    --viz-r1: #34322e;
+    --viz-r2: #46433d;
+    --viz-r3: #5a564e;
+    --viz-track: #2a2926;
+    --viz-prev: #a8a49c;
+  }
+}
+
+[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #191918;
+  --surface: #22211f;
+  --surface-soft: #1e1d1c;
+  --hover: #2b2a28;
+  --fg: #efede9;
+  --fg-2: #dcd9d3;
+  --muted: #a8a49c;
+  --faint: #8f8b83;
+  --border: #34322f;
+  --border-strong: #4a4743;
+  --brand: #356ee9; /* 上と同じ理由でモックから変えた */
+  --brand-fg: #ffffff;
+  --brand-soft: #1d2a45;
+  --link: #7fb0ef;
+  --ok: #7dd99a;
+  --ok-soft: #173523;
+  --warn: #f6b37a;
+  --warn-soft: #3a2614;
+  --warn-line: #f08a3c;
+  --err: #ff9a90;
+  --err-soft: #3d1c1f;
+  --viz-now: #efede9;
+  --viz-next: #4bbfae;
+  --viz-r1: #34322e;
+  --viz-r2: #46433d;
+  --viz-r3: #5a564e;
+  --viz-track: #2a2926;
+  --viz-prev: #a8a49c;
+}

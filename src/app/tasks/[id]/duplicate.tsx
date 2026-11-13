@@ -14,7 +14,10 @@ export function DuplicateButton({ taskId }: { taskId: number }) {
     try {
       const res = await fetch(`/api/tasks/${taskId}/duplicate`, { method: "POST" });
       if (!res.ok) {
-        setError("タスクを複製できませんでした。");
+        // 担当者のログインが停止されているときなどは、API の理由（details）を添える（#522）
+        const data = (await res.json().catch(() => null)) as { details?: unknown } | null;
+        const details = Array.isArray(data?.details) ? data.details.filter((d) => typeof d === "string").join(" ") : "";
+        setError(details ? `タスクを複製できませんでした。${details}` : "タスクを複製できませんでした。");
         return;
       }
       const data = (await res.json()) as { task: { id: number } };

@@ -1,6 +1,7 @@
 import { getDb, savepoint, transaction, type Db } from "./db/index.ts";
 import { addDays, DUE_SOON_DAYS, RESTORE_DAYS, todayInJapan } from "./task-dates.ts";
 import type { Assignee, Task, TaskFilter, TaskInput, TaskPriority, TaskStatus } from "./task-types.ts";
+import { isSuspended } from "./users.ts";
 
 /** タスクに登場する担当者（重複なし）。 */
 export function listAssignees(db: Db = getDb()): Assignee[] {
@@ -89,7 +90,7 @@ export const COMPLETED_AT_SQL =
 
 /**
  * 更新の後の更新日時。今の時刻が前の更新日時より後でなければ（同じミリ秒に続けて更新したときなど）、前の値の 1 ミリ秒後にする。
- * 更新するたびに値が必ず変わるので、古い更新日時を付けた確認つきの更新（`updateTaskIfUnchanged`）が一致しない。
+ * 値を変える更新のたびに値が必ず変わるので、古い更新日時を付けた確認つきの更新（`updateTaskIfUnchanged`）が一致しない。
  */
 export function nextUpdatedAt(previous: string, now: Date = new Date()): string {
   const prev = Date.parse(previous);
@@ -97,10 +98,18 @@ export function nextUpdatedAt(previous: string, now: Date = new Date()): string 
   return new Date(prev + 1).toISOString();
 }
 
-const UPDATE_TASK_SQL = `UPDATE tasks SET title = :title, status = :status, assignee = :assignee, due_date = :dueDate, priority = :priority, estimate_minutes = :estimateMinutes, memo = :memo, archived = :archived, updated_at = :now, ${COMPLETED_AT_SQL} WHERE id = :id AND deleted_at IS NULL`;
+/**
+ * 書き込む値が今の行と 1 つでも違うときだけ真になる条件。SET の右辺は更新前の行を見るので、何も変えない更新では更新日時を進めない
+ * （同時に編集している人の確認つきの更新が、変更の無い更新のせいで衝突にならないようにする。#514）。`IS NOT` で null も比べる。
+ */
+const TASK_CHANGED_SQL =
+  "title IS NOT :title OR status IS NOT :status OR assignee IS NOT :assignee OR due_date IS NOT :dueDate OR priority IS NOT :priority OR estimate_minutes IS NOT :estimateMinutes OR memo IS NOT :memo OR archived IS NOT :archived";
+
+const UPDATE_TASK_SQL = `UPDATE tasks SET title = :title, status = :status, assignee = :assignee, due_date = :dueDate, priority = :priority, estimate_minutes = :estimateMinutes, memo = :memo, archived = :archived, updated_at = CASE WHEN ${TASK_CHANGED_SQL} THEN :now ELSE updated_at END, ${COMPLETED_AT_SQL} WHERE id = :id AND deleted_at IS NULL`;
 
 /**
  * 今のタスクに変更を重ねて書き込む。`onlyIfUpdatedAt` を渡すと、更新日時がその値のときだけ書き込む。書き込んだら true。
+ * 値が今の行と同じなら、更新日時は変えない（true は返す）。
  * 担当者が変わったときは、担当者の変更の履歴を同じセーブポイントの中で 1 件足す（どちらかだけが残ることはない）。
  * 変更前の担当者は、書き込む直前に DB から読み直した値を使う（編集を始めたときの値ではない）。
  */
@@ -137,7 +146,7 @@ function writeTask(current: Task, changes: Partial<TaskInput>, db: Db, changedBy
 }
 
 /**
- * 指定した項目だけを更新する。タスクが無ければ undefined。完了日時はステータスの変化に合わせて決まる。
+ * 指定した項目だけを更新する。タスクが無ければ undefined。完了日時はステータスの変化に合わせて決まる。値が 1 つも変わらなければ更新日時も変えない。
  * `changedBy` は更新した利用者の ID。担当者が変わったときに、担当者の変更の履歴に残す。
  */
 export function updateTask(id: number, changes: Partial<TaskInput>, db: Db = getDb(), changedBy: string | null = null): Task | undefined {
@@ -196,6 +205,20 @@ export function duplicateTask(id: number, db: Db = getDb()): Task | undefined {
     db.prepare("INSERT INTO task_tags (task_id, name) SELECT ?, name FROM task_tags WHERE task_id = ? ORDER BY id").run(copy.id, id);
     return copy;
   });
+}
+
+export type DuplicateTaskResult = { ok: true; task: Task } | { ok: false; reason: "not_found" | "suspended_assignee" };
+
+/**
+ * タスクを複製する（POST /api/tasks/:id/duplicate）。元のタスクの担当者がログインを停止していれば複製しない
+ * （停止した利用者を担当者にするタスクを作らない。#522）。それ以外は `duplicateTask` と同じ。
+ */
+export function duplicateTaskForRequest(id: number, db: Db = getDb()): DuplicateTaskResult {
+  const source = getTask(id, db);
+  if (!source) return { ok: false, reason: "not_found" };
+  if (isSuspended(source.assignee, db)) return { ok: false, reason: "suspended_assignee" };
+  const task = duplicateTask(id, db);
+  return task ? { ok: true, task } : { ok: false, reason: "not_found" };
 }
 
 export type BulkCompleteResult = { ok: true; tasks: Task[] } | { ok: false; missingIds: number[] };

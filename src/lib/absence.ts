@@ -2,6 +2,7 @@
 import { getDb, type Db } from "./db/index.ts";
 import { todayInJapan } from "./task-dates.ts";
 import type { ValidationResult } from "./task-types.ts";
+import { unknownFieldErrors } from "./body-fields.ts";
 
 /** 休みの期間。日付は日本時間の YYYY-MM-DD で、開始日と終了日を両方含む。 */
 export type Absence = { startDate: string; endDate: string };
@@ -15,10 +16,16 @@ function isValidDate(value: string): boolean {
   return !Number.isNaN(time) && new Date(time).toISOString().slice(0, 10) === value;
 }
 
-/** 休みの登録の本文（{ startDate, endDate }）を検証する。誤りは日本語の文言で返す。 */
+/** 本人の確認に使う `userId`（isOwnAbsenceTarget）を含め、休みの登録の本文で受け付ける項目。 */
+export const ABSENCE_INPUT_FIELDS = ["startDate", "endDate", "userId"] as const;
+
+/**
+ * 休みの登録の本文（{ startDate, endDate }）を検証する。誤りは日本語の文言で返す。
+ * ABSENCE_INPUT_FIELDS のほかの項目があれば誤り（#527）。
+ */
 export function validateAbsenceInput(body: unknown): ValidationResult<Absence> {
-  const record = typeof body === "object" && body !== null ? (body as Record<string, unknown>) : {};
-  const errors: string[] = [];
+  const record = typeof body === "object" && body !== null && !Array.isArray(body) ? (body as Record<string, unknown>) : {};
+  const errors: string[] = unknownFieldErrors(record, ABSENCE_INPUT_FIELDS);
   const check = (key: "startDate" | "endDate", label: string): string | undefined => {
     const value = record[key];
     if (typeof value !== "string" || value === "") {

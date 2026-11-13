@@ -100,7 +100,7 @@ export default async function TaskDetailPage({ params }: Props) {
         <dt>完了</dt>
         <dd data-testid="completed-at">{formatCompletedAt(task)}</dd>
       </dl>
-      <EditTaskForm task={task} users={listAssigneeOptions()} />
+      <EditTaskForm task={task} users={listAssigneeOptions(undefined, undefined, task.assignee)} />
       <p>
         <DuplicateButton taskId={task.id} /> <ArchiveButton taskId={task.id} archived={task.archived} updatedAt={task.updatedAt} />{" "}
         <DeleteTaskButton taskId={task.id} title={task.title} />

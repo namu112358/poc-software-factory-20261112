@@ -10,6 +10,7 @@ import {
   mergeCheck,
   reviewStatus,
   ciCheck,
+  combineChecks,
   precheckActions,
   relabelTargets,
   readyBudget,
@@ -19,11 +20,15 @@ import {
   blockingDeps,
   makeIsStalled,
   stalledActions,
+  gateDecision,
+  settleMergeable,
+  type GateInput,
   type StalledPr,
   type StalledIssue,
   type IssueInfo,
   normalizeLabel,
   START_LABELS,
+  isOwnClaudePr,
 } from "../scripts/factory/claim-core.ts";
 
 const touch = (files: string, at: string) => ({ body: `<!-- factory:touch files=${files} -->\n着手します。`, createdAt: at });
@@ -455,30 +460,55 @@ describe("ラベルの名前（接頭を付けた名前への切り替え）", (
 describe("キューに入る条件のチェック（ciCheck。#364）", () => {
   const run = (name: string, conclusion: string | null, startedAt = "2026-11-12T18:00:00Z", status = "completed") => ({ name, status, conclusion, startedAt });
 
-  it("app-check と pr-body-check が両方 success なら ok", () => {
-    assert.equal(ciCheck([run("app-check", "success"), run("pr-body-check", "success"), run("Summary", "failure")]).ok, true);
+  const ds = run("design-system-check", "success");
+
+  it("app-check・design-system-check・pr-body-check がすべて success なら ok", () => {
+    assert.equal(ciCheck([run("app-check", "success"), ds, run("pr-body-check", "success"), run("Summary", "failure")]).ok, true);
   });
 
   it("app-check が落ちていれば ok にしない（#364 の形）", () => {
-    const r = ciCheck([run("app-check", "failure"), run("pr-body-check", "success")]);
+    const r = ciCheck([run("app-check", "failure"), ds, run("pr-body-check", "success")]);
     assert.equal(r.ok, false);
     assert.match(r.reason, /app-check が failure/);
   });
 
+  it("design-system-check が落ちている・無いときは ok にしない（.mergify.yml のキューの条件と同じ）", () => {
+    const r = ciCheck([run("app-check", "success"), run("design-system-check", "failure"), run("pr-body-check", "success")]);
+    assert.equal(r.ok, false);
+    assert.match(r.reason, /design-system-check が failure/);
+    assert.match(ciCheck([run("app-check", "success"), run("pr-body-check", "success")]).reason, /design-system-check が無い/);
+  });
+
   it("本文の検査が skipped のまま残っていれば ok にしない（#258 の形）", () => {
-    assert.equal(ciCheck([run("app-check", "success"), run("pr-body-check", "skipped")]).ok, false);
+    assert.equal(ciCheck([run("app-check", "success"), ds, run("pr-body-check", "skipped")]).ok, false);
   });
 
   it("まだ終わっていない・まだ無いチェックがあれば ok にしない", () => {
-    assert.equal(ciCheck([run("app-check", null, "2026-11-12T18:00:00Z", "in_progress"), run("pr-body-check", "success")]).ok, false);
-    assert.equal(ciCheck([run("app-check", "success")]).ok, false);
+    assert.equal(ciCheck([run("app-check", null, "2026-11-12T18:00:00Z", "in_progress"), ds, run("pr-body-check", "success")]).ok, false);
+    assert.equal(ciCheck([run("app-check", "success"), ds]).ok, false);
   });
 
   it("同じ名前のチェックが何度も動いたときは、最後に始まったものを見る", () => {
     const old = run("pr-body-check", "failure", "2026-11-12T17:00:00Z");
     const now = run("pr-body-check", "success", "2026-11-12T18:00:00Z");
-    assert.equal(ciCheck([run("app-check", "success"), now, old]).ok, true);
-    assert.equal(ciCheck([run("app-check", "success"), old, run("pr-body-check", "failure", "2026-11-12T19:00:00Z")]).ok, false);
+    assert.equal(ciCheck([run("app-check", "success"), ds, now, old]).ok, true);
+    assert.equal(ciCheck([run("app-check", "success"), ds, old, run("pr-body-check", "failure", "2026-11-12T19:00:00Z")]).ok, false);
+  });
+});
+
+describe("巡回の CI の状態（combineChecks。app-check と design-system-check をまとめる）", () => {
+  it("どちらかが落ちていれば failure（design-system-check だけが落ちた PR を「CI が通った」と扱わない）", () => {
+    assert.equal(combineChecks(["success", "failure"]), "failure");
+    assert.equal(combineChecks(["failure", "pending"]), "failure");
+  });
+
+  it("落ちたものが無く、動いているものがあれば pending、まだ無いものがあれば none", () => {
+    assert.equal(combineChecks(["success", "pending"]), "pending");
+    assert.equal(combineChecks(["success", "none"]), "none");
+  });
+
+  it("すべて成功なら success", () => {
+    assert.equal(combineChecks(["success", "success"]), "success");
   });
 });
 
@@ -780,5 +810,203 @@ describe("stalled: 止まった実装・PR の片付け", () => {
       assert.equal(only(run([pr({ ...kick, priorMarks: [{ action: "conflict-kick", commit: "ccccccc" }] })], kickIssue)).draft, "ready-then-draft");
       assert.equal(only(run([pr({ ...kick, priorMarks: [{ action: "conflict", commit: "aaaaaaa" }] })], kickIssue)).draft, "ready-then-draft");
     });
+  });
+});
+
+describe("gate: 各役の起動の判定", () => {
+  const REPO = "namu112358/poc-software-factory-20261112";
+  const T0 = "2026-11-13T10:00:00Z";
+  const T1 = "2026-11-13T10:05:00Z";
+  const startMark = { body: "<!-- factory:implement action=start -->\n着手します。", createdAt: T1 };
+  type Impl = Extract<GateInput, { role: "implement" }>;
+  const impl = (o: Partial<Impl> = {}): GateInput => ({
+    role: "implement", number: 7, sessionUrl: "https://claude.ai/code/session_X", repo: REPO, issueOpen: true, labels: ["status:in-progress"],
+    lastStartAt: T0, labeler: "alice", comments: [], closingPrs: [], branchExists: false, ...o,
+  });
+
+  describe("implement", () => {
+    it("1: 閉じた Issue・起動のラベル無し・epic・人待ちは stop（何も書かない）", () => {
+      for (const o of [{ issueOpen: false }, { labels: [] }, { labels: ["status:in-progress", "kind:epic"] }, { labels: ["status:in-progress-hard", "status:blocked-question"] }, { labels: ["status:in-progress", "status:needs-human"] }]) {
+        const r = gateDecision(impl(o));
+        assert.equal(r.decision, "stop", JSON.stringify(o));
+        assert.equal(r.ops, null);
+      }
+    });
+    it("起動のラベルを付けた人（labeler）を、どの判定でも出す。読めなければ null（権限は gate では確かめない。役が確かめる）", () => {
+      assert.equal(gateDecision(impl()).labeler, "alice");
+      assert.equal(gateDecision(impl({ labeler: null, lastStartAt: null })).labeler, null);
+      assert.equal(gateDecision(impl({ labeler: null, lastStartAt: null })).decision, "lock");
+      assert.equal(gateDecision(impl({ issueOpen: false })).labeler, "alice");
+    });
+    it("2: 最後の起動の後に着手のコメントがあれば stop。起動の前のものは数えない", () => {
+      assert.equal(gateDecision(impl({ comments: [startMark] })).decision, "stop");
+      assert.equal(gateDecision(impl({ comments: [{ ...startMark, createdAt: "2026-11-13T09:00:00Z" }] })).decision, "lock");
+    });
+    it("3: Closes で参照する開いている PR があれば stop。claude/issue-N の draft でレビュー前なら takeover", () => {
+      const pr = (o = {}) => ({ number: 90, headRef: "claude/issue-7", headRepo: REPO, draft: true, reviewed: false, ...o });
+      const t = gateDecision(impl({ closingPrs: [pr()] }));
+      assert.equal(t.decision, "takeover");
+      assert.equal(t.pr, 90);
+      assert.equal(t.branch, "claude/issue-7");
+      for (const o of [{ draft: false }, { reviewed: true }, { headRef: "claude/other" }]) assert.equal(gateDecision(impl({ closingPrs: [pr(o)] })).decision, "stop", JSON.stringify(o));
+      // 着手のコメントがあれば、PR より先（3）に stop
+      assert.equal(gateDecision(impl({ comments: [startMark], closingPrs: [pr()] })).decision, "stop");
+    });
+    it("4: PR が無くブランチだけがあれば takeover（pr は null）。読み直して着手のコメントが現れたら stop", () => {
+      const r = gateDecision(impl({ branchExists: true }));
+      assert.equal(r.decision, "takeover");
+      assert.equal(r.pr, null);
+      assert.equal(r.branch, "claude/issue-7");
+      assert.equal(gateDecision(impl({ branchExists: true, comments: [startMark] })).decision, "stop");
+    });
+    it("5: どれでもなければ lock（ブランチ名を返す）", () => {
+      const r = gateDecision(impl());
+      assert.equal(r.decision, "lock");
+      assert.equal(r.branch, "claude/issue-7");
+      assert.equal(r.pr, null);
+      assert.equal(r.ops, null);
+    });
+    it("最初に当たった 1 つだけ: 着手のコメントがあれば、ブランチや PR があっても stop", () => {
+      const r = gateDecision(impl({ comments: [startMark], branchExists: true, closingPrs: [{ number: 90, headRef: "claude/issue-7", headRepo: REPO, draft: true, reviewed: false }] }));
+      assert.equal(r.decision, "stop");
+    });
+    it("フォークの PR（head のリポジトリが違う・null）は引き継がず、着手も止めない（数えずに lock へ）", () => {
+      for (const headRepo of ["someone/poc-software-factory-20261112", null]) {
+        const r = gateDecision(impl({ closingPrs: [{ number: 90, headRef: "claude/issue-7", headRepo, draft: true, reviewed: false }] }));
+        assert.equal(r.decision, "lock", String(headRepo));
+        assert.equal(r.pr, null);
+      }
+    });
+  });
+
+  const HEAD = "aaaaaaa1111111";
+  type Rev = Extract<GateInput, { role: "review" }>;
+  type Fix = Extract<GateInput, { role: "fix" }>;
+  const pr = (o = {}) => ({ open: true, draft: false, headRef: "claude/issue-7", headSha: HEAD, labels: [] as string[], headRepo: REPO as string | null, ...o });
+  const review = (o: Partial<Rev> = {}): GateInput => ({ role: "review", number: 20, sessionUrl: null, repo: REPO, pr: pr(), reviews: [], afterOk: null, files: [], ...o });
+
+  describe("review", () => {
+    it("1: 閉じている・draft・claude/ 以外・needs-human は stop", () => {
+      for (const p of [pr({ open: false }), pr({ draft: true }), pr({ headRef: "feature/x" }), pr({ labels: ["status:needs-human"] })]) assert.equal(gateDecision(review({ pr: p })).decision, "stop", JSON.stringify(p));
+      assert.equal(gateDecision(review({ pr: pr({ headRef: "claude/hand-made" }) })).decision, "go"); // claude/issue- でなくてもレビューする
+    });
+    it("フォークの PR（head のリポジトリが違う・null）は stop", () => {
+      for (const headRepo of ["someone/poc-software-factory-20261112", null]) assert.equal(gateDecision(review({ pr: pr({ headRepo }) })).decision, "stop", String(headRepo));
+    });
+    it("2: 最新のコミットへのレビューがもうあれば stop（ok でも changes でも）", () => {
+      for (const verdict of ["ok", "changes"]) assert.equal(gateDecision(review({ reviews: [{ verdict, commit: "aaaaaaa" }] })).decision, "stop");
+      assert.equal(gateDecision(review({ reviews: [{ verdict: "ok", commit: "bbbbbbb" }] })).decision, "go");
+    });
+    const rv = [{ verdict: "ok", commit: "bbbbbbb" }];
+    it("3: ok の後が取り込みだけなら stop", () => {
+      assert.equal(gateDecision(review({ reviews: rv, afterOk: [{ sha: "c1", mergeOnly: true, merge: true }, { sha: "c2", mergeOnly: true, merge: true }] })).decision, "stop");
+    });
+    it("4: ok の後がマージのコミットだけ（衝突の解消を含む）なら go で light", () => {
+      const r = gateDecision(review({ reviews: rv, afterOk: [{ sha: "c1", mergeOnly: true, merge: true }, { sha: "c2", mergeOnly: false, merge: true }] }));
+      assert.equal(r.decision, "go");
+      assert.equal(r.light, true);
+    });
+    it("main 以外のブランチを取り込んだマージ（merge: false）が入ったら、軽い再レビューにしない", () => {
+      const r = gateDecision(review({ reviews: rv, afterOk: [{ sha: "c1", mergeOnly: false, merge: false }] }));
+      assert.equal(r.decision, "go");
+      assert.equal(r.light, false);
+    });
+    it("5: それ以外は go で light ではない（機能の変更を含む・ok が無い・履歴に無い）", () => {
+      for (const o of [{ reviews: rv, afterOk: [{ sha: "c1", mergeOnly: false, merge: true }, { sha: "c2", mergeOnly: false, merge: false }] }, { reviews: [] }, { reviews: rv, afterOk: null }, { reviews: [{ verdict: "changes", commit: "bbbbbbb" }] }]) {
+        const r = gateDecision(review(o));
+        assert.equal(r.decision, "go", JSON.stringify(o));
+        assert.equal(r.light, false);
+      }
+    });
+    it("go のときだけ、高リスクのファイルに当たった変更ファイルを riskFiles に出す", () => {
+      const files = ["src/app/page.tsx", "src/lib/auth.ts", "src/lib/db/migrations.ts", "tests/auth.test.ts"];
+      assert.deepEqual(gateDecision(review({ files })).riskFiles, ["src/lib/auth.ts", "src/lib/db/migrations.ts"]);
+      assert.deepEqual(gateDecision(review({ files: ["src/app/page.tsx"] })).riskFiles, []);
+      assert.equal(gateDecision(review({ files, pr: pr({ draft: true }) })).riskFiles, undefined);
+    });
+    it("最初に当たった 1 つだけ: draft なら、最新のレビューがあっても理由は draft", () => {
+      assert.match(gateDecision(review({ pr: pr({ draft: true }), reviews: [{ verdict: "ok", commit: "aaaaaaa" }] })).reason, /draft/);
+    });
+  });
+
+  const fix = (o: Partial<Fix> = {}): GateInput => ({
+    role: "fix", number: 20, sessionUrl: "https://claude.ai/code/session_X", repo: REPO, pr: pr({ draft: true }), reviews: [{ verdict: "changes", commit: "aaaaaaa" }], mergeable: true, ...o,
+  });
+  describe("fix", () => {
+    it("1: 閉じている・draft でない・claude/issue- 以外・needs-human は stop", () => {
+      for (const p of [pr({ draft: true, open: false }), pr({ draft: false }), pr({ draft: true, headRef: "claude/hand-made" }), pr({ draft: true, labels: ["status:needs-human"] })]) {
+        const r = gateDecision(fix({ pr: p, mergeable: false }));
+        assert.equal(r.decision, "stop", JSON.stringify(p));
+        assert.equal(r.fix, null);
+      }
+    });
+    it("フォークの PR（head のリポジトリが違う・null）は、指摘や衝突があっても stop", () => {
+      for (const headRepo of ["someone/poc-software-factory-20261112", null]) assert.equal(gateDecision(fix({ pr: pr({ draft: true, headRepo }), mergeable: false })).decision, "stop", String(headRepo));
+    });
+    it("2: 直すものが無ければ stop（指摘が古い版へのもの・指摘が無い）。衝突が無くても、指摘があれば go", () => {
+      assert.equal(gateDecision(fix({ reviews: [{ verdict: "changes", commit: "ccccccc" }] })).decision, "stop");
+      assert.equal(gateDecision(fix({ reviews: [{ verdict: "ok", commit: "aaaaaaa" }] })).decision, "stop");
+      assert.equal(gateDecision(fix({ reviews: [] })).decision, "stop");
+      const r = gateDecision(fix());
+      assert.equal(r.decision, "go");
+      assert.deepEqual(r.fix, { changes: true, conflict: false, removeMergeRequested: false });
+    });
+    it("衝突だけでも go（conflict: true）。merge:requested があれば外す印を出す", () => {
+      const r = gateDecision(fix({ reviews: [], mergeable: false, pr: pr({ draft: true, labels: ["merge:requested"] }) }));
+      assert.equal(r.decision, "go");
+      assert.deepEqual(r.fix, { changes: false, conflict: true, removeMergeRequested: true });
+    });
+    it("3: verdict=changes のレビューが 3 つ以上なら needs-human（PR に status:needs-human とコメント）", () => {
+      const three = [{ verdict: "changes", commit: "1111111" }, { verdict: "changes", commit: "2222222" }, { verdict: "changes", commit: "aaaaaaa" }];
+      const r = gateDecision(fix({ reviews: three }));
+      assert.equal(r.decision, "needs-human");
+      assert.deepEqual(r.ops?.addLabels, ["status:needs-human"]);
+      assert.match(r.ops!.comment!, /^<!-- factory:fix action=round-limit -->\n2 往復直しても指摘が残っているので、人に回す。\nセッション: /);
+      // 2 つなら、まだ直す
+      assert.equal(gateDecision(fix({ reviews: three.slice(1) })).decision, "go");
+      // 直すものが無ければ（2）、3 つ以上でも stop が先
+      assert.equal(gateDecision(fix({ reviews: [...three.slice(0, 2), { verdict: "changes", commit: "3333333" }] })).decision, "stop");
+    });
+  });
+
+  describe("mergeable が null（計算中）のとき（settleMergeable）", () => {
+    const reader = (values: (boolean | null)[]) => {
+      const calls = { reads: 0, waits: 0 };
+      return { calls, read: async () => values[calls.reads++] ?? null, wait: async () => void calls.waits++ };
+    };
+    it("null を 3 回読んだら衝突（false）として扱う。間に待つのは 2 回", async () => {
+      const r = reader([null, null, null]);
+      assert.equal(await settleMergeable(r.read, r.wait), false);
+      assert.deepEqual(r.calls, { reads: 3, waits: 2 });
+    });
+    it("途中で値が出たらそこで止める", async () => {
+      const r = reader([null, true]);
+      assert.equal(await settleMergeable(r.read, r.wait), true);
+      assert.deepEqual(r.calls, { reads: 2, waits: 1 });
+      const f = reader([false]);
+      assert.equal(await settleMergeable(f.read, f.wait), false);
+      assert.deepEqual(f.calls, { reads: 1, waits: 0 });
+    });
+    it("衝突として扱った PR は、指摘が無くても修正の対象（go）", async () => {
+      const r = reader([null, null, null]);
+      const mergeable = await settleMergeable(r.read, r.wait);
+      assert.equal(gateDecision(fix({ reviews: [], mergeable })).decision, "go");
+    });
+  });
+});
+
+describe("isOwnClaudePr（フォークの PR を役の対象にしない）", () => {
+  const repo = "o/r";
+  it("このリポジトリの claude/ のブランチは対象", () => {
+    assert.equal(isOwnClaudePr({ head: { ref: "claude/issue-1", repo: { full_name: repo } } }, repo), true);
+  });
+  it("フォークの PR は、ブランチ名が claude/ でも対象にしない", () => {
+    assert.equal(isOwnClaudePr({ head: { ref: "claude/issue-1", repo: { full_name: "x/r" } } }, repo), false);
+  });
+  it("フォークが消えた PR（repo が null）は対象にしない", () => {
+    assert.equal(isOwnClaudePr({ head: { ref: "claude/issue-1", repo: null } }, repo), false);
+  });
+  it("claude/ で始まらないブランチは対象にしない", () => {
+    assert.equal(isOwnClaudePr({ head: { ref: "sf-d/x", repo: { full_name: repo } } }, repo), false);
   });
 });

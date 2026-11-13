@@ -1,6 +1,7 @@
 import { getDb, transaction, type Db } from "./db/index.ts";
 import { restoreCutoff, restoreDeadline } from "./task-store.ts";
 import type { ValidationResult } from "./tasks.ts";
+import { checkBodyFields } from "./body-fields.ts";
 
 export type Comment = {
   id: number;
@@ -41,18 +42,19 @@ function toComment(row: CommentRow): Comment {
 
 export const COMMENT_MAX_LENGTH = 1000;
 
-/** 投稿の本文を検証する。前後の空白を取り除き、1〜1000 文字でなければエラー。 */
+/** 投稿・編集の本文を検証する。前後の空白を取り除き、1〜1000 文字でなければエラー。`body` のほかの項目があれば誤り（#527）。 */
 export function validateCommentInput(body: unknown): ValidationResult<{ body: string }> {
   if (typeof body !== "object" || body === null || Array.isArray(body)) {
     return { ok: false, errors: ["リクエストの形式が正しくありません"] };
   }
-  const text = (body as Record<string, unknown>).body;
-  if (typeof text !== "string") return { ok: false, errors: ["本文を文字列で入力してください"] };
-  const trimmed = text.trim();
-  if (trimmed.length < 1 || trimmed.length > COMMENT_MAX_LENGTH) {
-    return { ok: false, errors: [`本文は 1〜${COMMENT_MAX_LENGTH} 文字で入力してください`] };
-  }
-  return { ok: true, value: { body: trimmed } };
+  return checkBodyFields(body as Record<string, unknown>, ["body"], ({ body: text }) => {
+    if (typeof text !== "string") return { ok: false, errors: ["本文を文字列で入力してください"] };
+    const trimmed = text.trim();
+    if (trimmed.length < 1 || trimmed.length > COMMENT_MAX_LENGTH) {
+      return { ok: false, errors: [`本文は 1〜${COMMENT_MAX_LENGTH} 文字で入力してください`] };
+    }
+    return { ok: true, value: { body: trimmed } };
+  });
 }
 
 /** タスクのコメント（削除したものを除く）を投稿の古い順に返す。 */

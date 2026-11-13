@@ -1,7 +1,8 @@
 import { getDb, type Db } from "./db/index.ts";
 import { parseAssignees, parseTagFilters } from "./task-validation.ts";
 import { UNASSIGNED } from "./task-types.ts";
-import { listUsers } from "./users.ts";
+import { SUSPENDED_MARK } from "./members.ts";
+import { listUserSummaries } from "./users.ts";
 
 export type CheckboxOption = { value: string; label: string; checked: boolean };
 
@@ -17,8 +18,9 @@ export function filterConditionsFromForm(form: URLSearchParams, db?: Db): { assi
 
 /**
  * タスク一覧の担当者の絞り込みの選択肢。アプリの利用者を全員（今担当のタスクが無い人も）並べ、最後に「担当者なし」を置く。
- * 選んだ値にだけ checked を付ける（#436）。
+ * 選んだ値にだけ checked を付ける（#436）。ログインを停止した人も残し（引き継ぐタスクを探せるように）、名前に「（停止中）」を付ける（#522）。
  */
 export function buildAssigneeFilterOptions(selected: string[], db: Db = getDb()): CheckboxOption[] {
-  return buildCheckboxOptions([...listUsers(db).map((u) => ({ value: u.id, label: u.name })), { value: UNASSIGNED, label: "担当者なし" }], selected);
+  const users = listUserSummaries(db).map((u) => ({ value: u.id, label: u.suspended ? `${u.name}${SUSPENDED_MARK}` : u.name }));
+  return buildCheckboxOptions([...users, { value: UNASSIGNED, label: "担当者なし" }], selected);
 }
