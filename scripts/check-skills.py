@@ -12,6 +12,7 @@
   - .claude/skills/SOURCES.md に載っている。SOURCES.md に載っているのに指紋がないものも検出する。
   - 形式の問題（上流の書き方によるもの）は警告だけにする。手で直せないため。
 - 自作の Skills（指紋に載っていないもの）
+  - 名前が `namu112358-` で始まる（SOURCES.md の vendored の表に載っているものは vendored として扱う。vendored の Skill と見分けるため）。
   - SKILL.md の frontmatter が skill-creator の quick_validate.py の検査を通る。
   - frontmatter の name がディレクトリ名と一致する。
   - SKILL.md が 500 行以内（skill-creator の指針）。
@@ -42,6 +43,7 @@ def set_root(root: Path) -> None:
 
 set_root(ROOT)
 MAX_LINES = 500
+OWN_PREFIX = "namu112358-"  # 自作の Skill の名前の接頭辞
 MIN_TRIGGER_EACH = 5  # 発火する例・しない例のそれぞれ。skill-creator の推奨は合わせて 20 件
 
 
@@ -172,6 +174,9 @@ def check_trigger(skill: Path) -> tuple:
 
 def check_own(skill: Path) -> tuple:
     errors, warns = [], []
+    if not skill.name.startswith(OWN_PREFIX):
+        errors.append(f"SOURCES.md の vendored の表に載っていない Skill は、名前を {OWN_PREFIX} で始めてください"
+                      "（vendored の Skill と見分けるため）")
     if not (skill / "SKILL.md").exists():
         return ["SKILL.md がありません"], []
     ok, msg = frontmatter_check(skill)
