@@ -41,6 +41,7 @@
 | `--r-lg`（12px） | `--r-lg` | `rounded-lg` |
 | `border-radius:999px`（タグ） | — | `rounded-full` |
 | `--font` | `--font` | `font-sans`（`body` の既定） |
+| `box-shadow: 0 8px 24px rgba(0,0,0,.12)`（浮く要素） | `--shadow` | `shadow-pop` |
 | 文字 11・12・13・14・16・20px | — | `text-2xs`・`text-xs`・`text-sm`・`text-base`・`text-lg`・`text-xl` |
 | 余白 4・6・8・10・12・14・16px | `--spacing: 4px` | `p-1`・`p-1.5`・`p-2`・`p-2.5`・`p-3`・`p-3.5`・`p-4` |
 
@@ -51,6 +52,9 @@
 | `--side`・`--side-active` | アプリの骨組み（サイドバー）の色。`--side` は `--surface` と同じ値。骨組みの部品を作るときに決める |
 | `--band-0`・`--band-1` | 特定の画面の帯の色。業務の型を作るときに決める |
 | `--viz-pb0`・`--viz-pb1` | 図の中の位置（%）で、色ではない |
+| `--viz-q`・`--viz-q-soft`・`--viz-q-track`・`--g-*` | 特定の図の色。図の部品（業務の型）を作るときに決める |
+| `--chat-hl`・`--chat-line`・`--chat-ink` | チャットの欄の色。業務の型を作るときに決める |
+| `--now-ink`・`--ib-edge` | 特定の画面の印の色。業務の型を作るときに決める |
 
 ## 明るい表示と暗い表示
 

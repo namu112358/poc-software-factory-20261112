@@ -50,7 +50,8 @@
   --viz-track: #f6f5f4;
   --viz-prev: #65625b;
 
-  /* 形・文字 */
+  /* 形・文字・影 */
+  --shadow: 0 8px 24px rgba(0, 0, 0, 0.12); /* 浮く要素（ダイアログ・ツールチップ・メニュー）だけ */
   --r: 8px;
   --r-lg: 12px;
   --font: "Noto Sans JP", -apple-system, "Hiragino Sans", "Yu Gothic UI", system-ui, sans-serif;
