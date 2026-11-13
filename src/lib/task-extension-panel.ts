@@ -1,6 +1,8 @@
 // タスク詳細の「期限の延長」欄の判定と表示。画面（クライアント）からも読むため、DB を使うモジュールは読み込まない。
 import { isSessionExpired } from "./session-expired.ts";
 
+export const EXTENSION_NOT_AFTER_MESSAGE = "希望の期限は、今の期限より後の日付にしてください"; // lib/extensions.ts と同じ文（DB を読まないよう複製）
+
 export const TASK_EXTENSION_RESULTS_MAX = 5;
 
 export type PanelExtension = {
@@ -53,7 +55,7 @@ export function validateExtensionRequestForm(
 ): string[] {
   const errors: string[] = [];
   if (!DATE_RE.test(input.newDueDate)) errors.push("希望の期限を入力してください");
-  else if (input.newDueDate <= currentDueDate) errors.push("希望の期限は、今の期限より後の日付にしてください");
+  else if (input.newDueDate <= currentDueDate) errors.push(EXTENSION_NOT_AFTER_MESSAGE);
   if (input.reason.trim() === "") errors.push("理由を入力してください");
   return errors;
 }
