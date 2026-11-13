@@ -16,6 +16,8 @@ export type MemberRow = {
   suspended: boolean;
   /** 役割（#524）。 */
   role: UserRole;
+  /** 仮のパスワードのままか（#566）。 */
+  mustChangePassword: boolean;
 };
 
 const TITLE_MAX = 10;
@@ -28,14 +30,15 @@ export function truncateTitle(title: string): string {
 
 /**
  * メンバーごとの、担当している未完了（完了以外）で、アーカイブしていないタスク。メンバーはユーザー ID 順、タスクは期限の早い順。
- * ログインを停止したメンバーも含め、`suspended` で分かるようにする（#522）。
+ * ログインを停止したメンバーも含め、`suspended` で分かるようにする（#522）。仮のパスワードのままかは `mustChangePassword`（#566）。
  */
 export function listMemberWorkload(db: Db = getDb(), today: string = todayInJapan()): MemberRow[] {
-  const users = db.prepare("SELECT id, name, suspended_at, role FROM users ORDER BY id").all() as {
+  const users = db.prepare("SELECT id, name, suspended_at, role, must_change_password FROM users ORDER BY id").all() as {
     id: string;
     name: string;
     suspended_at: string | null;
     role: string;
+    must_change_password: number;
   }[];
   const tasks = db
     .prepare("SELECT id, title, assignee, due_date AS dueDate FROM tasks WHERE status <> 'done' AND archived = 0 AND deleted_at IS NULL AND assignee IS NOT NULL ORDER BY due_date IS NULL, due_date, id")
@@ -54,6 +57,7 @@ export function listMemberWorkload(db: Db = getDb(), today: string = todayInJapa
       leaveUntil: leaveEndDates.get(u.id) ?? null,
       suspended: u.suspended_at !== null,
       role: u.role === "coordinator" ? "coordinator" : "member",
+      mustChangePassword: u.must_change_password === 1,
     };
   });
 }

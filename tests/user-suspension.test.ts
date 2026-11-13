@@ -226,9 +226,9 @@ describe("停止したメンバーは、担当者の選択肢に出ず、一覧�
     const db = openDb();
     suspend(db, "suzuki");
     assert.deepEqual(listUserSummaries(db), [
-      { id: "sato", name: "佐藤", suspended: false, role: "member" },
-      { id: "suzuki", name: "鈴木", suspended: true, role: "member" },
-      { id: "tanaka", name: "田中", suspended: false, role: "coordinator" },
+      { id: "sato", name: "佐藤", suspended: false, role: "member", mustChangePassword: false },
+      { id: "suzuki", name: "鈴木", suspended: true, role: "member", mustChangePassword: false },
+      { id: "tanaka", name: "田中", suspended: false, role: "coordinator", mustChangePassword: false },
     ]);
     const rows = listMemberWorkload(db, "2026-11-13");
     assert.deepEqual(rows.map((r) => [r.id, r.suspended]), [["sato", false], ["suzuki", true], ["tanaka", false]]);
@@ -237,7 +237,7 @@ describe("停止したメンバーは、担当者の選択肢に出ず、一覧�
   it("GET /api/users はパスワードのハッシュなどを含めない", () => {
     const db = openDb();
     suspend(db, "suzuki");
-    for (const u of listUserSummaries(db)) assert.deepEqual(Object.keys(u).sort(), ["id", "name", "role", "suspended"]);
+    for (const u of listUserSummaries(db)) assert.deepEqual(Object.keys(u).sort(), ["id", "mustChangePassword", "name", "role", "suspended"]);
   });
 
   it("一覧の絞り込みには残り、名前に（停止中）が付く（引き継ぐタスクを探せる）", () => {

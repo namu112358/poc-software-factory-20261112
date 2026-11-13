@@ -30,3 +30,16 @@ export function checkBodyFields<T>(
   if (unknown.length === 0) return result;
   return { ok: false, errors: [...unknown, ...(result.ok ? [] : result.errors)] };
 }
+
+/**
+ * 本文を受け付けない API（#566 など）のために、本文の文字列を読む。空（空白だけを含む）なら undefined、
+ * JSON として読めればその値、読めなければ文字列のまま返す（オブジェクトでない本文として、検証で断る）。
+ */
+export function parseOptionalJson(text: string): unknown {
+  if (text.trim() === "") return undefined;
+  try {
+    return JSON.parse(text);
+  } catch {
+    return text;
+  }
+}
