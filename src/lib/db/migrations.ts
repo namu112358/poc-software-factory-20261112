@@ -351,4 +351,35 @@ export const MIGRATIONS: readonly Migration[] = [
       ALTER TABLE users ADD COLUMN suspended_at TEXT;
     `,
   },
+  {
+    version: 29,
+    name: "login_attempts_by_source",
+    sql: `
+      -- ログインの失敗を「入力された ID と接続元の組」で数える（#526）。source は接続元の IP アドレス。見分けられなければ ''（ID ごとに数える）。
+      -- 既存の行は、接続元の分からない組として引き継ぐ。
+      CREATE TABLE login_attempts_new (
+        user_id      TEXT NOT NULL, -- 入力された ID（存在しない ID も数える）
+        source       TEXT NOT NULL DEFAULT '',
+        failures     INTEGER NOT NULL,
+        locked_until TEXT, -- ISO 8601（UTC）。ロックしていなければ NULL
+        PRIMARY KEY (user_id, source)
+      );
+      INSERT INTO login_attempts_new (user_id, source, failures, locked_until)
+        SELECT user_id, '', failures, locked_until FROM login_attempts;
+      DROP TABLE login_attempts;
+      ALTER TABLE login_attempts_new RENAME TO login_attempts;
+      -- アカウント全体（接続元をまたいだ）の失敗の時刻。直前 1 時間の数でアカウント全体をロックする。1 時間より古い行は書くついでに消す。
+      CREATE TABLE login_failure_log (
+        id        INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id   TEXT NOT NULL, -- 入力された ID（存在しない ID も数える）
+        failed_at TEXT NOT NULL  -- ISO 8601（UTC）
+      );
+      CREATE INDEX login_failure_log_user ON login_failure_log(user_id, failed_at);
+      -- アカウント全体のロック。locked_until を過ぎたら明ける。
+      CREATE TABLE account_login_locks (
+        user_id      TEXT PRIMARY KEY, -- 入力された ID（存在しない ID も数える）
+        locked_until TEXT NOT NULL     -- ISO 8601（UTC）
+      );
+    `,
+  },
 ];
