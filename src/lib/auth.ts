@@ -13,14 +13,17 @@ export const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 // ダミーのパスワードは起動ごとにランダムにし、推測で一致させられないようにする。
 const DUMMY_HASH = hashPassword(randomBytes(32).toString("hex"));
 
-/** ID とパスワードが正しければユーザーを返す。 */
+/**
+ * ID とパスワードが正しければユーザーを返す。
+ * ログインを停止した利用者は、パスワードが正しくても undefined（ほかの失敗と同じ扱い。停止しているかを外から見分けられないようにする。#522）。
+ */
 export function authenticate(userId: string, password: string, db: Db = getDb()): User | undefined {
-  const row = db.prepare("SELECT id, name, password_hash FROM users WHERE id = ?").get(userId) as
-    | { id: string; name: string; password_hash: string }
+  const row = db.prepare("SELECT id, name, password_hash, suspended_at FROM users WHERE id = ?").get(userId) as
+    | { id: string; name: string; password_hash: string; suspended_at: string | null }
     | undefined;
   const ok = verifyPassword(password, row?.password_hash || DUMMY_HASH);
   // パスワード未設定（ハッシュが空）のユーザーはログインさせない。
-  if (!row || !row.password_hash || !ok) return undefined;
+  if (!row || !row.password_hash || !ok || row.suspended_at !== null) return undefined;
   return { id: row.id, name: row.name };
 }
 
@@ -236,11 +239,16 @@ export function formatJstDateTime(iso: string): string {
   return `${parts.year}/${parts.month}/${parts.day} ${parts.hour}:${parts.minute}`;
 }
 
-/** 有効なセッションのユーザーを返す。期限切れ・不明なトークンは undefined。 */
+/**
+ * 有効なセッションのユーザーを返す。期限切れ・不明なトークンは undefined。
+ * ログインを停止した利用者のセッションも undefined（停止のときにセッションは消すが、残っていても通さない。#522）。
+ */
 export function getSessionUser(token: string | undefined, db: Db = getDb(), now: Date = new Date()): User | undefined {
   if (!token) return undefined;
   return db
-    .prepare("SELECT u.id, u.name FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token = ? AND s.expires_at > ?")
+    .prepare(
+      "SELECT u.id, u.name FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token = ? AND s.expires_at > ? AND u.suspended_at IS NULL",
+    )
     .get(token, now.toISOString()) as User | undefined;
 }
 

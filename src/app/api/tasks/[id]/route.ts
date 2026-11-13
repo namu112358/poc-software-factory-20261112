@@ -1,4 +1,5 @@
 // GET /api/tasks/:id — タスクを 1 件取得 / PATCH /api/tasks/:id — 送った項目だけを更新する / DELETE /api/tasks/:id — タスクを消す（担当者だけ）。ログインが必要。
+// PATCH でログインを停止した利用者へ担当者を変えようとしたときは 400 を返す（#522）。
 // PATCH で担当者が変わったときは、ログイン中の利用者を変更した人として履歴に残す（GET の応答には履歴を含めない）。
 // PATCH の本文に expectedUpdatedAt（編集を始めたときの更新日時）があれば、ほかの人が先に更新していたときは変えずに 409 を返す。
 import { NextResponse } from "next/server";
@@ -19,9 +20,11 @@ export async function PATCH(request: Request, { params }: Context) {
   const user = await requireApiUser();
   if (user instanceof NextResponse) return user;
   const id = parseTaskId((await params).id);
-  if (id === undefined || !getTask(id)) return jsonError(404, "タスクが見つかりません");
+  const current = id === undefined ? undefined : getTask(id);
+  if (id === undefined || !current) return jsonError(404, "タスクが見つかりません");
   const body = await readJson(request);
-  const result = validateTaskInput(body, { partial: true });
+  // 今の担当者をそのまま送ったときは、その人がログインを停止していても通す（担当を変えずにほかの項目を直せるように。#522）
+  const result = validateTaskInput(body, { partial: true, currentAssignee: current.assignee });
   const expected = parseExpectedUpdatedAt(body);
   if (!result.ok || !expected.ok) {
     const errors = [...(result.ok ? [] : result.errors), ...(expected.ok ? [] : expected.errors)];

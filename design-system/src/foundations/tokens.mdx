@@ -1,0 +1,37 @@
+import { Meta } from "@storybook/addon-docs/blocks";
+import { colorGroups, ColorTable, TextTable, SpaceTable, RadiusTable } from "./token-tables";
+
+<Meta title="基礎/トークン" />
+
+# トークン
+
+部品の色・文字・余白・角丸は、ここにあるトークンだけで書く。値の正本は `src/styles/tokens.css`、試作のモックとの対応は `docs/tokens.md`。
+
+色は、明るい表示と暗い表示の値を並べてある。部品の Story は、ツールバーの「表示」で切り替えられる。
+
+## 色
+
+ブランドの青（`brand`）は、主な操作・フォーカス・選択中だけに使う。状態の色（`ok`・`warn`・`err`）は、文字に使うときは対応する `-soft` の地と組み合わせる。
+
+{colorGroups.map((group) => (
+  <section key={group.title}>
+    <h3>{group.title}</h3>
+    <ColorTable tokens={group.tokens} />
+  </section>
+))}
+
+## 文字
+
+書体は `--font`（Noto Sans JP。無ければ OS の日本語の書体）。数字をそろえたいときは `tabular-nums` を付ける。
+
+<TextTable />
+
+## 余白
+
+4px 刻み。`p-2.5`（10px）・`p-3.5`（14px）のように、モックで使われている段を使う。`p-[13px]` のような任意の値は書かない。
+
+<SpaceTable />
+
+## 角丸
+
+<RadiusTable />

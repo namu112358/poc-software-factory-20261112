@@ -210,8 +210,8 @@ describe("元に戻す（画面の処理）", () => {
   it("文言: 変えた項目と、戻せなかった件数と理由", () => {
     assert.equal(bulkUndoOfferMessage(3, { status: "done" }), "3 件のステータスを変えました。");
     assert.equal(bulkUndoOfferMessage(1, { assignee: "sato", status: "done" }), "1 件の担当者とステータスを変えました。");
-    assert.equal(bulkUndoDoneMessage(2, 1), "2 件を元に戻しました。1 件は、変えた後にほかの変更があった（または削除された）ため、戻していません。");
-    assert.equal(bulkUndoDoneMessage(0, 2), "0 件を元に戻しました。2 件は、変えた後にほかの変更があった（または削除された）ため、戻していません。");
+    assert.equal(bulkUndoDoneMessage(2, 1), "2 件を元に戻しました。1 件は、変えた後にほかの変更があった（または削除された・担当者のログインが停止された）ため、戻していません。");
+    assert.equal(bulkUndoDoneMessage(0, 2), "0 件を元に戻しました。2 件は、変えた後にほかの変更があった（または削除された・担当者のログインが停止された）ため、戻していません。");
   });
 
   it("応答に元に戻す記録が無い・0 件なら、元に戻すを出さない", () => {
