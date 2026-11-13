@@ -1,4 +1,4 @@
-import { TASK_DUE_FILTERS, type Task, type TaskDueFilter } from "./task-types.ts";
+import { DUE_SOON_DAYS, TASK_DUE_FILTERS, type Task, type TaskDueFilter } from "./task-types.ts";
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 
@@ -35,8 +35,7 @@ export function isOverdue(task: Pick<Task, "status" | "dueDate">, today: string 
   return task.status !== "done" && task.dueDate < today;
 }
 
-/** 「期限が近い」とみなす日数。期限の 3 日前から当日まで（暦の日数。土日も数える）。 */
-export const DUE_SOON_DAYS = 3;
+export { DUE_SOON_DAYS };
 
 /** 期限が近いか。未完了で、期限が今日から 3 日後までの間（今日を含む）。期限切れは含めない。日付は日本時間の YYYY-MM-DD。 */
 export function isDueSoon(task: Pick<Task, "status" | "dueDate">, today: string = todayInJapan()): boolean {

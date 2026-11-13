@@ -1,26 +1,25 @@
 "use client";
 // 自分の休みの期間を登録・取り消すフォーム。結果は画面を読み込み直して出す。
+// ログインが切れていたら（401）、入力を残したまま、ログインし直す案内を出す（#491）。
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import type { FormEvent } from "react";
 import type { Absence } from "@/lib/absence";
+import { readFormFailure } from "@/lib/session-expired";
+import { SessionExpiredNotice } from "../../session-expired";
 
 const FAILED_MESSAGE = "保存できませんでした。時間をおいてもう一度試してください";
-
-async function errorMessages(res: Response): Promise<string[]> {
-  const body = (await res.json().catch(() => undefined)) as { error?: unknown; details?: unknown } | undefined;
-  if (Array.isArray(body?.details) && body.details.length > 0) return body.details.map(String);
-  return [typeof body?.error === "string" ? body.error : FAILED_MESSAGE];
-}
 
 export function AbsenceForm({ absence, onLeave }: { absence: Absence | null; onLeave: boolean }) {
   const router = useRouter();
   const [errors, setErrors] = useState<string[]>([]);
+  const [expired, setExpired] = useState(false);
   const [message, setMessage] = useState<string>();
   const [pending, setPending] = useState(false);
 
   async function send(init: RequestInit, done: string) {
     setErrors([]);
+    setExpired(false);
     setMessage(undefined);
     setPending(true);
     try {
@@ -29,7 +28,9 @@ export function AbsenceForm({ absence, onLeave }: { absence: Absence | null; onL
         setMessage(done);
         router.refresh();
       } else {
-        setErrors(await errorMessages(res));
+        const failure = readFormFailure(res.status, await res.json().catch(() => undefined), FAILED_MESSAGE);
+        if (failure.expired) setExpired(true);
+        else setErrors(failure.messages);
       }
     } catch {
       setErrors([FAILED_MESSAGE]);
@@ -79,6 +80,11 @@ export function AbsenceForm({ absence, onLeave }: { absence: Absence | null; onL
         )}
       </form>
       {message && <p role="status">{message}</p>}
+      {expired && (
+        <p role="alert" data-testid="absence-session-expired">
+          <SessionExpiredNotice />
+        </p>
+      )}
       {errors.map((e) => (
         <p key={e} role="alert">
           {e}

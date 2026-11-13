@@ -1,13 +1,17 @@
 // POST /api/login — JSON（{ userId, password }）またはフォーム送信でログインする。
 // フォーム送信のときは画面遷移（303）、JSON のときは JSON で応答する。
+// フォーム送信の next（ログインした後の戻り先。#491）は、このアプリの中の画面のときだけ使い、それ以外はタスク一覧へ移す。
 import { NextResponse } from "next/server";
 import { jsonError, readJson } from "@/lib/api";
 import { SESSION_COOKIE, SESSION_TTL_MS, login } from "@/lib/auth";
+import { loginErrorPath } from "@/lib/login-error";
+import { afterLoginPath } from "@/lib/session-expired";
 
 export async function POST(request: Request) {
   const isJson = (request.headers.get("content-type") ?? "").includes("application/json");
   let userId: unknown;
   let password: unknown;
+  let next: unknown;
   if (isJson) {
     const body = (await readJson(request)) as Record<string, unknown> | undefined;
     userId = body?.userId;
@@ -16,25 +20,22 @@ export async function POST(request: Request) {
     const form = await request.formData();
     userId = form.get("userId");
     password = form.get("password");
+    next = form.get("next");
   }
 
   const result = login(userId, password, undefined, undefined, request.headers.get("user-agent"));
-  if (!result.ok && result.reason === "locked") {
-    return isJson
-      ? jsonError(429, "ログインに続けて失敗したため、しばらくログインできません", [
-          `あと ${result.retryAfterMinutes} 分後に試せます`,
-        ])
-      : NextResponse.redirect(new URL("/login?error=locked", request.url), 303);
-  }
   if (!result.ok) {
-    return isJson
-      ? jsonError(401, "ID またはパスワードが正しくありません")
-      : NextResponse.redirect(new URL("/login?error=1", request.url), 303);
+    if (!isJson) return NextResponse.redirect(new URL(loginErrorPath(result, next), request.url), 303);
+    if (result.reason === "invalid") return jsonError(401, "ID またはパスワードが正しくありません");
+    const details = [`あと ${result.retryAfterMinutes} 分後に試せます`];
+    return result.reason === "lock-started"
+      ? jsonError(429, "ID またはパスワードが正しくありません。続けて失敗したため、ログインをロックしました", details)
+      : jsonError(429, "ログインに続けて失敗したため、しばらくログインできません", details);
   }
 
   const response = isJson
     ? NextResponse.json({ user: result.user })
-    : NextResponse.redirect(new URL("/tasks", request.url), 303);
+    : NextResponse.redirect(new URL(afterLoginPath(next), request.url), 303);
   response.cookies.set(SESSION_COOKIE, result.token, {
     httpOnly: true,
     sameSite: "lax",

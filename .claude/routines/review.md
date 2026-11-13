@@ -30,7 +30,7 @@ PR が `Closes #<番号>` で参照する Issue を読み、次の 2 段を順�
 
 あわせて、PR が `main` と衝突していないか（`mergeable`）を見る。衝突していれば、それを「必須」の指摘にする。
 
-PR が高リスクの変更（DB のスキーマ `src/lib/db/migrations.ts`／ログイン・セッション・権限の判定 `src/lib/auth.ts`・`src/lib/session.ts`・`src/lib/api.ts` の `requireApiUser` など／他人のデータを見せる・変える範囲が変わる変更）に当たれば、PR に `risk:high` を付け、レビューのコメントにどれに当たるかを書く。verdict には影響させない。
+PR が高リスクの変更（DB のスキーマ `src/lib/db/migrations.ts`／ログイン・セッション・権限の判定 `src/lib/auth.ts`・`src/lib/session.ts`・`src/lib/api.ts` の `requireApiUser` など／他人のデータを見せる・変える範囲が変わる変更）に当たれば、PR に `risk:high` を付け、レビューのコメントにどれに当たるかを書く。verdict には影響させない。`risk:high` は、結果を書く（3.）より前に付ける（ok のレビューを書くと PR は自動でキューに入るので、後から付けると間に合わないことがある）。
 
 ## 3. 結果を書く
 
@@ -42,4 +42,4 @@ PR が高リスクの変更（DB のスキーマ `src/lib/db/migrations.ts`／�
 
 - 直すべき指摘には、それぞれ「必須」を付け、どの受入条件・どの確かめた結果に反するかを書く。好みの問題は「任意」にし、verdict には数えない。
 - 「必須」が 1 つでもあれば verdict=changes にし、PR を draft に戻す（これが修正の起動の合図）。
-- 無ければ verdict=ok にし、Ready のままにする。人がマージするので、それ以上は何もしない。
+- 無ければ verdict=ok にし、Ready のままにする。それ以上は何もしない（`risk:high` 以外は、GitHub Actions がレビューの結果を status にして、自動でキューに入る。`risk:high` は人が `merge:requested` を付ける）。

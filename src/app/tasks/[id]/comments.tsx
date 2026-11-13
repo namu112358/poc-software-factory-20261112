@@ -1,12 +1,16 @@
 "use client";
 // コメントの投稿フォーム・編集・削除・元に戻すボタン。操作のあと、サーバー側の一覧を読み直す。
+// 投稿・編集でログインが切れていたら（401）、本文を残したまま、ログインし直す案内を出す（#491）。
 import { useRouter } from "next/navigation";
 import { useState, type FormEvent } from "react";
 import { confirmAndDeleteComment, requestRestoreComment } from "@/lib/comment-delete";
+import { readFormFailure } from "@/lib/session-expired";
+import { SessionExpiredNotice } from "../../session-expired";
 
 export function CommentForm({ taskId }: { taskId: number }) {
   const router = useRouter();
   const [error, setError] = useState<string>();
+  const [expired, setExpired] = useState(false);
   const [pending, setPending] = useState(false);
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
@@ -15,6 +19,7 @@ export function CommentForm({ taskId }: { taskId: number }) {
     const body = new FormData(form).get("body");
     setPending(true);
     setError(undefined);
+    setExpired(false);
     try {
       const res = await fetch(`/api/tasks/${taskId}/comments`, {
         method: "POST",
@@ -22,8 +27,9 @@ export function CommentForm({ taskId }: { taskId: number }) {
         body: JSON.stringify({ body }),
       });
       if (!res.ok) {
-        const data = (await res.json().catch(() => ({}))) as { error?: string; details?: string[] };
-        setError(data.details?.join(" ") ?? data.error ?? "コメントを投稿できませんでした。");
+        const failure = readFormFailure(res.status, await res.json().catch(() => undefined), "コメントを投稿できませんでした。");
+        if (failure.expired) setExpired(true);
+        else setError(failure.messages.join(" "));
         return;
       }
       form.reset();
@@ -41,6 +47,11 @@ export function CommentForm({ taskId }: { taskId: number }) {
         <textarea name="body" rows={3} cols={50} aria-label="コメントの本文" />
       </p>
       {error && <p role="alert">{error}</p>}
+      {expired && (
+        <p role="alert" data-testid="comment-session-expired">
+          <SessionExpiredNotice />
+        </p>
+      )}
       <button type="submit" disabled={pending}>
         投稿する
       </button>
@@ -76,6 +87,7 @@ export function EditCommentForm({ taskId, commentId, body }: { taskId: number; c
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [error, setError] = useState<string>();
+  const [expired, setExpired] = useState(false);
   const [pending, setPending] = useState(false);
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
@@ -83,6 +95,7 @@ export function EditCommentForm({ taskId, commentId, body }: { taskId: number; c
     const text = new FormData(event.currentTarget).get("body");
     setPending(true);
     setError(undefined);
+    setExpired(false);
     try {
       const res = await fetch(`/api/tasks/${taskId}/comments/${commentId}`, {
         method: "PATCH",
@@ -90,8 +103,9 @@ export function EditCommentForm({ taskId, commentId, body }: { taskId: number; c
         body: JSON.stringify({ body: text }),
       });
       if (!res.ok) {
-        const data = (await res.json().catch(() => ({}))) as { error?: string; details?: string[] };
-        setError(data.details?.join(" ") ?? data.error ?? "コメントを編集できませんでした。");
+        const failure = readFormFailure(res.status, await res.json().catch(() => undefined), "コメントを編集できませんでした。");
+        if (failure.expired) setExpired(true);
+        else setError(failure.messages.join(" "));
         return;
       }
       setOpen(false);
@@ -117,6 +131,11 @@ export function EditCommentForm({ taskId, commentId, body }: { taskId: number; c
         <textarea name="body" rows={3} cols={50} aria-label="編集する本文" defaultValue={body} />
       </p>
       {error && <p role="alert">{error}</p>}
+      {expired && (
+        <p role="alert" data-testid="comment-edit-session-expired">
+          <SessionExpiredNotice />
+        </p>
+      )}
       <button type="submit" disabled={pending}>
         保存する
       </button>{" "}
@@ -125,6 +144,7 @@ export function EditCommentForm({ taskId, commentId, body }: { taskId: number; c
         onClick={() => {
           setOpen(false);
           setError(undefined);
+          setExpired(false);
         }}
       >
         やめる

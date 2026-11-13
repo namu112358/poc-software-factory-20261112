@@ -1,27 +1,29 @@
+import { formatLoginError } from "@/lib/login-error";
 import { formatPageTitle } from "@/lib/page-title";
 import { redirect } from "next/navigation";
 import { getCurrentUser } from "@/lib/session";
+import { afterLoginPath, safeNextPath } from "@/lib/session-expired";
 import { PasswordField } from "./password-field";
 
 type Props = {
-  searchParams: Promise<{ error?: string }>;
+  searchParams: Promise<{ error?: string | string[]; minutes?: string | string[]; next?: string | string[] }>;
 };
 
 export const metadata = { title: formatPageTitle("ログイン") };
 
 export default async function LoginPage({ searchParams }: Props) {
-  // ログイン済みなら、ログイン画面を見せずにタスク一覧へ移す。
-  if (await getCurrentUser()) redirect("/tasks");
-  const { error } = await searchParams;
+  const { error, minutes, next } = await searchParams;
+  // ログイン済みなら、ログイン画面を見せずに戻り先（無ければタスク一覧）へ移す。
+  if (await getCurrentUser()) redirect(afterLoginPath(next));
+  // ログインした後の戻り先（#491）。このアプリの中の画面だけを送る。
+  const nextPath = safeNextPath(next);
+  const message = formatLoginError(error, minutes);
   return (
     <main id="main-content" tabIndex={-1}>
       <h1>ログイン</h1>
-      {error === "locked" ? (
-        <p role="alert">ログインに続けて失敗したため、しばらくしてからもう一度お試しください。</p>
-      ) : (
-        error !== undefined && <p role="alert">ID またはパスワードが正しくありません。</p>
-      )}
+      {message && <p role="alert">{message}</p>}
       <form method="post" action="/api/login" aria-label="ログイン">
+        {nextPath !== undefined && <input type="hidden" name="next" value={nextPath} />}
         <p>
           <label>
             ユーザー ID <input name="userId" autoComplete="username" required />
