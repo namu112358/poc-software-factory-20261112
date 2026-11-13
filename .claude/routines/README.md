@@ -61,7 +61,10 @@ flowchart LR
 - `.github/`・`.claude/`・`scripts/factory/`・`AGENTS.md`・`CLAUDE.md`・`docs/rulesets/` は変えない（例外は、振り返りの役が draft の PR で出す案だけ）。
 - 起動のラベル（`status:in-progress`・`status:in-progress-hard`）は、その Issue のほかのラベルを付け外ししてから 30 秒以上あけて付ける（同じ数秒にほかのラベルも付くと、実装が重ねて起動した。#429）。
 - push するのは `claude/` で始まるブランチだけ。force push はしない。
-- コマンドは 1 回に 1 つ実行する。`&&`・`;`・`||` でつながない、`cd` してから git を実行しない（git は `git -C <ディレクトリ>` で）、スクリプトをヒアドキュメントで python・node に流さない（ファイルに書いてから実行する）、`rm -rf` を使わない。つないだコマンドは承認の画面で止まり、Routine はそこから進めない（05:43・05:50 UTC のレビューの Routine）。git を含まないつなぎ（`S=...; $S`、`(cmd &)`、`cat > $S/x <<'EOF'`）でも 6 回止まったので、コマンドの種類を問わず、`;`・`&&`・`||` でつながない、`&` で裏で動かさない、シェル変数（`NAME=...`・`$NAME`・`$(...)`。`NAME=値 npm test` のようなコマンドの前の環境変数の前置きも）を使わない。複数の手順の確かめは、Write でスクラッチパッドにスクリプト（.mjs など）を書き、`node <ファイル>` で 1 コマンドで実行する。サーバーは Bash の `run_in_background` で 1 コマンドで起動する。一時のフォルダーは消さずに新しい名前で作る。`.claude/settings.json` の `PreToolUse` にフック（`.claude/hooks/bash-guard.mjs`）が登録済みで、これらの形はフックが実行前に断る（断られたら、言い換えずに分けて実行し直す）。
+- コマンドは 1 回に 1 つ実行する。`&&`・`;`・`||` でつながない、`cd` してから git を実行しない（git は `git -C <ディレクトリ>` で）、`rm -rf` を使わない。つないだコマンドは承認の画面で止まり、Routine はそこから進めない（05:43・05:50 UTC のレビューの Routine）。git を含まないつなぎ（`S=...; $S`、`(cmd &)`、`cat > $S/x <<'EOF'`）でも 6 回止まった。
+  - Bash のコマンドに、`;` `&` `<` `>` `$` バッククォート `\` `(` `)` `{` `}` と改行を書かない（引用符の中も）。リダイレクト・ヒアドキュメント・変数・`$(...)`・`NAME=値 npm test` のような前置きも使わない。`|` は `head`・`tail`・`grep`・`wc`・`sort` に渡す形だけ。git は `git -C <ディレクトリ>` で実行し、`git -c` などで設定を差し替えない。
+  - 複数の手順の確かめは、Write でスクラッチパッドにスクリプト（.mjs など）を書き、`node <ファイル>` で 1 コマンドで実行する。サーバーは Bash の `run_in_background` で 1 コマンドで起動する。`git commit -m` で書けない本文は、Write でファイルに書いて `git commit -F <ファイル>` で渡す。一時のフォルダーは消さずに新しい名前で作る。
+  - `.claude/settings.json` の `PreToolUse` にフック（`.claude/hooks/bash-guard.mjs`）が登録済みで、上の文字を含むコマンドは実行前に断られる（断られたら、言い換えずに分けて実行し直す）。フックの役目は、承認の画面で止まらないように早めに断って分け方を返すこと。何を実行してよいかの境界は、`.claude/settings.json` の許可（`permissions.allow`）である。
 - `claude/issue-` 以外の `claude/` の PR（有人のセッションが出した手順書・スクリプトの PR など）は、出したセッションが直す。修正の役は扱わず、衝突や必須の指摘で `status:needs-human` を付けない。レビューと、割り当ての衝突の知らせ、割り当て・巡回のレビューの起こし直し（Ready のまま 10 分レビューが無いとき。同じコミットで 2 回目は `status:needs-human`）は同じように行う。
 - PR の draft と Ready の切り替えは、GitHub MCP の `update_pull_request`（`draft: true` / `false`）で行う。
 - 実装の着手の鍵は、ブランチ `claude/issue-<番号>` の作成（同じ名前は 2 度作れない）。

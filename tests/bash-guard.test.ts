@@ -6,189 +6,83 @@ import { check } from "../.claude/hooks/bash-guard.mjs";
 
 const denied = (c: string) => (check(c) as { deny: boolean }).deny;
 
-describe("Bash のフック（承認の画面で止まりやすい形を断る）", () => {
-  it("git をつないだ形は断る", () => {
+describe("Bash のフック（文字の許可リスト。承認の画面で止まりやすい形を断る）", () => {
+  it("つなぎ・裏での実行・リダイレクト・展開・ヒアドキュメントなど、許さない文字を 1 つでも含めば断る（引用符の中も）", () => {
     for (const c of [
-      "cd /home/user/repo && git status",
-      "git fetch -q origin main && git merge --no-edit origin/main",
+      "cd /x && git status",
       "git add -A; git commit -m x",
       "git pull || echo ng",
-      "npm test && git push origin claude/x",
+      "sleep 1 & echo x",
+      "(python3 -m http.server 6006 &)",
+      "echo a 2>&1",
+      "echo a > /tmp/x",
+      "cat < /tmp/x",
+      "echo $HOME",
+      "echo ${HOME}",
+      "cat $(ls)",
+      "echo `date`",
+      "echo a\\b",
+      "ls (x)",
+      "echo {a,b}",
       "git status\ngit log",
+      "cat > /tmp/x.js <<'EOF'\nconsole.log(1)\nEOF",
+      'git commit -m "a; b"',
+      "echo 'a && b'",
+      "find . -exec ls {} \\;",
+      "rm -rf $S",
     ]) assert.equal(denied(c), true, c);
   });
 
-  it("rm -rf は断る", () => {
-    for (const c of ["rm -rf node_modules", "rm -fr /tmp/x", "rm -r -f dist", "ls; rm -rf x"]) assert.equal(denied(c), true, c);
+  it("`|` は head・tail・grep・wc・sort に渡す形だけ通す。それ以外・空の `|`・`||` は断る", () => {
+    for (const c of ["ls src | head -5", "git log --oneline | tail -3", "grep -n foo src/x.ts | wc -l", "ls | sort", "git diff --stat | grep claim | head"]) assert.equal(denied(c), false, c);
+    for (const c of ["ls | sh", "cat x | node", "ls | xargs rm", "ls | tee /tmp/x", "ls | python3", "ls ||", "a || b", "| head", "ls | head | sh"]) assert.equal(denied(c), true, c);
   });
 
-  it("手元の変更を捨てる形（checkout -- ・checkout .・restore）は断る。ブランチを替えるだけの checkout は通す", () => {
-    for (const c of ["git checkout -- .", "git checkout claude/x -- src/a.ts", "git checkout .", "git restore src/a.ts"]) assert.equal(denied(c), true, c);
-    for (const c of ["git checkout claude/issue-1", "git checkout -b claude/kaizen-x", "git checkout main"]) assert.equal(denied(c), false, c);
+  it("先頭の NAME=value の前置きは断る（パイプの後ろも）", () => {
+    for (const c of ["FOO=bar npm test", "NODE_OPTIONS=x npm test", "npm_config_script_shell=sh npm run x", "GIT_DIR=/x git status", "ls | FOO=1 head"]) assert.equal(denied(c), true, c);
+    for (const c of ["git commit -m a=b", "grep a=b x.txt", "npm run build -- --foo=bar"]) assert.equal(denied(c), false, c);
   });
 
-  it("rm の再帰と強制は、書き方を問わず断る（-Rf・--recursive --force・-r --force）。-f だけ・-r だけは通す", () => {
-    for (const c of ["rm -Rf x", "rm --recursive --force x", "rm -r --force x", "rm --force -R x"]) assert.equal(denied(c), true, c);
-    for (const c of ["rm -f x", "rm -r emptydir"]) assert.equal(denied(c), false, c);
-  });
-
-  it("git reset --hard・git clean -f も、手元の変更を捨てる形として断る。git reset（--hard なし）・git clean -n は通す", () => {
-    for (const c of ["git reset --hard", "git reset --hard origin/main", "git clean -f", "git clean -fd", "git clean --force"]) assert.equal(denied(c), true, c);
-    for (const c of ["git reset HEAD~1", "git clean -n", "git clean -nd"]) assert.equal(denied(c), false, c);
-  });
-
-  it("git の全体のオプション（-C・-c）の後でも、手元の変更を捨てる形は断る", () => {
-    for (const c of ["git -C x reset --hard", "git -C /repo clean -f", "git -c core.x=1 checkout -- .", "git --no-pager -C x restore a.ts"]) assert.equal(denied(c), true, c);
-    for (const c of ["git -C x status", "git -C x reset HEAD~1"]) assert.equal(denied(c), false, c);
-  });
-
-  it("rm の長い名前の省略（--rec・--forc・--force=）も断る", () => {
-    for (const c of ["rm --rec --forc x", "rm --recursive -f x", "rm -R --for x"]) assert.equal(denied(c), true, c);
-  });
-
-  it("シェルのパス・長いオプション・$'...' の -c も中身を見る", () => {
-    for (const c of ['/bin/bash -c "cd x && git status"', 'bash --norc -c "cd x && git log"', "bash -c $'cd x && git status'", "dash -c 'rm -rf x'"]) assert.equal(denied(c), true, c);
-  });
-
-  it("bash -c・sh -c の中身も同じ決まりで見る", () => {
-    for (const c of ['bash -c "cd x && git status"', "sh -c 'git add . ; git commit -m x'", 'bash -lc "cd x && git log"', "bash -c 'rm -rf x'"]) assert.equal(denied(c), true, c);
-    for (const c of ['bash -c "npm test"', "sh -c 'git status'"]) assert.equal(denied(c), false, c);
-  });
-
-  it("ヒアドキュメントで python・node に流す形は断る", () => {
-    for (const c of ["python3 - <<'EOF'\nprint(1)\nEOF", "node <<EOF\nconsole.log(1)\nEOF", "cat <<'EOF' | python3\nprint(1)\nEOF"]) assert.equal(denied(c), true, c);
-  });
-
-  it("1 つのコマンド・読むだけのパイプ・引用符の中の区切りは通す", () => {
+  it("git の -c・--config-env・--exec-path・--git-dir・--work-tree は断る。-C は通す", () => {
     for (const c of [
-      "git status",
-      "git -C /home/user/repo log --oneline -5",
-      "git log --oneline | head -5",
-      "git diff --stat | grep claim",
-      'git commit -m "直す; 理由 && 補足"',
+      "git -c core.pager=x log",
+      "git -C /x -c core.x=1 status",
+      "git --config-env=core.x=Y status",
+      "git --exec-path=/tmp/x status",
+      "git --exec-path status",
+      "git --git-dir=/x status",
+      "git --work-tree=/x status",
+      "/usr/bin/git -c a.b=c log",
+    ]) assert.equal(denied(c), true, c);
+    for (const c of ["git -C /x log --oneline -5", "git --no-pager log", "git commit -c HEAD", "git log -c"]) assert.equal(denied(c), false, c);
+  });
+
+  it("通す例（1 つのコマンド）", () => {
+    for (const c of [
       "npm test",
+      "npm run build",
+      "git status",
+      "git -C /x log --oneline -5",
+      'git commit -m "直す"',
+      "ls src | head -5",
+      "grep -n foo src/x.ts",
+      "node /tmp/x/check.mjs",
+      "npm run build -- --foo",
       "node scripts/factory/claim.ts gate --role review --number 1",
-      "rm tmp.txt",
-      "cat <<'EOF' > /tmp/x.md\n本文; git && x\nEOF",
       "python3 scripts/check-skills.py",
+      "git commit -F /tmp/msg.txt",
     ]) assert.equal(denied(c), false, c);
   });
 
-  it("git を含まなくても、`;`・`&&`・`||` でつないだ形は断る。引用符の中・パイプ・`\\;` は通す", () => {
-    for (const c of ["npm run build && npm test", "ls; pwd", "test -f a || echo ng", "echo a;echo b", "mkdir /tmp/x && node /tmp/x/a.mjs"]) assert.equal(denied(c), true, c);
-    for (const c of ["ls | head -5", 'echo "a; b && c"', "echo 'a || b'", "find . -name x -exec ls {} \\;"]) assert.equal(denied(c), false, c);
-  });
-
-  it("`&` で裏で動かす形は断る。`2>&1`・`>&2` は通す", () => {
-    for (const c of ["python3 -m http.server 6006 &", "(python3 -m http.server 6006 &)", "npm start &", "sleep 1 & echo x"]) assert.equal(denied(c), true, c);
-    for (const c of ["echo a 2>&1", "echo a >&2", "npm test 2>&1 | tail -5", "npm test &> /tmp/x.log", 'echo "a & b"']) assert.equal(denied(c), false, c);
-  });
-
-  it("コマンドの前の環境変数の前置き（NAME=value）は、npm・git の設定を変えられるので断る", () => {
-    for (const c of [
-      "FOO=bar npm test",
-      "NODE_ENV=test node /tmp/x/check.mjs",
-      "npm_config_script_shell=sh npm run x",
-      "NODE_OPTIONS=--require=/tmp/x.js npm test",
-      "GIT_EXTERNAL_DIFF=/tmp/x git diff",
-      "GIT_DIR=/x git status",
-      "ls | FOO=1 cat",
-      "env FOO=bar npm test",
-      "env -i FOO=bar npm test",
-    ]) assert.equal(denied(c), true, c);
-    for (const c of ["git -c core.pager=cat log", "npm run build -- --foo=bar", 'git commit -m "a=b"', "echo a=b"]) assert.equal(denied(c), false, c);
-  });
-
-  it("`>|` と、`>` の直後の `|` で切れない引数の検査（git diff --output を `>|` の後ろに隠せない）", () => {
-    for (const c of ["echo a >| /tmp/x", "git diff >| /tmp/x --output=/tmp/y", "git diff > /tmp/o --output=y", "npm test >| /tmp/x"]) assert.equal(denied(c), true, c);
-    for (const c of ["git diff --stat | head -5", "git log --oneline |& head -5", "npm test 2>&1 | tail -3"]) assert.equal(denied(c), false, c);
-  });
-
-  it("git diff・log・show で `--o` で始まる省略したオプション（--outp=x・--o=x）は断る。--oneline は通す", () => {
-    for (const c of ["git diff --outp=/tmp/x", "git diff --o=/tmp/x", "git log --out /tmp/x", "git show --output-indicator-new=+", "git diff --output-indicator-new=+"]) assert.equal(denied(c), true, c);
-    for (const c of ["git log --oneline", "git log --oneline -5", "git diff --stat"]) assert.equal(denied(c), false, c);
-  });
-
-  it("シェル変数の代入・展開（$NAME・${...}・$(...)・バッククォート）は断る", () => {
-    for (const c of ["echo $HOME", "ls ${TMPDIR}/x", "cat $(ls)", "echo `date`", 'echo "$S/check.js"', "cat > $S/check.js <<'EOF'\nconsole.log(1)\nEOF", "S=/tmp/x\nnode $S/a.mjs", "S=/tmp/x\nls /tmp"]) assert.equal(denied(c), true, c);
-    for (const c of ["echo '$HOME'", 'echo "cost \\$5"', 'git commit -m "直す: 値は $5 ではない"']) assert.equal(denied(c), false, c);
-  });
-
-  it("断るときの文言に、分け方（1 回に 1 コマンド・Write でスクリプト・run_in_background）を書く", () => {
-    for (const c of ["ls; pwd", "npm start &", "echo $HOME"]) {
+  it("断るときの文言に、分け方（1 回に 1 コマンド・Write でスクリプト・run_in_background・git commit -F）を書く", () => {
+    for (const c of ["ls; pwd", "npm start &", "echo $HOME", "ls | sh", "FOO=1 npm test", "git -c a.b=c log"]) {
       const r = check(c) as { reason: string };
       assert.match(r.reason, /1 回に 1 コマンド/, c);
       assert.match(r.reason, /Write/, c);
       assert.match(r.reason, /run_in_background/, c);
+      assert.match(r.reason, /git commit -F/, c);
       assert.match(r.reason, /新しい名前/, c);
     }
-  });
-
-  it("git diff・log・show の --output・-o、npm の設定の引数、checkout claude/<ブランチ> に続く引数は断る", () => {
-    for (const c of [
-      "git diff --output=/tmp/x.patch",
-      "git -C /x log --output /tmp/x",
-      "git show -o /tmp/x HEAD",
-      "git diff -ofile",
-      "npm test --script-shell=/tmp/x.sh",
-      "npm run build --script-shell /tmp/x.sh",
-      "npm run build --node-options=--require=/tmp/x.js",
-      "npm test --foo=bar",
-      "npm run build --cache=/tmp/x -- --foo",
-      "git checkout claude/issue-1 src/a.ts",
-      "git -C /x checkout claude/issue-1 package.json",
-    ]) assert.equal(denied(c), true, c);
-    for (const c of [
-      "git status",
-      "git -C /x log --oneline",
-      "git log --oneline | grep -o x",
-      "npm test",
-      "npm run build -- --foo",
-      "npm run build -- --foo=bar",
-      "git checkout claude/issue-1",
-      "git -C /x checkout -B claude/x origin/claude/x",
-      "git checkout claude/issue-1 2>&1",
-      "node /tmp/x/check.mjs",
-    ]) assert.equal(denied(c), false, c);
-  });
-
-  it("git diff・log・show・checkout と npm test・run の引数に引用符・バックスラッシュがあれば断る", () => {
-    for (const c of [
-      'git diff "--output=x"',
-      "git diff --out\\put=x",
-      "git log '--output=x'",
-      'git show "HEAD"',
-      'git checkout "claude/x"',
-      "npm run build '--script-shell=sh'",
-      'npm test "--userconfig=x"',
-      "npm run build -- --grep 'a b'",
-      "npm run-script b\\uild",
-    ]) assert.equal(denied(c), true, c);
-    for (const c of ["git diff --stat", "git log --oneline -5", "npm run build -- --foo", "npm test"]) assert.equal(denied(c), false, c);
-  });
-
-  it("npm test・run は、`--` より前の `-` で始まる引数をすべて断る（空白区切り・--prefix・-C を含む）。`npm run <名前>` と `-- <引数>` は通す", () => {
-    for (const c of [
-      "npm run build --userconfig x",
-      "npm test --prefix /tmp/x",
-      "npm run build -C /tmp/x",
-      "npm --prefix /tmp/x run build",
-      "npm t --ignore-scripts",
-      "npm run-script build --silent",
-      "npm run build --foo -- --bar",
-    ]) assert.equal(denied(c), true, c);
-    for (const c of ["npm run build", "npm run build -- --foo", "npm run build -- --userconfig x", "npm test -- --test-name-pattern=x", "npm test 2>&1", "npm run build 2>&1 | tail -3", "npm ci", "npm install"]) assert.equal(denied(c), false, c);
-  });
-
-  it("git checkout claude/<ブランチ> の後ろの引数は、リダイレクトを挟んでも断る。リダイレクトだけなら通す", () => {
-    for (const c of [
-      "git checkout claude/x 2>/dev/null src/a.ts",
-      "git checkout claude/x >/dev/null package.json",
-      "git checkout claude/x 2>&1 src/a.ts",
-      "git -C /x checkout claude/x > /tmp/o src/a.ts",
-      "git checkout claude/x src/a.ts 2>&1",
-    ]) assert.equal(denied(c), true, c);
-    for (const c of ["git checkout claude/x 2>&1", "git checkout claude/x > /tmp/o", "git checkout claude/x 2>/dev/null"]) assert.equal(denied(c), false, c);
   });
 
   it("フックとして動かすと、断るときだけ deny の JSON を返し、終了コードは 0", () => {
@@ -199,7 +93,7 @@ describe("Bash のフック（承認の画面で止まりやすい形を断る�
     const out = JSON.parse(ng.stdout);
     assert.equal(out.hookSpecificOutput.hookEventName, "PreToolUse");
     assert.equal(out.hookSpecificOutput.permissionDecision, "deny");
-    assert.match(out.hookSpecificOutput.permissionDecisionReason, /1 コマンドずつ/);
+    assert.match(out.hookSpecificOutput.permissionDecisionReason, /1 回に 1 コマンド/);
     const ok = run("git status");
     assert.equal(ok.status, 0);
     assert.equal(ok.stdout, "");
