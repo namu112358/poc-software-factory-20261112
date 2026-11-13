@@ -2,6 +2,7 @@
 // タスクの「編集」ボタンとフォーム。保存はフォームを開いたときの更新日時を付けて送り、
 // ほかの人が先に更新していたら（409）上書きせずに知らせ、入力は残したまま、相手が変えた項目を並べる。
 // 「今の値で編集し直す」を押すまでは保存できない（自分の入力のまま、確かめずに上書きしないため）。
+// 編集し直すと、相手が変えた項目だけが今の値になり、ほかの項目は自分の入力が残る。
 import { useRouter } from "next/navigation";
 import { useMemo, useState, type FormEvent } from "react";
 import {
@@ -206,7 +207,7 @@ export function EditTaskForm({ task, users }: Props) {
               </tbody>
             </table>
           )}
-          <p>保存するには、今の値でフォームを入れ直してから、もう一度入力してください。</p>
+          <p>「今の値で編集し直す」を押すと、相手が変えた項目は今の値になり、ほかの項目はあなたの入力のまま残ります。確かめてから保存してください。</p>
           <button type="button" onClick={rebase} disabled={pending}>
             今の値で編集し直す
           </button>
