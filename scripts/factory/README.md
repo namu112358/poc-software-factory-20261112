@@ -9,6 +9,7 @@ Routine（`.claude/routines/`）が使う判定のスクリプトです。GitHub
 | `pick` | 割り当て・巡回 | 着手させる候補（`pick`）と、待ち先を付け替える Issue（`rewait` とその `comment`）。空き・budget の残り |
 | `precheck <番号> --files a,b` | 割り当て・巡回 | 候補 1 件を着手させてよいか（`go` / `queue` / `error`）と、そのまま行う操作（`actions`） |
 | `relabel --minutes N` | 割り当て（15）・巡回（30） | 起動しなかった実装の付け直しの対象（`relabel`）と、2 回目で人に回すもの（`needsHuman`） |
+| `stalled --role dispatch\|patrol` | 割り当て・巡回 | 止まった実装・PR の片付け。衝突した PR・レビューが動かなかった PR・CI が通ったまま止まった draft・作業中のまま止まった Issue・CI が通らないまま止まった draft・Mergify の時間切れ・閉じた Issue に残った起動のラベルを、行の順に最初に当たった 1 つだけ判定し、`actions`（`target`・`action`・`removeLabels`・`addLabels`・`draft`・`issue`・`comment`）に出す。`mergeable` が `null` の PR は `unknown`（1 分後に 1 回だけ実行し直す）。PR は `claude/` のもの（`claude/issue-` 以外は衝突だけ）。人を待っているもの（`status:needs-human` の PR、Issue に `status:blocked-question`・`status:needs-human`・`kind:epic`）は対象にしない |
 | `handled --since <時刻>` | 割り当て | ほかの割り当てのセッションが、その時刻より後に処理した Issue・PR |
 | `budget` | （確かめ用） | 直近 60 分に `status:in-progress`・`status:in-progress-hard` を付けた回数と、残り |
 | `review-status <PR>` | GitHub Actions（`.github/workflows/factory-review-status.yml`。main の定義で動くきっかけだけで起動する） | レビューを通ったことを表す status（`factory-review`）の値。`merge-check` のレビューの部分と同じ判定で `ok` なら `success`（`risk:high` の PR と、品質のゲート〔CI の動きを決めるファイル・Mergify・手順書・判定のスクリプト・規約・Ruleset。一覧は `GATE_PATHS`〕を変える PR は付けない）、最新のコミットへのレビューが ok でなければ `failure`、それ以外は `null`（付けない）。Mergify は `risk:high` 以外の PR を、これが `success` ならキューに入れる |
@@ -39,4 +40,4 @@ PR に `merge:requested` を付ける前に、必ず `node scripts/factory/claim
 
 ## 人の手順: 最初に動かすとき
 
-割り当ての Routine は PR が閉じたときにしか動かない。作業中が 0 件のときは、人（有人のセッション）が `pick` を実行し、`.claude/routines/dispatch.md` の「2.」と同じ手順で `status:in-progress`（`status:in-progress-hard`）を付ける。その後は、PR が閉じるたびに割り当てが、1 時間ごとに巡回が着手させる。
+割り当ての Routine は、PR が閉じたときと、Issue に `status:ready` が付いたとき（#357。トリガーの設定はユーザー）に動く。承認のトリガーがまだ無い環境で作業中が 0 件のときは、人（有人のセッション）が `pick` を実行し、`.claude/routines/dispatch.md` の「1.」と同じ手順で `status:in-progress`（`status:in-progress-hard`）を付ける。その後は、PR が閉じるたびに割り当てが、1 時間ごとに巡回が着手させる。

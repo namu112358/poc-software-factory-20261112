@@ -1,12 +1,15 @@
+import { formatPageTitle } from "@/lib/page-title";
 import { listTagCounts } from "@/lib/tags";
 import { requireUser } from "@/lib/session";
+
+export const metadata = { title: formatPageTitle("タグ一覧") };
 
 export default async function TagsPage() {
   await requireUser();
   const tags = listTagCounts();
 
   return (
-    <main>
+    <main id="main-content" tabIndex={-1}>
       <h1>タグ一覧</h1>
       {tags.length === 0 ? (
         <p data-testid="tags-empty">タグはまだありません。</p>

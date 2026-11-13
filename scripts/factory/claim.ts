@@ -6,6 +6,7 @@
 //   node scripts/factory/claim.ts handled --since <ISO 8601>            ほかの割り当てがもう処理した Issue・PR
 //   node scripts/factory/claim.ts merge-check <PR>                      merge:requested のラベルを付けてよいか（最新のレビューが ok で、その後は取り込みだけか）
 //   node scripts/factory/claim.ts review-status <PR>                    レビューを通ったことを表す status（factory-review）の値（success・failure・null）。GitHub Actions が使う
+//   node scripts/factory/claim.ts stalled --role dispatch|patrol       止まった実装・PR の片付け（actions に、そのまま行う操作。unknown は 1 分後にもう一度）
 //   node scripts/factory/claim.ts budget                                直近 60 分に status:in-progress を付けた回数と、あと何回付けてよいか
 // Node 22.18 以上（型を外して .ts をそのまま動かす）。クラウドのプロキシを通すため、NODE_USE_ENV_PROXY=1 で自分を起動し直す。
 import { spawnSync } from "node:child_process";
@@ -15,6 +16,11 @@ import {
   makeIsStalled,
   pick,
   STALLED_LABELS,
+  stalledActions,
+  type StalledPr,
+  type StalledIssue,
+  type StalledCommit,
+  type CheckState,
   START_LABELS,
   LABEL,
   normalizeLabel,
@@ -183,38 +189,112 @@ function mySession(): string | null {
   return m ? `session_${m[1]}` : null;
 }
 
-/** merge-check・review-status に共通: 最新のレビューが ok で、その後は取り込みだけのコミットかを判定する */
-async function reviewCheck(n: number): Promise<{ headSha: string; labels: string[]; review: ReturnType<typeof mergeCheck> }> {
-  const pr = (await get<{ head: { sha: string }; labels: { name: string }[] }>(`/repos/${REPO}/pulls/${n}`)).data;
-  const reviews = (await getAll<{ body: string | null; submitted_at: string; author_association: string }>(`/repos/${REPO}/pulls/${n}/reviews`))
-    .sort((a, b) => (a.submitted_at < b.submitted_at ? -1 : 1))
-    .map((r) => ({ body: r.body ?? "", association: r.author_association }));
-  const git = (...a: string[]) => spawnSync("git", a, { encoding: "utf-8" });
-  const commitOf = /<!--\s*factory:review\s+verdict=\w+[^>]*?commit=([0-9a-f]+)/;
-  const last = reviews
-    .filter((r) => TRUSTED_ASSOCIATIONS.includes(r.association))
-    .map((r) => commitOf.exec(r.body)?.[1])
-    .filter(Boolean)
-    .at(-1);
-  let after: { sha: string; mergeOnly: boolean }[] | null = [];
-  if (last && !pr.head.sha.startsWith(last)) {
-    const fetched = git("fetch", "-q", "origin", `+pull/${n}/head:refs/factory/pr-${n}`, "+main:refs/factory/main");
-    if (fetched.status !== 0) throw new Error(`git fetch に失敗した（${fetched.stderr.trim()}）。付けずに、後でやり直す。`);
-    // 手元の参照が古いまま判定しないよう、取り込んだ PR の先頭が GitHub の head と同じかを確かめる
-    const local = git("rev-parse", `refs/factory/pr-${n}`).stdout.trim();
-    if (local !== pr.head.sha) throw new Error(`手元の PR の先頭（${local.slice(0, 7)}）が GitHub の head（${pr.head.sha.slice(0, 7)}）と違う。付けずに、後でやり直す。`);
-    const list = git("rev-list", "--first-parent", `${last}..refs/factory/pr-${n}`);
-    if (list.status !== 0) after = null;
-    else
-      after = list.stdout.split("\n").filter(Boolean).map((sha) => {
-        const parents = git("rev-list", "--parents", "-n1", sha).stdout.trim().split(" ").slice(1);
-        const diff = git("show", "--format=", "--remerge-diff", sha).stdout.trim();
-        // 取り込みだけのコミット: main を取り込んだ（2 つ目の親が main に含まれる）マージで、--remerge-diff の差分が空
-        const fromMain = parents.length === 2 && git("merge-base", "--is-ancestor", parents[1], "refs/factory/main").status === 0;
-        return { sha, mergeOnly: fromMain && diff === "" };
-      });
+const git = (...a: string[]) => spawnSync("git", a, { encoding: "utf-8" });
+
+/**
+ * レビューのコミット（last）より後の PR のコミット（first-parent）と、それが「取り込みだけのコミット」か。
+ * head が last と同じなら []。last が PR の履歴に無ければ null。手元の参照が古い・fetch に失敗したときは例外（付けずに、後でやり直す）。
+ * merge-check と stalled が使う。
+ */
+function commitsAfter(n: number, last: string, headSha: string): StalledCommit[] | null {
+  if (headSha.startsWith(last)) return [];
+  const fetched = git("fetch", "-q", "origin", `+pull/${n}/head:refs/factory/pr-${n}`, "+main:refs/factory/main");
+  if (fetched.status !== 0) throw new Error(`git fetch に失敗した（${fetched.stderr.trim()}）。付けずに、後でやり直す。`);
+  // 手元の参照が古いまま判定しないよう、取り込んだ PR の先頭が GitHub の head と同じかを確かめる
+  const local = git("rev-parse", `refs/factory/pr-${n}`).stdout.trim();
+  if (local !== headSha) throw new Error(`手元の PR の先頭（${local.slice(0, 7)}）が GitHub の head（${headSha.slice(0, 7)}）と違う。付けずに、後でやり直す。`);
+  const list = git("rev-list", "--first-parent", `${last}..refs/factory/pr-${n}`);
+  if (list.status !== 0) return null;
+  return list.stdout.split("\n").filter(Boolean).map((sha) => {
+    const parents = git("rev-list", "--parents", "-n1", sha).stdout.trim().split(" ").slice(1);
+    const diff = git("show", "--format=", "--remerge-diff", sha).stdout.trim();
+    // 取り込みだけのコミット: main を取り込んだ（2 つ目の親が main に含まれる）マージで、--remerge-diff の差分が空
+    const fromMain = parents.length === 2 && git("merge-base", "--is-ancestor", parents[1], "refs/factory/main").status === 0;
+    return { sha, mergeOnly: fromMain && diff === "" };
+  });
+}
+
+const COMMIT_MARK_RE = /<!--\s*factory:review\s+verdict=(\w+)[^>]*?commit=([0-9a-f]+)/;
+type RawPull = { number: number; draft: boolean; mergeable?: boolean | null; created_at: string; updated_at: string; head: { ref: string; sha: string }; labels?: { name: string }[] };
+type RawTrustedComment = { body: string | null; updated_at: string; author_association: string; user?: { login: string } };
+
+/** 止まった実装・PR の判定の入力を GitHub と git から集める（読むだけ） */
+async function loadStalled(role: string) {
+  const list = (await getAll<RawPull>(`/repos/${REPO}/pulls?state=open`)).filter((p) => p.head.ref.startsWith("claude/"));
+  const prs: StalledPr[] = [];
+  const unknown: { pr: number; reason: string }[] = [];
+  const issues = new Map<number, StalledIssue>();
+  const addIssue = (raw: { number: number; labels?: { name: string }[]; updated_at?: string }) =>
+    issues.set(raw.number, { number: raw.number, labels: (raw.labels ?? []).map((l) => normalizeLabel(l.name)), updatedAt: raw.updated_at ?? "" });
+  for (const label of START_LABELS) {
+    for (const i of (await getAll<RawIssue & { updated_at: string }>(`/repos/${REPO}/issues?state=open&labels=${encodeURIComponent(label)}`)).filter((x) => !x.pull_request)) addIssue(i);
   }
-  return { headSha: pr.head.sha, labels: pr.labels.map((l) => l.name), review: mergeCheck({ reviews, headSha: pr.head.sha, after }) };
+  for (const p of list) {
+    const no = issueOf(p.head.ref);
+    if (Number.isInteger(no) && !issues.has(no)) {
+      const { status, data } = await get<RawIssue & { updated_at: string }>(`/repos/${REPO}/issues/${no}`);
+      if (status !== 404) addIssue(data);
+    }
+  }
+  for (const p of list) {
+    const n = p.number;
+    const own = Number.isInteger(issueOf(p.head.ref));
+    const full = (await get<RawPull>(`/repos/${REPO}/pulls/${n}`)).data; // 一覧には mergeable が入らない
+    const labels = (full.labels ?? []).map((l) => normalizeLabel(l.name));
+    const mergeable = full.mergeable ?? null;
+    let appCheck: CheckState = "none";
+    let reviews: StalledPr["reviews"] = [];
+    let after: StalledPr["after"] = {};
+    let readyAt: string | null = null;
+    let priorMarks: StalledPr["priorMarks"] = [];
+    let bodyCheck: CheckState = "none";
+    let mergifyTimeout: StalledPr["mergifyTimeout"] = null;
+    try {
+      if (mergeable !== null) {
+        const comments = (await getAll<RawTrustedComment>(`/repos/${REPO}/issues/${n}/comments`)).filter((c) => TRUSTED_ASSOCIATIONS.includes(c.author_association));
+        priorMarks = comments
+          .map((c) => /factory:(?:dispatch|patrol) action=([\w-]+) commit=([0-9a-f]+)/.exec(c.body ?? ""))
+          .filter((m): m is RegExpExecArray => m !== null)
+          .map((m) => ({ action: m[1], commit: m[2] }));
+      }
+      if (mergeable !== null && own) {
+        const checkState = async (name: string): Promise<CheckState> => {
+          const runs = (await get<{ check_runs: { status: string; conclusion: string | null; started_at: string }[] }>(`/repos/${REPO}/commits/${full.head.sha}/check-runs?check_name=${name}&per_page=100`)).data.check_runs ?? [];
+          const latest = runs.sort((a, b) => (a.started_at < b.started_at ? -1 : 1)).at(-1);
+          return !latest ? "none" : latest.status !== "completed" ? "pending" : latest.conclusion === "success" ? "success" : "failure";
+        };
+        appCheck = await checkState("app-check");
+        bodyCheck = await checkState("pr-body-check");
+        reviews = (await getAll<{ body: string | null; submitted_at: string; author_association: string }>(`/repos/${REPO}/pulls/${n}/reviews`))
+          .sort((a, b) => (a.submitted_at < b.submitted_at ? -1 : 1))
+          .filter((r) => TRUSTED_ASSOCIATIONS.includes(r.author_association))
+          .map((r) => COMMIT_MARK_RE.exec(r.body ?? ""))
+          .filter((m): m is RegExpExecArray => m !== null)
+          .map((m) => ({ verdict: m[1], commit: m[2] }));
+        for (const commit of new Set([reviews.at(-1)?.commit, reviews.filter((r) => r.verdict === "ok").at(-1)?.commit])) {
+          if (commit) after[commit] = commitsAfter(n, commit, full.head.sha);
+        }
+        if (!full.draft) {
+          const tl = await getAll<{ event: string; created_at: string }>(`/repos/${REPO}/issues/${n}/timeline`);
+          readyAt = tl.filter((e) => e.event === "ready_for_review").at(-1)?.created_at ?? full.created_at;
+        }
+        if (labels.some((l) => l === "merge:dequeued" || l === "dequeued")) {
+          const comments = await getAll<RawTrustedComment>(`/repos/${REPO}/issues/${n}/comments`);
+          const m = comments.filter((c) => /dequeue_reason[\s\S]{0,300}?CHECKS_TIMEOUT/.test(c.body ?? "")).at(-1);
+          if (m) mergifyTimeout = { at: m.updated_at };
+        }
+      }
+    } catch (e) {
+      unknown.push({ pr: n, reason: e instanceof Error ? e.message : String(e) });
+      continue;
+    }
+    prs.push({ number: n, headRef: full.head.ref, headSha: full.head.sha, draft: full.draft, mergeable, labels, updatedAt: full.updated_at, readyAt, appCheck, reviews, after, priorMarks, bodyCheck, mergifyTimeout });
+  }
+  const closed = (await get<(RawIssue & { updated_at: string })[]>(`/repos/${REPO}/issues?state=closed&per_page=100&sort=updated&direction=desc`)).data.filter((i) => !i.pull_request);
+  const closedStarted = closed.map((i) => ({ number: i.number, labels: (i.labels ?? []).map((l) => normalizeLabel(l.name)) })).filter((i) => i.labels.some((l) => START_LABELS.includes(l)));
+  const sessionId = mySession();
+  const r = stalledActions({ role, now: new Date().toISOString(), sessionUrl: sessionId ? `https://claude.ai/code/${sessionId}` : null, prs, issues: [...issues.values()], closedStarted });
+  return { ...r, unknown: [...r.unknown, ...unknown] };
 }
 
 async function main(): Promise<unknown> {
@@ -239,8 +319,18 @@ async function main(): Promise<unknown> {
       return loadBudget();
     case "merge-check": {
       if (!Number.isInteger(n)) throw new Error("PR の番号を指定する");
-      const { headSha, review } = await reviewCheck(n);
-      const pr = { head: { sha: headSha } };
+      const pr = (await get<{ head: { sha: string } }>(`/repos/${REPO}/pulls/${n}`)).data;
+      const reviews = (await getAll<{ body: string | null; submitted_at: string; author_association: string }>(`/repos/${REPO}/pulls/${n}/reviews`))
+        .sort((a, b) => (a.submitted_at < b.submitted_at ? -1 : 1))
+        .map((r) => ({ body: r.body ?? "", association: r.author_association }));
+      const commitOf = /<!--\s*factory:review\s+verdict=\w+[^>]*?commit=([0-9a-f]+)/;
+      const last = reviews
+        .filter((r) => TRUSTED_ASSOCIATIONS.includes(r.association))
+        .map((r) => commitOf.exec(r.body)?.[1])
+        .filter(Boolean)
+        .at(-1);
+      const after = last ? commitsAfter(n, last, pr.head.sha) : [];
+      const review = mergeCheck({ reviews, headSha: pr.head.sha, after });
       if (!review.ok) return { pr: n, ...review };
       // レビューが ok でも、キューに入る条件のチェックが落ちていればキューに入らない（#364）
       const runs = (
@@ -251,15 +341,30 @@ async function main(): Promise<unknown> {
     }
     case "review-status": {
       if (!Number.isInteger(n)) throw new Error("PR の番号を指定する");
-      const { headSha, labels, review } = await reviewCheck(n);
-      // 判定のよりどころは GitHub の変更ファイル（PR の側の記述は読まない）
+      const pr = (await get<{ head: { sha: string }; labels: { name: string }[] }>(`/repos/${REPO}/pulls/${n}`)).data;
+      const reviews = (await getAll<{ body: string | null; submitted_at: string; author_association: string }>(`/repos/${REPO}/pulls/${n}/reviews`))
+        .sort((a, b) => (a.submitted_at < b.submitted_at ? -1 : 1))
+        .map((r) => ({ body: r.body ?? "", association: r.author_association }));
+      const commitOf = /<!--\s*factory:review\s+verdict=\w+[^>]*?commit=([0-9a-f]+)/;
+      const last = reviews
+        .filter((r) => TRUSTED_ASSOCIATIONS.includes(r.association))
+        .map((r) => commitOf.exec(r.body)?.[1])
+        .filter(Boolean)
+        .at(-1);
+      const review = mergeCheck({ reviews, headSha: pr.head.sha, after: last ? commitsAfter(n, last, pr.head.sha) : [] });
       const raw = await getAll<{ filename: string; previous_filename?: string }>(`/repos/${REPO}/pulls/${n}/files`);
       // 一覧が途中で切れた・判定の間に head が変わったときは、付けない（安全側に倒す）
       const now = (await get<{ head: { sha: string }; changed_files: number }>(`/repos/${REPO}/pulls/${n}`)).data;
-      if (now.head.sha !== headSha) return { pr: n, sha: headSha, state: null, description: "判定の間に PR の最新のコミットが変わった。次のきっかけで判定し直す。" };
-      if (raw.length !== now.changed_files) return { pr: n, sha: headSha, state: null, description: `変更ファイルの一覧（${raw.length} 件）が PR の変更ファイル数（${now.changed_files} 件）と合わない。人が確かめる。` };
+      if (now.head.sha !== pr.head.sha) return { pr: n, sha: pr.head.sha, state: null, description: "判定の間に PR の最新のコミットが変わった。次のきっかけで判定し直す。" };
+      if (raw.length !== now.changed_files) return { pr: n, sha: pr.head.sha, state: null, description: `変更ファイルの一覧（${raw.length} 件）が PR の変更ファイル数（${now.changed_files} 件）と合わない。人が確かめる。` };
+      // 判定のよりどころは GitHub の変更ファイル（PR の側の記述は読まない）
       const files = raw.flatMap((f) => [f.filename, ...(f.previous_filename ? [f.previous_filename] : [])]);
-      return { pr: n, sha: headSha, ...reviewStatus(review, headSha, labels, files) };
+      return { pr: n, sha: pr.head.sha, ...reviewStatus(review, pr.head.sha, pr.labels.map((l) => l.name), files) };
+    }
+    case "stalled": {
+      const role = arg("role");
+      if (role !== "dispatch" && role !== "patrol") throw new Error("--role dispatch か --role patrol を指定する");
+      return loadStalled(role);
     }
     case "relabel": {
       const minutes = Number(arg("minutes") ?? "15");
@@ -282,7 +387,7 @@ async function main(): Promise<unknown> {
       return { since, mySession: mySession(), handled: handledByOthers({ comments, since, mySession: mySession() }) };
     }
     default:
-      throw new Error("pick / precheck / relabel / handled / budget / merge-check / review-status のどれかを指定する");
+      throw new Error("pick / precheck / relabel / stalled / handled / budget / merge-check / review-status のどれかを指定する");
   }
 }
 
