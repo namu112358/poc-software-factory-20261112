@@ -16,6 +16,9 @@ merge_queue:
 queue_rules:
   - name: default
     merge_method: squash
+    # キューの中の CI を待つ時間。既定の auto（最近の CI の時間の 95 パーセンタイル＋余裕）は、CI が 45 秒前後なので 3 分 33 秒になり、
+    # CI の実行機の順番待ちだけでキューから外れた（#318・#328）。実行機の順番待ちも含めて待てる長さにする。
+    checks_timeout: "10 minutes"
     queue_conditions:
       - -draft
       - check-success = app-check
