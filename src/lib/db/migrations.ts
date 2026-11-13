@@ -342,4 +342,13 @@ export const MIGRATIONS: readonly Migration[] = [
       ALTER TABLE sessions ADD COLUMN last_locked_at_before TEXT;
     `,
   },
+  {
+    version: 28,
+    name: "user_suspension",
+    sql: `
+      -- 取りまとめる人が利用者のログインを停止した日時（ISO 8601（UTC））。停止していなければ NULL（既存の利用者は NULL から始まる）。
+      -- 停止した利用者はログインできず、担当者の選択肢に出ない。利用者の行は消さないので、過去の記録の名前は残る。再開したら NULL に戻す。
+      ALTER TABLE users ADD COLUMN suspended_at TEXT;
+    `,
+  },
 ];

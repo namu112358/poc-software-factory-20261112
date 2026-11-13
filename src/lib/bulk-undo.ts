@@ -52,11 +52,13 @@ type ItemRow = {
   updatedAt: string;
   currentAssignee: string | null;
   currentUpdatedAt: string | null;
+  fromAssigneeSuspended: number;
 };
 
 /**
  * まとめての変更 1 回分を元に戻す。変えたタスクを、変える前の担当者・ステータス・完了日時に戻す。
  * 変えた後にほかの変更があったタスク（更新日時が変えた直後の値と違う）と、削除したタスクは戻さず `skippedIds` に入れる。
+ * 戻すと担当者がログインを停止した利用者に替わるタスクも、戻さず `skippedIds` に入れる（停止した人に担当を戻さない。#522）。
  * 戻したタスクの更新日時は前回より必ず後にし（`nextUpdatedAt`）、担当者が変わるときは担当者の変更の履歴を `userId` の名前で足す。
  * 全部か無しか: 1 つのトランザクションで行い、途中で失敗したらどのタスクも戻さず、戻した印も付けない。戻せるのは 1 回だけ。
  */
@@ -72,9 +74,11 @@ export function undoBulkUpdate(id: number, userId: string, db: Db = getDb(), now
       .prepare(
         `SELECT i.task_id AS taskId, i.from_status AS fromStatus, i.from_assignee AS fromAssignee,
                 i.from_completed_at AS fromCompletedAt, i.updated_at AS updatedAt,
-                t.assignee AS currentAssignee, t.updated_at AS currentUpdatedAt
+                t.assignee AS currentAssignee, t.updated_at AS currentUpdatedAt,
+                (fu.suspended_at IS NOT NULL) AS fromAssigneeSuspended
            FROM bulk_update_items i
            LEFT JOIN tasks t ON t.id = i.task_id AND t.deleted_at IS NULL
+           LEFT JOIN users fu ON fu.id = i.from_assignee
           WHERE i.bulk_update_id = ?
           ORDER BY i.task_id`,
       )
@@ -88,7 +92,8 @@ export function undoBulkUpdate(id: number, userId: string, db: Db = getDb(), now
     const restoredIds: number[] = [];
     const skippedIds: number[] = [];
     for (const item of items) {
-      if (item.currentUpdatedAt === null || item.currentUpdatedAt !== item.updatedAt) {
+      const toSuspended = item.fromAssigneeSuspended === 1 && item.currentAssignee !== item.fromAssignee;
+      if (item.currentUpdatedAt === null || item.currentUpdatedAt !== item.updatedAt || toSuspended) {
         skippedIds.push(item.taskId);
         continue;
       }

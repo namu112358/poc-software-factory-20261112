@@ -1,5 +1,5 @@
 import { getDb, type Db } from "./db/index.ts";
-import { getUser } from "./users.ts";
+import { getUser, isAssignableUser } from "./users.ts";
 import { isValidDate } from "./valid-date.ts";
 import { isTaskPriority, isTaskStatus, TASK_SORTS, UNASSIGNED, type TaskInput, type TaskSort, type ValidationResult, MEMO_MAX_LENGTH } from "./task-types.ts";
 
@@ -74,13 +74,17 @@ export function parseTaskId(value: unknown): number | undefined {
   return Number(value);
 }
 
+/** ログインを停止した利用者を担当者にしようとしたときの文言。 */
+export const SUSPENDED_ASSIGNEE_ERROR = "ログインを停止しているメンバーは担当者にできません";
+
 /**
  * API に送られたタスクの内容を検証する。partial = true（更新）のときは、送られた項目だけを検証する。
- * 担当者が存在するかは DB で確認する。
+ * 担当者が存在するかは DB で確認する。ログインを停止した利用者は担当者にできない（#522）。
+ * ただし更新で、今の担当者（currentAssignee）をそのまま送ったときは、その人が停止していても通す（担当を変えずにほかの項目を直せるように）。
  */
 export function validateTaskInput(
   body: unknown,
-  options: { partial?: boolean } = {},
+  options: { partial?: boolean; currentAssignee?: string } = {},
   db: Db = getDb(),
 ): ValidationResult<Partial<TaskInput>> {
   if (typeof body !== "object" || body === null || Array.isArray(body)) {
@@ -104,6 +108,7 @@ export function validateTaskInput(
     const exists =
       typeof b.assignee === "string" && db.prepare("SELECT 1 FROM users WHERE id = ?").get(b.assignee) !== undefined;
     if (!exists) errors.push("担当者が存在しません");
+    else if (b.assignee !== options.currentAssignee && !isAssignableUser(b.assignee, db)) errors.push(SUSPENDED_ASSIGNEE_ERROR);
     else value.assignee = b.assignee as string;
   }
   if (need("dueDate")) {
