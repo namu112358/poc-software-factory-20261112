@@ -9,6 +9,11 @@ import {
   precheck,
   mergeCheck,
   reviewStatus,
+  auditNeeded,
+  authorSessionsOf,
+  sessionOfReview,
+  type GateContext,
+  type ReviewMark,
   ciCheck,
   combineChecks,
   precheckActions,
@@ -994,6 +999,164 @@ describe("gate: 各役の起動の判定", () => {
       const r = reader([null, null, null]);
       const mergeable = await settleMergeable(r.read, r.wait);
       assert.equal(gateDecision(fix({ reviews: [], mergeable })).decision, "go");
+    });
+  });
+});
+
+describe("ゲートの監査（gate-review。台帳 #123 の E27）", () => {
+  const HEAD = "aaaa111";
+  const rv = (verdict: string, session: string | null, commit = HEAD, kind: ReviewMark["kind"] = "review"): ReviewMark => ({ kind, verdict, commit, session });
+  const au = (verdict: string, session: string | null, commit = HEAD) => rv(verdict, session, commit, "gate-review");
+  const ctx = (marks: ReviewMark[], o: Partial<GateContext> = {}): GateContext => ({ marks, after: {}, authorSessions: ["session_AUTH"], ...o });
+  const okMc = (commit = HEAD, head = HEAD, after: { sha: string; mergeOnly: boolean }[] = []) =>
+    mergeCheck({ reviews: [{ body: `<!-- factory:review verdict=ok round=1 commit=${commit} -->`, association: "COLLABORATOR" }], headSha: head, after });
+  const AUDIT_FILES = ["src/app/page.tsx", ".claude/routines/fix.md"];
+  const status = (marks: ReviewMark[], files = AUDIT_FILES, labels: string[] = [], o: Partial<GateContext> = {}, mc = okMc(), head = HEAD) =>
+    reviewStatus(mc, head, labels, files, ctx(marks, o));
+
+  it("reviewStatus: 監査のパスで、1 回目が ok・監査が別のセッションの ok なら success", () => {
+    assert.equal(status([rv("ok", "session_R1"), au("ok", "session_A1")]).state, "success");
+  });
+  it("reviewStatus: 監査が changes なら failure", () => {
+    assert.equal(status([rv("ok", "session_R1"), au("changes", "session_A1")]).state, "failure");
+    // 同じ版に ok と changes があれば changes を優先する
+    assert.equal(status([rv("ok", "session_R1"), au("changes", "session_A1"), au("ok", "session_A2")]).state, "failure");
+  });
+  it("reviewStatus: 監査が無ければ付けない（監査を待つ）。gate を渡さなくても付けない", () => {
+    const r = status([rv("ok", "session_R1")]);
+    assert.equal(r.state, null);
+    assert.match(r.description, /factory:gate-review/);
+    assert.equal(reviewStatus(okMc(), HEAD, [], AUDIT_FILES).state, null);
+  });
+  it("reviewStatus: 監査のセッションが 1 回目のレビュー・PR を出したセッションと同じ、またはセッションの行が無ければ付けない", () => {
+    assert.equal(status([rv("ok", "session_R1"), au("ok", "session_R1")]).state, null);
+    assert.equal(status([rv("ok", "session_R1"), au("ok", "session_AUTH")]).state, null);
+    assert.equal(status([rv("ok", "session_R1"), au("ok", null)]).state, null);
+    assert.equal(status([rv("ok", null), au("ok", "session_A1")]).state, null);
+    // PR を出したセッションが読めなければ、別のセッションか確かめられないので付けない
+    assert.equal(status([rv("ok", "session_R1"), au("ok", "session_A1")], AUDIT_FILES, [], { authorSessions: [] }).state, null);
+  });
+  it("reviewStatus: 人が見るパス（.github・Mergify・Ruleset・監査の仕組み自身の 4 ファイル）を含めば、監査が ok でも付けない", () => {
+    const marks = [rv("ok", "session_R1"), au("ok", "session_A1")];
+    for (const f of [".github/workflows/ci.yml", ".mergify.yml", ".mergify/x.yml", "docs/rulesets/main.json", "scripts/factory/claim-core.ts", "scripts/factory/claim.ts", ".claude/routines/review.md", ".claude/routines/README.md", ".claude/settings.json", ".claude/settings.local.json", ".claude/hooks/x.sh", ".mcp.json", "package.json", "design-system/package.json", "tsconfig.json", "design-system/scripts/check-tokens.mjs", "design-system/vitest.config.ts"]) {
+      assert.equal(status(marks, [...AUDIT_FILES, f]).state, null, f);
+    }
+    // ほかのスクリプト・手順書・規約・設定は、監査で通る
+    for (const f of ["scripts/check-skills.py", "scripts/factory/README.md", ".claude/routines/fix.md", "AGENTS.md", "CLAUDE.md", "tests/factory-claim.test.ts"]) {
+      assert.equal(status(marks, ["src/a.ts", f]).state, "success", f);
+    }
+  });
+  it("reviewStatus: risk:high なら、監査が ok でも付けない", () => {
+    assert.equal(status([rv("ok", "session_R1"), au("ok", "session_A1")], AUDIT_FILES, ["risk:high"]).state, null);
+  });
+  it("reviewStatus: ゲートのパスに当たらない PR は、今までどおり（監査なしで success）", () => {
+    assert.equal(status([rv("ok", "session_R1")], ["src/app/page.tsx", "docs/product.md"]).state, "success");
+  });
+  it("reviewStatus: 監査の後が取り込みだけのコミットなら success を引き継ぐ。中身の変わるコミットなら付けない", () => {
+    const mc = okMc(HEAD, "bbbb222", [{ sha: "bbbb222", mergeOnly: true }]);
+    const marks = [rv("ok", "session_R1"), au("ok", "session_A1")];
+    assert.equal(status(marks, AUDIT_FILES, [], { after: { [HEAD]: [{ sha: "bbbb222", mergeOnly: true }] } }, mc, "bbbb222").state, "success");
+    assert.equal(status(marks, AUDIT_FILES, [], { after: { [HEAD]: [{ sha: "bbbb222", mergeOnly: false }] } }, mc, "bbbb222").state, null);
+  });
+  it("セッションの読み取り", () => {
+    assert.equal(sessionOfReview("よし\nセッション: https://claude.ai/code/session_01AbC"), "session_01AbC");
+    assert.equal(sessionOfReview("セッションの行なし"), null);
+    assert.deepEqual(
+      authorSessionsOf("本文\nhttps://claude.ai/code/session_P1", ["fix\n\nClaude-Session: https://claude.ai/code/session_C1\nCo-Authored-By: x", "別\nClaude-Session: https://claude.ai/code/session_P1"]),
+      ["session_P1", "session_C1"],
+    );
+  });
+
+  describe("gate --role review の監査（gate-review の決定）", () => {
+    const REPO_ = "namu112358/poc-software-factory-20261112";
+    const mode = (marks: ReviewMark[], o: Record<string, unknown> = {}, c: Partial<GateContext> = {}, session: string | null = "session_ME") => {
+      const reviews = marks.filter((m) => m.kind === "review").map((m) => ({ verdict: m.verdict, commit: m.commit }));
+      return gateDecision({
+        role: "review", number: 7, sessionUrl: session ? `https://claude.ai/code/${session}` : null, repo: REPO_,
+        pr: { open: true, draft: false, headRef: "claude/x", headSha: HEAD, labels: [], headRepo: REPO_ }, reviews, afterOk: null, files: AUDIT_FILES, audit: ctx(marks, c), ...o,
+      } as GateInput);
+    };
+    it("1: 閉じている・draft・claude/ でない・フォーク・needs-human は、監査が要る場面でも stop", () => {
+      const pr = { open: true, draft: false, headRef: "claude/x", headSha: HEAD, labels: [] as string[], headRepo: REPO_ };
+      for (const p of [{ open: false }, { draft: true }, { headRef: "feat/x" }, { headRepo: "someone/else" }, { labels: ["status:needs-human"] }]) assert.equal(mode([rv("ok", "session_R1")], { pr: { ...pr, ...p } }).decision, "stop", JSON.stringify(p));
+    });
+    it("2: 最新のコミットへの factory:review が無ければ、通常のレビュー（go）", () => {
+      assert.equal(mode([]).decision, "go");
+      assert.equal(mode([rv("ok", "session_R1", "old0000")]).decision, "go");
+    });
+    it("2: 通常のレビュー（go）は、ok の後に監査を起こすか（startAudit）とパスを返す", () => {
+      const r = mode([]);
+      assert.equal(r.startAudit, true);
+      assert.deepEqual(r.gatePaths, [".claude/routines/fix.md"]);
+      // 人が見るパスを含む・risk:high・ゲートのパスに当たらない PR は、監査を起こさない
+      assert.equal(mode([], { files: [...AUDIT_FILES, ".github/workflows/ci.yml"] }).startAudit, false);
+      const pr = { open: true, draft: false, headRef: "claude/x", headSha: HEAD, labels: ["risk:high"], headRepo: REPO_ };
+      assert.equal(mode([], { pr }).startAudit, false);
+      assert.equal(mode([], { files: ["src/app/page.tsx"] }).startAudit, false);
+    });
+    it("3: ok で、監査で通すパスに当たり、監査がまだ無ければ gate-review（出力にパスと 1 回目のセッション）。最新のコミットへのレビューがあっても、これが先", () => {
+      const r = mode([rv("ok", "session_R1")]);
+      assert.equal(r.decision, "gate-review");
+      assert.equal(r.pr, 7);
+      assert.deepEqual(r.gatePaths, [".claude/routines/fix.md"]);
+      assert.equal(r.firstReviewSession, "session_R1");
+      assert.deepEqual(r.authorSessions, ["session_AUTH"]);
+      // ok の後が取り込みだけのコミットでも、監査が要る
+      assert.equal(mode([rv("ok", "session_R1", "old0000")], { afterOk: [{ sha: "m", mergeOnly: true, merge: true }] }, { after: { old0000: [{ sha: "m", mergeOnly: true }] } }).decision, "gate-review");
+    });
+    it("3: 自分が 1 回目のレビューのセッション・PR を出したセッションなら stop。自分のセッションが読めなくても stop", () => {
+      assert.equal(mode([rv("ok", "session_ME")]).decision, "stop");
+      assert.equal(mode([rv("ok", "session_R1")], {}, { authorSessions: ["session_ME"] }).decision, "stop");
+      const r = mode([rv("ok", "session_R1")], {}, {}, null);
+      assert.equal(r.decision, "stop");
+      assert.match(r.reason, /読めない/);
+      // PR を出したセッションが読めないとき（本文にもコミットにも無い）も stop
+      assert.match(mode([rv("ok", "session_R1")], {}, { authorSessions: [] }).reason, /PR を出したセッションが読めない/);
+    });
+    it("4: 監査が済み・changes・人が見るパス・risk:high・ゲートのパスなしは、gate-review にならない（stop）", () => {
+      assert.equal(mode([rv("ok", "session_R1"), au("ok", "session_A1")]).decision, "stop");
+      assert.equal(mode([rv("changes", "session_R1")]).decision, "stop");
+      for (const f of ["scripts/factory/claim-core.ts", ".github/workflows/ci.yml", ".claude/routines/review.md"]) assert.equal(mode([rv("ok", "session_R1")], { files: [...AUDIT_FILES, f] }).decision, "stop", f);
+      const pr = { open: true, draft: false, headRef: "claude/x", headSha: HEAD, labels: ["risk:high"], headRepo: REPO_ };
+      assert.equal(mode([rv("ok", "session_R1")], { pr }).decision, "stop");
+      assert.equal(mode([rv("ok", "session_R1")], { files: ["src/app/page.tsx"] }).decision, "stop");
+    });
+    it("audit が無ければ（変更が監査のパスに当たらない）、今までどおり", () => {
+      assert.equal(mode([rv("ok", "session_R1")], { audit: undefined }).decision, "stop");
+    });
+    it("auditNeeded: 同じ版に changes もあれば、監査は要らない（直してから）", () => {
+      assert.equal(auditNeeded({ headSha: HEAD, labels: [], files: AUDIT_FILES, ctx: ctx([rv("changes", "session_R1"), rv("ok", "session_R2")]) }), null);
+    });
+  });
+
+  describe("stalledActions: 監査が来ないまま", () => {
+    const NOW = "2026-11-13T12:00:00.000Z";
+    const ago = (min: number) => new Date(new Date(NOW).getTime() - min * 60000).toISOString();
+    const pr = (o: Partial<StalledPr> = {}): StalledPr => ({
+      number: 10, headRef: "claude/issue-5", headSha: "aaaaaaa1111111", draft: false, mergeable: true, labels: [], updatedAt: ago(0), readyAt: ago(60),
+      appCheck: "success", bodyCheck: "success", reviews: [{ verdict: "ok", commit: "aaaaaaa" }], after: {}, priorMarks: [], mergifyTimeout: null, auditWait: { since: ago(11) }, ...o,
+    });
+    const run = (prs: StalledPr[]) => stalledActions({ role: "dispatch", now: NOW, sessionUrl: "https://claude.ai/code/session_X", prs, issues: [], closedStarted: [] });
+    it("10 分たったら rereview（監査の文）。10 分未満は何もしない", () => {
+      const a = run([pr()]).actions;
+      assert.equal(a.length, 1);
+      assert.equal(a[0].action, "rereview");
+      assert.equal(a[0].draft, "draft-then-ready");
+      assert.match(a[0].comment!, /^<!-- factory:dispatch action=rereview commit=aaaaaaa -->\nゲートの監査が動かなかったので起こし直した。/);
+      assert.equal(run([pr({ auditWait: { since: ago(9) } })]).actions.length, 0);
+      assert.equal(run([pr({ auditWait: null })]).actions.length, 0);
+    });
+    it("claude/issue- 以外の claude/ の PR も対象", () => {
+      const a = run([pr({ headRef: "claude/kaizen-x" })]).actions;
+      assert.equal(a.length, 1);
+      assert.equal(a[0].action, "rereview");
+      // 巡回（patrol）は、claude/issue- 以外を扱わない
+      assert.equal(stalledActions({ role: "patrol", now: NOW, sessionUrl: null, prs: [pr({ headRef: "claude/kaizen-x" })], issues: [], closedStarted: [] }).actions.length, 0);
+    });
+    it("同じコミットへの 2 回目は人に回す", () => {
+      const a = run([pr({ priorMarks: [{ action: "rereview", commit: "aaaaaaa" }] })]).actions;
+      assert.equal(a[0].draft, null);
+      assert.deepEqual(a[0].addLabels, ["status:needs-human"]);
     });
   });
 });

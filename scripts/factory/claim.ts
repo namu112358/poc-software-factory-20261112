@@ -36,6 +36,13 @@ import {
   errorActions,
   mergeCheck,
   reviewStatus,
+  auditNeeded,
+  auditPaths,
+  parseReviewMark,
+  sessionOfReview,
+  authorSessionsOf,
+  type GateContext,
+  type ReviewMark,
   ciCheck,
   CI_CHECKS,
   combineChecks,
@@ -228,8 +235,33 @@ function commitsAfter(n: number, last: string, headSha: string): StalledCommit[]
 }
 
 const COMMIT_MARK_RE = /<!--\s*factory:review\s+verdict=(\w+)[^>]*?commit=([0-9a-f]+)/;
-type RawPull = { number: number; draft: boolean; mergeable?: boolean | null; created_at: string; updated_at: string; head: HeadRef & { sha: string }; labels?: { name: string }[] };
+type RawPull = { number: number; body?: string | null; draft: boolean; mergeable?: boolean | null; created_at: string; updated_at: string; head: HeadRef & { sha: string }; labels?: { name: string }[] };
 type RawTrustedComment = { body: string | null; updated_at: string; author_association: string; user?: { login: string } };
+
+/**
+ * ゲートの監査の判定に要る値を集める（読むだけ）。書き込み権限のある人の factory:review・factory:gate-review の印とセッション、
+ * 印のコミットより後のコミット、PR を出したセッション（PR 本文と、コミットの Claude-Session: の行）。okAt は、最新の 1 回目の ok のレビューの時刻。
+ */
+async function loadGateContext(n: number, headSha: string, prBody: string): Promise<{ ctx: GateContext; okAt: string | null }> {
+  const raw = (await getAll<{ body: string | null; submitted_at: string; author_association: string }>(`/repos/${REPO}/pulls/${n}/reviews`))
+    .sort((a, b) => (a.submitted_at < b.submitted_at ? -1 : 1))
+    .filter((r) => TRUSTED_ASSOCIATIONS.includes(r.author_association));
+  const found = raw.flatMap((r) => {
+    const m = parseReviewMark(r.body ?? "");
+    return m ? [{ mark: { ...m, session: sessionOfReview(r.body ?? "") } as ReviewMark, at: r.submitted_at }] : [];
+  });
+  const marks = found.map((f) => f.mark);
+  const reviews = marks.filter((m) => m.kind === "review");
+  const commits = new Set<string>([reviews.at(-1)?.commit, reviews.filter((m) => m.verdict === "ok").at(-1)?.commit, ...marks.filter((m) => m.kind === "gate-review").map((m) => m.commit)].filter((c): c is string => !!c));
+  const after: GateContext["after"] = {};
+  for (const c of commits) after[c] = commitsAfter(n, c, headSha);
+  const msgs = (await getAll<{ commit: { message: string } }>(`/repos/${REPO}/pulls/${n}/commits`)).map((c) => c.commit.message);
+  const lastOk = found.filter((f) => f.mark.kind === "review" && f.mark.verdict === "ok").at(-1);
+  return { ctx: { marks, after, authorSessions: authorSessionsOf(prBody, msgs) }, okAt: lastOk?.at ?? null };
+}
+
+const filesOf = async (n: number) =>
+  (await getAll<{ filename: string; previous_filename?: string }>(`/repos/${REPO}/pulls/${n}/files`)).flatMap((f) => [f.filename, ...(f.previous_filename ? [f.previous_filename] : [])]);
 
 /** 止まった実装・PR の判定の入力を GitHub と git から集める（読むだけ） */
 async function loadStalled(role: string) {
@@ -262,7 +294,16 @@ async function loadStalled(role: string) {
     let priorMarks: StalledPr["priorMarks"] = [];
     let bodyCheck: CheckState = "none";
     let mergifyTimeout: StalledPr["mergifyTimeout"] = null;
+    let auditWait: StalledPr["auditWait"] = null;
     try {
+      if (mergeable !== null && !full.draft) {
+        // ゲートの監査が要るのに来ない PR（claude/issue- 以外の claude/ の PR も）。変更が監査で通すパスに当たるときだけ、くわしく読む
+        const files = await filesOf(n);
+        if (auditPaths(files).length > 0) {
+          const { ctx, okAt } = await loadGateContext(n, full.head.sha, full.body ?? "");
+          if (okAt && auditNeeded({ headSha: full.head.sha, labels, files, ctx })) auditWait = { since: okAt };
+        }
+      }
       if (mergeable !== null) {
         const comments = (await getAll<RawTrustedComment>(`/repos/${REPO}/issues/${n}/comments`)).filter((c) => TRUSTED_ASSOCIATIONS.includes(c.author_association));
         priorMarks = comments
@@ -302,7 +343,7 @@ async function loadStalled(role: string) {
       unknown.push({ pr: n, reason: e instanceof Error ? e.message : String(e) });
       continue;
     }
-    prs.push({ number: n, headRef: full.head.ref, headSha: full.head.sha, draft: full.draft, mergeable, labels, updatedAt: full.updated_at, readyAt, appCheck, reviews, after, priorMarks, bodyCheck, mergifyTimeout });
+    prs.push({ number: n, headRef: full.head.ref, headSha: full.head.sha, draft: full.draft, mergeable, labels, updatedAt: full.updated_at, readyAt, appCheck, reviews, after, priorMarks, bodyCheck, mergifyTimeout, auditWait });
   }
   const closed = (await get<(RawIssue & { updated_at: string })[]>(`/repos/${REPO}/issues?state=closed&per_page=100&sort=updated&direction=desc`)).data.filter((i) => !i.pull_request);
   const closedStarted = closed.map((i) => ({ number: i.number, labels: (i.labels ?? []).map((l) => normalizeLabel(l.name)) })).filter((i) => i.labels.some((l) => START_LABELS.includes(l)));
@@ -316,13 +357,14 @@ const GATE_WAIT_MS = Number(process.env.FACTORY_GATE_WAIT_MS ?? "60000");
 const sessionUrl = () => (mySession() ? `https://claude.ai/code/${mySession()}` : null);
 
 /** 書き込み権限のある人の factory:review（古い順）。reviews の API から読む */
-async function loadReviewMarks(n: number): Promise<GateReview[]> {
-  return (await getAll<{ body: string | null; submitted_at: string; author_association: string }>(`/repos/${REPO}/pulls/${n}/reviews`))
+async function loadReviewMarks(n: number, withAudit = false): Promise<GateReview[]> {
+  const marks = (await getAll<{ body: string | null; submitted_at: string; author_association: string }>(`/repos/${REPO}/pulls/${n}/reviews`))
     .sort((a, b) => (a.submitted_at < b.submitted_at ? -1 : 1))
     .filter((r) => TRUSTED_ASSOCIATIONS.includes(r.author_association))
-    .map((r) => COMMIT_MARK_RE.exec(r.body ?? ""))
-    .filter((m): m is RegExpExecArray => m !== null)
-    .map((m) => ({ verdict: m[1], commit: m[2] }));
+    .map((r) => parseReviewMark(r.body ?? ""))
+    .filter((m): m is NonNullable<typeof m> => m !== null);
+  // withAudit: ゲートの監査（factory:gate-review）の changes も、直すものに入れる（fix）
+  return marks.filter((m) => withAudit || m.kind === "review").map((m) => ({ verdict: m.verdict, commit: m.commit }));
 }
 
 async function loadImplementGate(n: number): Promise<GateInput> {
@@ -365,13 +407,15 @@ async function loadPrGate(role: "review" | "fix", n: number): Promise<GateInput>
     const eligible = pr.open && pr.draft && pr.headRef.startsWith("claude/issue-") && !pr.labels.includes(LABEL.needsHuman);
     const firstRead: (boolean | null)[] = [full.mergeable ?? null]; // 最初の読み取りは、取得済みの値を使う
     const mergeable = eligible ? await settleMergeable(async () => (firstRead.length > 0 ? firstRead.shift()! : ((await read()).mergeable ?? null)), () => sleep(GATE_WAIT_MS)) : true;
-    return { role, number: n, sessionUrl: sessionUrl(), repo: REPO, pr, reviews: await loadReviewMarks(n), mergeable };
+    return { role, number: n, sessionUrl: sessionUrl(), repo: REPO, pr, reviews: await loadReviewMarks(n, true), mergeable };
   }
   const reviews = await loadReviewMarks(n);
   const ok = reviews.filter((r) => r.verdict === "ok").at(-1);
   const afterOk = ok && !pr.headSha.startsWith(ok.commit) ? commitsAfter(n, ok.commit, pr.headSha) : null;
   const files = (await getAll<{ filename: string }>(`/repos/${REPO}/pulls/${n}/files`)).map((f) => f.filename);
-  return { role, number: n, sessionUrl: sessionUrl(), repo: REPO, pr, reviews, afterOk, files };
+  // 変更が監査で通すパスに当たるときだけ、ゲートの監査の判定に要る印・セッションを集める
+  const audit = auditPaths(files).length > 0 ? (await loadGateContext(n, pr.headSha, full.body ?? "")).ctx : undefined;
+  return { role, number: n, sessionUrl: sessionUrl(), repo: REPO, pr, reviews, afterOk, files, audit };
 }
 
 async function runGate(role: string | undefined, n: number) {
@@ -486,7 +530,9 @@ async function main(): Promise<unknown> {
       if (raw.length !== now.changed_files) return { pr: n, sha: pr.head.sha, state: null, description: `変更ファイルの一覧（${raw.length} 件）が PR の変更ファイル数（${now.changed_files} 件）と合わない。人が確かめる。` };
       // 判定のよりどころは GitHub の変更ファイル（PR の側の記述は読まない）
       const files = raw.flatMap((f) => [f.filename, ...(f.previous_filename ? [f.previous_filename] : [])]);
-      return { pr: n, sha: pr.head.sha, ...reviewStatus(review, pr.head.sha, pr.labels.map((l) => l.name), files) };
+      // 変更が監査で通すパスに当たり、1 回目のレビューが ok のときだけ、監査の印を集める（それ以外は集めない）
+      const gate = review.ok && auditPaths(files).length > 0 ? (await loadGateContext(n, pr.head.sha, (await get<{ body: string | null }>(`/repos/${REPO}/pulls/${n}`)).data.body ?? "")).ctx : undefined;
+      return { pr: n, sha: pr.head.sha, ...reviewStatus(review, pr.head.sha, pr.labels.map((l) => l.name), files, gate) };
     }
     case "stalled": {
       const role = arg("role");
