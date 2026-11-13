@@ -80,6 +80,30 @@ export const Mixed: Story = {
   },
 };
 
+/** 状態を部品に任せる書き方（`defaultChecked="indeterminate"`）でも、地の色と横線の印が出る。 */
+export const MixedUncontrolled: Story = {
+  name: "一部だけ（状態を部品に任せる）",
+  args: { defaultChecked: "indeterminate" },
+  render: (args) => <Field name="すべての項目を選ぶ" {...args} />,
+  play: async ({ canvas }) => {
+    const box = canvas.getByRole("checkbox", { name: "すべての項目を選ぶ" });
+    await expect(box).toHaveAttribute("data-state", "indeterminate");
+    await expect(box).toHaveAttribute("aria-checked", "mixed");
+    // トークン --color-brand の値を、同じ描画で背景色にして比べる。
+    const probe = document.createElement("span");
+    probe.className = "bg-brand";
+    document.body.appendChild(probe);
+    const brand = getComputedStyle(probe).backgroundColor;
+    probe.remove();
+    await expect(getComputedStyle(box).backgroundColor).toBe(brand);
+    const dash = box.querySelectorAll("svg")[1];
+    await expect(getComputedStyle(dash).display).not.toBe("none");
+    await userEvent.click(box);
+    await expect(box).toHaveAttribute("data-state", "checked");
+    await expect(getComputedStyle(dash).display).toBe("none");
+  },
+};
+
 /** 押せない状態。クリックしても Space キーでも切り替わらない。 */
 export const Disabled: Story = {
   name: "押せない",
