@@ -844,10 +844,10 @@ describe("gate: 各役の起動の判定", () => {
       const r = gateDecision(impl({ comments: [startMark], branchExists: true, closingPrs: [{ number: 90, headRef: "claude/issue-7", headRepo: REPO, draft: true, reviewed: false }] }));
       assert.equal(r.decision, "stop");
     });
-    it("フォークの PR（head のリポジトリが違う・null）は引き継がず stop", () => {
+    it("フォークの PR（head のリポジトリが違う・null）は引き継がず、着手も止めない（数えずに lock へ）", () => {
       for (const headRepo of ["someone/poc-software-factory-20261112", null]) {
         const r = gateDecision(impl({ closingPrs: [{ number: 90, headRef: "claude/issue-7", headRepo, draft: true, reviewed: false }] }));
-        assert.equal(r.decision, "stop", String(headRepo));
+        assert.equal(r.decision, "lock", String(headRepo));
         assert.equal(r.pr, null);
       }
     });

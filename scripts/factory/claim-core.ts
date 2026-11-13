@@ -954,10 +954,12 @@ export function gateDecision(input: GateInput): GateResult {
     if (blocker) return stop(`${blocker} が付いている。`);
     if (input.comments.some((c) => START_MARK_RE.test(c.body) && c.createdAt > (input.lastStartAt ?? "")))
       return stop("起動のラベルが付いた後に、着手のコメントがもうある。");
-    if (input.closingPrs.length > 0) {
-      const own = input.closingPrs.find((p) => p.headRef === branch && isOwnHead(p.headRepo, input.repo) && p.draft && !p.reviewed);
+    // フォークの PR は数えない（外の人が「Closes #N」の PR を出して、実装の着手を止められないように）
+    const closing = input.closingPrs.filter((p) => isOwnHead(p.headRepo, input.repo));
+    if (closing.length > 0) {
+      const own = closing.find((p) => p.headRef === branch && p.draft && !p.reviewed);
       if (own) return withLabeler({ ...base, decision: "takeover", reason: `残った draft の PR #${own.number} がある（レビュー前）。引き継ぐ。`, pr: own.number, branch, ops: null });
-      return stop(`この Issue を Closes で参照する開いている PR（#${input.closingPrs[0].number}）がある。`);
+      return stop(`この Issue を Closes で参照する開いている PR（#${closing[0].number}）がある。`);
     }
     if (input.branchExists) return withLabeler({ ...base, decision: "takeover", reason: `ブランチ ${branch} が残っている（PR は無い）。取り出して続ける。`, pr: null, branch, ops: null });
     return withLabeler({ ...base, decision: "lock", reason: `着手の鍵（ブランチ ${branch}）を作ってよい。`, pr: null, branch, ops: null });
