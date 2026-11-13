@@ -6,6 +6,7 @@ import {
   canSaveTaskEdit,
   changedFields,
   conflictRows,
+  mergeEditValues,
   rebaseOnCurrent,
   recordConflict,
   saveTaskEdit,
@@ -14,6 +15,8 @@ import {
   type TaskEditState,
   type TaskEditValues,
 } from "../src/lib/task-edit.ts";
+import { undoBulkUpdate } from "../src/lib/bulk-undo.ts";
+import { updateTasks } from "../src/lib/bulk-update.ts";
 import { getTask, parseExpectedUpdatedAt, updateTask, updateTaskIfUnchanged, validateTaskInput } from "../src/lib/tasks.ts";
 
 // 同時に編集して保存が衝突したとき（#385）: 入力を残し、相手が変えた項目だけを 3 列で並べ、
@@ -126,14 +129,14 @@ describe("保存が衝突したときの編集の状態", () => {
     assert.equal(after.expectedUpdatedAt, opened.expectedUpdatedAt);
   });
 
-  it("「今の値で編集し直す」で、フォームの値が今の値になり、その後の保存は今の更新日時で確かめて保存される", async () => {
+  it("「今の値で編集し直す」で、相手が変えた項目は今の値・自分だけが変えた項目は自分の入力になり、その後の保存は今の更新日時で確かめて保存される", async () => {
     const db = openDb();
     const opened = startTaskEdit(getTask(3, db)!);
     updateTask(3, { memo: "ほかの人のメモ" }, db);
     const conflicted = await saveAndRecord({ ...opened, values: { ...opened.values, title: "自分の変更" } }, db);
     const latest = getTask(3, db)!;
     const rebased = rebaseOnCurrent(conflicted);
-    assert.deepEqual(rebased.values, taskToEditValues(latest));
+    assert.deepEqual(rebased.values, { ...taskToEditValues(latest), title: "自分の変更" });
     assert.deepEqual(rebased.base, taskToEditValues(latest));
     assert.equal(rebased.expectedUpdatedAt, latest.updatedAt);
     assert.equal(rebased.conflict, undefined);
@@ -177,5 +180,130 @@ describe("保存が衝突したときの編集の状態", () => {
   it("衝突しなければ、編集し直しは何も変えない", () => {
     const state = startTaskEdit(getTask(3, openDb())!);
     assert.deepEqual(rebaseOnCurrent(state), state);
+  });
+});
+
+// 編集し直したとき、相手が変えていない項目の自分の入力を残す（#446）。
+
+describe("mergeEditValues（編集し直したときの項目ごとの値の決め方）", () => {
+  const base: TaskEditValues = { title: "元", status: "todo", assignee: "sato", dueDate: "2026-11-14", priority: "medium", memo: "" };
+
+  it("相手がメモだけ、自分が期限だけを変えたら、メモは今の値・期限は自分の入力になる", () => {
+    const current = { ...base, memo: "相手のメモ" };
+    const mine = { ...base, dueDate: "2026-11-27" };
+    assert.deepEqual(mergeEditValues(base, current, mine), { ...base, memo: "相手のメモ", dueDate: "2026-11-27" });
+  });
+
+  it("相手と自分が同じ項目を変えていたら、その項目は今の値（相手の値）になる", () => {
+    const current = { ...base, dueDate: "2026-12-01" };
+    const mine = { ...base, dueDate: "2026-11-27", title: "自分のタイトル" };
+    assert.deepEqual(mergeEditValues(base, current, mine), { ...base, dueDate: "2026-12-01", title: "自分のタイトル" });
+  });
+
+  it("相手が変えた値と自分の入力が同じでも、今の値になる", () => {
+    const current = { ...base, priority: "high" as const };
+    assert.deepEqual(mergeEditValues(base, current, { ...current }), current);
+  });
+
+  it("6 項目すべてで、相手が変えた項目は今の値、変えていない項目は自分の入力にする", () => {
+    const current: TaskEditValues = { title: "相手", status: "done", assignee: "tanaka", dueDate: "", priority: "high", memo: "相手のメモ" };
+    const mine: TaskEditValues = { title: "自分", status: "in_progress", assignee: "suzuki", dueDate: "2030-02-02", priority: "low", memo: "自分のメモ" };
+    assert.deepEqual(mergeEditValues(base, current, mine), current);
+    assert.deepEqual(mergeEditValues(base, { ...base }, mine), mine);
+    for (const field of Object.keys(TASK_EDIT_FIELD_LABELS) as (keyof TaskEditValues)[]) {
+      const one = { ...base, [field]: current[field] } as TaskEditValues;
+      assert.deepEqual(mergeEditValues(base, one, mine), { ...mine, [field]: current[field] }, field);
+    }
+  });
+
+  it("相手が変えて元に戻した項目（始めの値と今の値が同じ）は、自分の入力を残す", () => {
+    const mine = { ...base, title: "自分のタイトル" };
+    assert.deepEqual(mergeEditValues(base, { ...base }, mine), mine);
+  });
+
+  it("渡した値は書き換えない", () => {
+    const current = { ...base, memo: "相手のメモ" };
+    const mine = { ...base, dueDate: "2026-11-27" };
+    const copies = [{ ...base }, { ...current }, { ...mine }];
+    mergeEditValues(base, current, mine);
+    assert.deepEqual([base, current, mine], copies);
+  });
+});
+
+describe("編集し直してから保存する（#446）", () => {
+  it("相手がメモ、自分が期限を変えて衝突したら、編集し直してそのまま保存すると両方の変更が残る", async () => {
+    const db = openDb();
+    const opened = startTaskEdit(getTask(3, db)!);
+    updateTask(3, { memo: "佐藤のメモ" }, db);
+    const conflicted = await saveAndRecord({ ...opened, values: { ...opened.values, dueDate: "2031-11-27" } }, db);
+    const rows = conflictRows(conflicted.base, taskToEditValues(conflicted.conflict!), conflicted.values, names);
+    assert.deepEqual(rows.map((r) => r.field), ["memo"]);
+    const rebased = rebaseOnCurrent(conflicted);
+    assert.equal(rebased.values.memo, "佐藤のメモ");
+    assert.equal(rebased.values.dueDate, "2031-11-27");
+    const result = await saveTaskEdit(3, rebased.values, rebased.expectedUpdatedAt, { fetch: fakeServer(db) });
+    assert.equal(result.status, "saved");
+    const saved = getTask(3, db)!;
+    assert.equal(saved.memo, "佐藤のメモ");
+    assert.equal(saved.dueDate, "2031-11-27");
+  });
+
+  it("相手がフォームの項目を変えていない衝突では、自分の入力がすべて残り、送る更新日時だけが今のものになる", () => {
+    const task = getTask(3, openDb())!;
+    const opened = startTaskEdit(task);
+    const typed = { ...opened, values: { ...opened.values, title: "自分", memo: "自分のメモ" } };
+    const latest = { ...task, updatedAt: "2099-01-01T00:00:00.000Z" };
+    const rebased = rebaseOnCurrent(recordConflict(typed, latest));
+    assert.deepEqual(rebased.values, typed.values);
+    assert.equal(rebased.expectedUpdatedAt, latest.updatedAt);
+    assert.deepEqual(rebased.base, taskToEditValues(latest));
+  });
+
+  it("編集し直した後にまた別の人が保存していれば、もう一度断られ、2 回目はその人が変えた項目だけが今の値になる", async () => {
+    const db = openDb();
+    const opened = startTaskEdit(getTask(3, db)!);
+    updateTask(3, { memo: "1 回目の相手" }, db);
+    const first = rebaseOnCurrent(await saveAndRecord({ ...opened, values: { ...opened.values, title: "自分のタイトル" } }, db));
+    updateTask(3, { priority: "low" }, db);
+    const before = getTask(3, db)!;
+    const typed = { ...first, values: { ...first.values, dueDate: "2031-05-05" } };
+    const second = await saveAndRecord(typed, db);
+    assert.deepEqual(getTask(3, db), before);
+    const rebased = rebaseOnCurrent(second);
+    assert.deepEqual(rebased.values, { ...typed.values, priority: "low" });
+    assert.equal(rebased.values.memo, "1 回目の相手");
+    assert.equal(rebased.expectedUpdatedAt, before.updatedAt);
+  });
+
+  it("まとめての変更（ステータス・担当者）で相手が変えた場合も、変えられた項目だけが今の値になる", async () => {
+    const db = openDb();
+    const task = getTask(3, db)!;
+    const opened = startTaskEdit(task);
+    const nextAssignee = task.assignee === "tanaka" ? "suzuki" : "tanaka";
+    const nextStatus = task.status === "done" ? "todo" : "done";
+    const r = updateTasks([3], { status: nextStatus, assignee: nextAssignee }, db, "tanaka");
+    assert.ok(r.ok);
+    const typed = { ...opened, values: { ...opened.values, title: "自分のタイトル", memo: "自分のメモ", priority: "high" as const } };
+    const rebased = rebaseOnCurrent(await saveAndRecord(typed, db));
+    assert.deepEqual(rebased.values, { ...typed.values, status: nextStatus, assignee: nextAssignee });
+    const result = await saveTaskEdit(3, rebased.values, rebased.expectedUpdatedAt, { fetch: fakeServer(db) });
+    assert.equal(result.status, "saved");
+    const saved = getTask(3, db)!;
+    assert.deepEqual(taskToEditValues(saved), rebased.values);
+  });
+
+  it("まとめての変更を元に戻した場合も、戻された項目だけが今の値になる", async () => {
+    const db = openDb();
+    const now = new Date();
+    const original = getTask(3, db)!.status;
+    const changedTo = original === "done" ? "todo" : "done";
+    const r = updateTasks([3], { status: changedTo }, db, "sato", now);
+    assert.ok(r.ok && r.undo);
+    const opened = startTaskEdit(getTask(3, db)!);
+    const undone = undoBulkUpdate(r.undo.id, "sato", db, new Date(now.getTime() + 1000));
+    assert.ok(undone.ok);
+    const typed = { ...opened, values: { ...opened.values, dueDate: "2031-03-03" } };
+    const rebased = rebaseOnCurrent(await saveAndRecord(typed, db));
+    assert.deepEqual(rebased.values, { ...typed.values, status: original });
   });
 });
