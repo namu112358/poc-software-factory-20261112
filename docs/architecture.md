@@ -13,6 +13,7 @@
 - 初期ユーザーは `sato` / `suzuki` / `tanaka`（パスワードは共通で `password`。PoC の検証用）。`/login` からログインする。
 - 利用者には役割（`users.role`）がある。`tanaka` だけが取りまとめる人（`coordinator`）で、`sato`・`suzuki` はメンバー（`member`）。延長の申請を承認・却下できるのは取りまとめる人だけ（自分の申請は除く）。
 - 取りまとめる人は、メンバーの一覧から、ほかの利用者のログインを停止・再開できる（`users.suspended_at`）。停止した利用者はログインできず、セッションは消え、担当者の選択肢に出ない。利用者の行は消さないので、過去の記録の名前は残る。
+- 取りまとめる人は、メンバーの一覧（または `POST /api/users`）から、新しいメンバーのアカウントを作れる。仮のパスワードは作った応答に 1 回だけ含み、DB にはハッシュだけを残す。仮のパスワードの間（`users.must_change_password` が 1）は、`requireUser()` がパスワード変更の画面へ移し、`requireApiUser()` が 403 を返す（パスワード変更の画面と `POST /api/password`、ログアウトだけは使える）。本人がパスワードを変えると 0 に戻る。
 - セッションは DB の `sessions` テーブルと Cookie `poc_session`（`src/lib/auth.ts`）。
 
 ## API
