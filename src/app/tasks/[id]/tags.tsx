@@ -2,6 +2,7 @@
 // タグの追加フォームと外すボタン。操作のあと、サーバー側の一覧を読み直す。
 import { useRouter } from "next/navigation";
 import { useState, type FormEvent } from "react";
+import { TAG_MAX_LENGTH, formatTagLimitHint } from "@/lib/tag-limits";
 
 export function TagForm({ taskId, suggestions = [] }: { taskId: number; suggestions?: string[] }) {
   const router = useRouter();
@@ -37,7 +38,8 @@ export function TagForm({ taskId, suggestions = [] }: { taskId: number; suggesti
   return (
     <form aria-label="タグの追加" onSubmit={onSubmit}>
       <p>
-        <input name="name" aria-label="タグの名前" maxLength={40} list={`tag-suggestions-${taskId}`} />
+        <input name="name" aria-label="タグの名前" maxLength={TAG_MAX_LENGTH} list={`tag-suggestions-${taskId}`} aria-describedby={`tag-limit-${taskId}`} />
+        <span id={`tag-limit-${taskId}`}> {formatTagLimitHint()}</span>
         <datalist id={`tag-suggestions-${taskId}`}>
           {suggestions.map((name) => (
             <option key={name} value={name} />
