@@ -327,7 +327,7 @@ async function loadImplementGate(n: number): Promise<GateInput> {
       return { number: p.number, headRef: p.head.ref, headRepo: p.head.repo?.full_name ?? null, draft: p.draft, reviewed };
     }),
   );
-  const branchExists = (await get<unknown>(`/repos/${REPO}/branches/${encodeURIComponent(`claude/issue-${n}`)}`)).status !== 404;
+  const branchExists = (await get<unknown>(`/repos/${REPO}/branches/${encodeURIComponent(`claude/issue-${n}`)}`)).status === 200; // 読めない（404 以外の失敗）ときは無いものとして lock に進む。鍵は create_branch の成否で決まる
   return {
     role: "implement", number: n, sessionUrl: sessionUrl(), repo: REPO, issueOpen: status !== 404 && issue.state === "open", labels,
     lastStartAt: last?.created_at ?? null, labeler: last?.actor?.login ?? null, comments, closingPrs, branchExists,
