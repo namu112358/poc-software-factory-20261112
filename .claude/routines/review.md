@@ -4,22 +4,16 @@ PR が Ready for review になったときに起動します。実装した役�
 
 ## 1. 起動してよいかを確かめる
 
-次のどれかに当たれば、何もせずに終える。
-
-- PR が閉じている、draft である。
-- head のブランチが `claude/` で始まらない。
-- PR に `status:needs-human` が付いている。
-- PR の最新のコミットに対するレビュー（`<!-- factory:review ... commit=<最新のコミット> -->`）が、もうある（同じ版を二度レビューしない）。
-- 最新の `verdict=ok` のレビューの後に入ったコミットが、すべて「取り込みだけのコミット」（`README.md` の「どの役にも共通の決まり」）である（中身は変わっていない）。
+`node scripts/factory/claim.ts gate --role review --number <番号>` を実行し、`decision` が `stop` なら何もせずに終える。`go` で `light` が `true` なら、次の「軽い再レビュー」だけを行う。
 
 ### 軽い再レビュー
 
-前回のレビューが `verdict=ok` で、その後に PR に入ったコミットが「`main` の取り込み（マージのコミット）」と、その衝突の解消だけなら、2 段の確かめはせず、次だけを行う。
+前回のレビューが `verdict=ok` で、その後に PR に入ったコミットが「`main` の取り込み（マージのコミット）」と、その衝突の解消だけのとき（`light`）は、2 段の確かめはせず、次だけを行う。
 
 - 衝突を解消した箇所（マージのコミットで、`main` の側とも PR の側とも違う行）を読み、両方の変更の意図が残っているかを見る。
 - `npm run typecheck`・`npm test`・`npm run build` が通るかを見る（`design-system/` を変えた PR は、`design-system/` でも `npm run typecheck`・`npm run lint`・`npm test`・`npm run build`）。
 
-問題が無ければ verdict=ok にする（コメントに「軽い再レビュー」と書く）。少しでも PR の側の変更（機能の変更）が入っていれば、通常のレビューをする。
+問題が無ければ verdict=ok にする（コメントに「軽い再レビュー」と書く）。
 
 ## 2. 確かめる
 
@@ -31,7 +25,7 @@ PR が `Closes #<番号>` で参照する Issue を読み、次の 2 段を順�
 
 あわせて、PR が `main` と衝突していないか（`mergeable`）を見る。衝突していれば、それを「必須」の指摘にする。
 
-PR が高リスクの変更（DB のスキーマ `src/lib/db/migrations.ts`／ログイン・セッション・権限の判定 `src/lib/auth.ts`・`src/lib/session.ts`・`src/lib/api.ts` の `requireApiUser` など／他人のデータを見せる・変える範囲が変わる変更）に当たれば、PR に `risk:high` を付け、レビューのコメントにどれに当たるかを書く。verdict には影響させない。`risk:high` は、結果を書く（3.）より前に付ける（ok のレビューを書くと PR は自動でキューに入るので、後から付けると間に合わないことがある）。
+`riskFiles` が空でなければ、PR に `risk:high` を付け、レビューのコメントにどのファイルに当たるかを書く。他人のデータを見せる・変える範囲の変更は、読んで判断する。`risk:high` は verdict には影響させない。`risk:high` は、結果を書く（3.）より前に付ける（ok のレビューを書くと PR は自動でキューに入るので、後から付けると間に合わないことがある）。
 
 ## 3. 結果を書く
 

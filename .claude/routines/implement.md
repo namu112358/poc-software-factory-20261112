@@ -4,21 +4,20 @@ Issue に `status:in-progress` か `status:in-progress-hard` が付いたとき�
 
 ## 1. 起動してよいかを確かめる
 
-次のどれかに当たれば、何もせずに終える（コメントもしない）。
+`node scripts/factory/claim.ts gate --role implement --number <番号>` を実行し、`decision` のとおりにする。
 
-- Issue に起動のラベルが付いていない、Issue が閉じている、`kind:epic`・`status:blocked-question`・`status:needs-human` のどれかが付いている。
-- 起動のラベルが付いた後に、着手のコメント（`<!-- factory:implement action=start -->`）がもうある。
-- その Issue を `Closes` で参照する開いている PR がある。ただし、`claude/issue-<番号>` の draft の PR で、レビュー（`factory:review`）がまだ無いなら、下の「残った PR を引き継ぐ」に進む。
-- 起動のラベルを付けた人（Issue のイベントの最後の `labeled`）が、GitHub MCP の `list_repository_collaborators` で `write`・`maintain`・`admin` を持たない。調べられなければ、起動のラベルを外して `status:needs-human` を付け、理由をコメントして終える。
+- `stop`: 何もせず終える（コメントもしない）。
+- `takeover`・`lock` の前に、`labeler` が GitHub MCP の `list_repository_collaborators` で `write`・`maintain`・`admin` を持つかを確かめる。持たない・調べられない（`labeler` が null を含む）なら、起動のラベルを外して `status:needs-human` を付け、理由をコメントして終える。
+- `takeover`: 「残った PR を引き継ぐ」へ。
+- `lock`: GitHub MCP の `create_branch` で、`main` から `branch` を作る。作れなければ（もうある）何もせずに終える（同じ起動で重ねて着手した別のセッションが先に作った）。作れたら「2.」へ。
 
 ### 残った PR を引き継ぐ
 
-新しく作らず、「2.」の 1 のコメントを書き、PR のブランチを取り出して「4.」の 2 から続ける。
+新しく作らず、「2.」のコメントを書き、`pr` のブランチを取り出して「4.」の 2 から続ける。`pr` が null（ブランチだけが残った）なら、`branch` を取り出して「3.」から続ける。
 
 ## 2. 着手する
 
-1. Issue に `<!-- factory:implement action=start -->` で始まるコメントを書く。割り当ての役の着手の記録（`factory:touch`）と、自分で調べた変えるファイルが違えば、同じコメントに `<!-- factory:touch files=<カンマ区切りのパス> -->` も書く。書いた直後にコメントを読み直し、起動のラベルが付いた後に、自分より前の着手のコメント（ほかのセッションのもの）があれば、それ以上何もせずに終える（コメントもしない。同じラベルで実装が重ねて起動することがある。#429）。
-2. `main` の最新から `claude/issue-<番号>` のブランチを作る（ほかの名前にしない）。
+Issue に `<!-- factory:implement action=start -->` で始まるコメントを書く。割り当ての役の着手の記録（`factory:touch`）と、自分で調べた変えるファイルが違えば、同じコメントに `<!-- factory:touch files=<カンマ区切りのパス> -->` も書く。
 
 ## 3. 実装する
 
