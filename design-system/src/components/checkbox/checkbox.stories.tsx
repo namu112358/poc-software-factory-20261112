@@ -90,9 +90,10 @@ export const MixedUncontrolled: Story = {
     await expect(box).toHaveAttribute("data-state", "indeterminate");
     await expect(box).toHaveAttribute("aria-checked", "mixed");
     // トークン --color-brand の値を、同じ描画で背景色にして比べる。
+    // 見本は箱と同じ親に置き、テーマ（Story の枠の data-theme）をそろえる。
     const probe = document.createElement("span");
     probe.className = "bg-brand";
-    document.body.appendChild(probe);
+    box.parentElement!.appendChild(probe);
     const brand = getComputedStyle(probe).backgroundColor;
     probe.remove();
     await expect(getComputedStyle(box).backgroundColor).toBe(brand);
