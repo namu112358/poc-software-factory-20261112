@@ -1,22 +1,18 @@
 name: Design system
 
+# すべての PR で動く（paths で絞らない）。design-system-check は Mergify のキューに入る条件なので、
+# design-system/ を変えない PR でも結果（success）を返す必要がある。変更が無ければ、検査を飛ばしてすぐ終える。
 on:
   pull_request:
-    paths:
-      - "design-system/**"
-      - ".github/workflows/design-system.yml"
   push:
     branches: [main]
-    paths:
-      - "design-system/**"
-      - ".github/workflows/design-system.yml"
 
 permissions:
   contents: read
 
 jobs:
   check:
-    # app-check とは別のジョブ。必須のチェックにするかは人が Ruleset で決める
+    # Mergify のキューに入る条件（.mergify.yml）と scripts/factory/claim-core.ts の REQUIRED_CHECKS はこの name で指定する。変更しないこと
     name: design-system-check
     runs-on: ubuntu-latest
     defaults:
@@ -24,14 +20,38 @@ jobs:
         working-directory: design-system
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+        with:
+          fetch-depth: 0
+      - name: design-system/ が変わったかを見る
+        id: changes
+        working-directory: .
+        env:
+          BASE: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          # 比べる元が無い（新しいブランチの最初の push など）ときは、変わったものとして検査する
+          if [ -z "$BASE" ] || ! git cat-file -e "$BASE^{commit}" 2>/dev/null; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          elif git diff --quiet "$BASE" HEAD -- design-system .github/workflows/design-system.yml; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "design-system/ の変更が無いので、検査を飛ばす。"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+      - if: steps.changes.outputs.changed == 'true'
+        uses: actions/setup-node@v4
         with:
           node-version: "22"
           cache: npm
           cache-dependency-path: design-system/package-lock.json
-      - run: npm ci
-      - run: npx playwright install --with-deps chromium
-      - run: npm run typecheck
-      - run: npm run lint
-      - run: npm test
-      - run: npm run build
+      - if: steps.changes.outputs.changed == 'true'
+        run: npm ci
+      - if: steps.changes.outputs.changed == 'true'
+        run: npx playwright install --with-deps chromium
+      - if: steps.changes.outputs.changed == 'true'
+        run: npm run typecheck
+      - if: steps.changes.outputs.changed == 'true'
+        run: npm run lint
+      - if: steps.changes.outputs.changed == 'true'
+        run: npm test
+      - if: steps.changes.outputs.changed == 'true'
+        run: npm run build

@@ -4,6 +4,7 @@ import { getDb, transaction, type Db } from "./db/index.ts";
 import { clearFailures, getLockState, recordFailure } from "./login-throttle.ts";
 import { hashPassword, verifyPassword } from "./password.ts";
 import type { ValidationResult } from "./tasks.ts";
+import { unknownFieldErrors } from "./body-fields.ts";
 import type { User } from "./users.ts";
 
 export const SESSION_COOKIE = "poc_session";
@@ -43,6 +44,8 @@ export type LoginResult =
  * 成功したら、ログインの記録（login_events）も 1 行残す（ログイン中のほかの端末に知らせる。login-notices.ts）。
  * この誤りでロックした（続けて MAX_FAILURES 回目）ときは "lock-started" と、あと何分で試せるかを返す。
  * 成功したら、前回のログインのあとにロックされた回数と最後の日時もセッションに写し、0 と NULL に戻す（ログイン後に知らせる）。
+ * 失敗の数とロックは「ID と接続元（source）の組」と「アカウント全体」で持つ（login-throttle.ts。#526）。
+ * source は接続元の IP アドレス（login-source.ts）。見分けられなければ null で、ID ごとに数える。成功で 0 に戻すのは、その組の数だけ。
  */
 export function login(
   userId: unknown,
@@ -50,8 +53,9 @@ export function login(
   db: Db = getDb(),
   now: Date = new Date(),
   userAgent: string | null = null,
+  source: string | null = null,
 ): LoginResult {
-  const lock = typeof userId === "string" ? getLockState(userId, db, now) : { locked: false as const };
+  const lock = typeof userId === "string" ? getLockState(userId, db, now, source) : { locked: false as const };
   if (lock.locked) {
     countFailedLogin(userId as string, db);
     return { ok: false, reason: "locked", retryAfterMinutes: lock.retryAfterMinutes };
@@ -61,7 +65,7 @@ export function login(
   if (!user) {
     if (typeof userId === "string") {
       const locked = transaction(db, () => {
-        const state = recordFailure(userId, db, now);
+        const state = recordFailure(userId, db, now, source);
         countFailedLogin(userId, db);
         return state;
       });
@@ -70,7 +74,7 @@ export function login(
     return { ok: false, reason: "invalid" };
   }
   const token = transaction(db, () => {
-    clearFailures(user.id, db);
+    clearFailures(user.id, db, source);
     const row = db
       .prepare("SELECT last_login_at, failed_logins_since_login, locks_since_login, last_locked_at FROM users WHERE id = ?")
       .get(user.id) as
@@ -300,13 +304,13 @@ export const MIN_PASSWORD_LENGTH = 8;
 
 export type PasswordChangeInput = { currentPassword: string; newPassword: string };
 
-/** パスワード変更の本文を検証する。文字数は見た目の文字（コードポイント）で数える。 */
+/** パスワード変更の本文を検証する。文字数は見た目の文字（コードポイント）で数える。`currentPassword`・`newPassword` のほかの項目があれば誤り（#527）。 */
 export function validatePasswordChangeInput(body: unknown): ValidationResult<PasswordChangeInput> {
   if (typeof body !== "object" || body === null || Array.isArray(body)) {
     return { ok: false, errors: ["リクエストの形式が正しくありません"] };
   }
   const { currentPassword, newPassword } = body as Record<string, unknown>;
-  const errors: string[] = [];
+  const errors: string[] = unknownFieldErrors(body as Record<string, unknown>, ["currentPassword", "newPassword"]);
   if (typeof currentPassword !== "string" || currentPassword === "") errors.push("今のパスワードを入力してください");
   if (typeof newPassword !== "string" || [...newPassword].length < MIN_PASSWORD_LENGTH) {
     errors.push(`新しいパスワードは ${MIN_PASSWORD_LENGTH} 文字以上で入力してください`);
@@ -326,6 +330,7 @@ export type PasswordChangeResult =
  * ログイン中の本人のパスワードを変える。今のパスワードが正しければ、ハッシュの更新と
  * 同じ利用者のほかのセッションの削除を 1 つのトランザクションで行い、keepToken のセッションだけを残す。
  * 今のパスワードの誤りはログインの失敗と同じ回数制限に数え、ロック中は照合しない。
+ * 接続元は見分けず（ID ごとの組）、アカウント全体の数にも入る。アカウント全体のロック中も変えられない（#526）。
  */
 export function changePassword(
   userId: string,

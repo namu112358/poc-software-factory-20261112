@@ -37,9 +37,13 @@ import {
   mergeCheck,
   reviewStatus,
   ciCheck,
+  CI_CHECKS,
+  combineChecks,
   TRUSTED_ASSOCIATIONS,
   precheck,
   precheckActions,
+  isOwnClaudePr,
+  type HeadRef,
   readyBudget,
   relabelTargets,
   splitFiles,
@@ -155,8 +159,8 @@ async function loadMainBroken(): Promise<boolean> {
 }
 
 async function loadOpenPrs(): Promise<PrInfo[]> {
-  const prs = await getAll<{ number: number; head: { ref: string }; labels?: { name: string }[] }>(`/repos/${REPO}/pulls?state=open`);
-  const mine = prs.filter((p) => p.head.ref.startsWith("claude/"));
+  const prs = await getAll<{ number: number; head: HeadRef; labels?: { name: string }[] }>(`/repos/${REPO}/pulls?state=open`);
+  const mine = prs.filter((p) => isOwnClaudePr(p, REPO));
   await loadOpen(mine.map((p) => issueOf(p.head.ref)).filter((n) => Number.isInteger(n)));
   return Promise.all(
     mine.map(async (p) => ({
@@ -224,12 +228,12 @@ function commitsAfter(n: number, last: string, headSha: string): StalledCommit[]
 }
 
 const COMMIT_MARK_RE = /<!--\s*factory:review\s+verdict=(\w+)[^>]*?commit=([0-9a-f]+)/;
-type RawPull = { number: number; draft: boolean; mergeable?: boolean | null; created_at: string; updated_at: string; head: { ref: string; sha: string; repo?: { full_name: string } | null }; labels?: { name: string }[] };
+type RawPull = { number: number; draft: boolean; mergeable?: boolean | null; created_at: string; updated_at: string; head: HeadRef & { sha: string }; labels?: { name: string }[] };
 type RawTrustedComment = { body: string | null; updated_at: string; author_association: string; user?: { login: string } };
 
 /** 止まった実装・PR の判定の入力を GitHub と git から集める（読むだけ） */
 async function loadStalled(role: string) {
-  const list = (await getAll<RawPull>(`/repos/${REPO}/pulls?state=open`)).filter((p) => p.head.ref.startsWith("claude/"));
+  const list = (await getAll<RawPull>(`/repos/${REPO}/pulls?state=open`)).filter((p) => isOwnClaudePr(p, REPO));
   const prs: StalledPr[] = [];
   const unknown: { pr: number; reason: string }[] = [];
   const issues = new Map<number, StalledIssue>();
@@ -272,7 +276,7 @@ async function loadStalled(role: string) {
           const latest = runs.sort((a, b) => (a.started_at < b.started_at ? -1 : 1)).at(-1);
           return !latest ? "none" : latest.status !== "completed" ? "pending" : latest.conclusion === "success" ? "success" : "failure";
         };
-        appCheck = await checkState("app-check");
+        appCheck = combineChecks(await Promise.all(CI_CHECKS.map((name) => checkState(name))));
         bodyCheck = await checkState("pr-body-check");
         reviews = (await getAll<{ body: string | null; submitted_at: string; author_association: string }>(`/repos/${REPO}/pulls/${n}/reviews`))
           .sort((a, b) => (a.submitted_at < b.submitted_at ? -1 : 1))

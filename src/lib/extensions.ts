@@ -1,6 +1,7 @@
 import { getDb, type Db } from "./db/index.ts";
 import { getTask, type Task } from "./tasks.ts";
 import type { ValidationResult } from "./tasks.ts";
+import { unknownFieldErrors } from "./body-fields.ts";
 import { isCoordinator } from "./users.ts";
 import { isValidDate } from "./valid-date.ts";
 
@@ -51,13 +52,16 @@ export const EXTENSION_REASON_MAX_LENGTH = 500;
 
 export const EXTENSION_NOT_AFTER_MESSAGE = "希望の期限は、今の期限より後の日付にしてください";
 
-/** 申請の本文（newDueDate・reason）を検証する。希望の期限は、タスクの今の期限より後の日付だけ。理由は前後の空白を除いて 1〜500 文字。 */
+/**
+ * 申請の本文（newDueDate・reason）を検証する。希望の期限は、タスクの今の期限より後の日付だけ。理由は前後の空白を除いて 1〜500 文字。
+ * `newDueDate`・`reason` のほかの項目があれば誤り（#527）。
+ */
 export function validateExtensionInput(body: unknown, currentDueDate: string): ValidationResult<{ newDueDate: string; reason: string }> {
   if (typeof body !== "object" || body === null || Array.isArray(body)) {
     return { ok: false, errors: ["リクエストの形式が正しくありません"] };
   }
   const b = body as Record<string, unknown>;
-  const errors: string[] = [];
+  const errors: string[] = unknownFieldErrors(b, ["newDueDate", "reason"]);
   if (typeof b.newDueDate !== "string" || !isValidDate(b.newDueDate)) {
     errors.push("新しい期限は YYYY-MM-DD 形式で入力してください");
   } else if (b.newDueDate <= currentDueDate) {

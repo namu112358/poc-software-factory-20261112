@@ -570,7 +570,21 @@ export function relabelTargets(args: {
 export const TRUSTED_ASSOCIATIONS = ["OWNER", "MEMBER", "COLLABORATOR"];
 
 /** Mergify のキューに入る条件のチェック（.mergify.yml の queue_conditions の check-success と合わせる） */
-export const REQUIRED_CHECKS = ["app-check", "pr-body-check"];
+export const REQUIRED_CHECKS = ["app-check", "design-system-check", "pr-body-check"];
+
+/** CI の結果として見るチェック（キューに入る条件のうち、PR 本文の検査を除いたもの）。巡回の「CI が通った・落ちた」の判定に使う */
+export const CI_CHECKS = ["app-check", "design-system-check"];
+
+/**
+ * 複数のチェックの状態を 1 つにまとめる。1 つでも落ちていれば failure、それ以外で 1 つでも動いていれば pending、
+ * 1 つでも無ければ none、すべて成功なら success。
+ */
+export function combineChecks(states: CheckState[]): CheckState {
+  if (states.includes("failure")) return "failure";
+  if (states.includes("pending")) return "pending";
+  if (states.length === 0 || states.includes("none")) return "none";
+  return "success";
+}
 
 /**
  * 最新のコミットで、キューに入る条件のチェックが成功しているか（#364）。
@@ -668,7 +682,7 @@ export type StalledPr = {
   labels: string[]; // 今の名前に直したラベル
   updatedAt: string; // PR の updated_at
   readyAt: string | null; // 最後に Ready になった時刻（timeline の ready_for_review。無ければ PR を作った時刻）
-  appCheck: CheckState; // 最新のコミットの app-check の最新の実行
+  appCheck: CheckState; // 最新のコミットの CI（CI_CHECKS: app-check・design-system-check）の最新の実行を combineChecks でまとめたもの
   reviews: { verdict: string; commit: string }[]; // 書き込み権限のある人の factory:review（古い順）
   /** レビューのコミット → それより後のコミット（first-parent）。PR の履歴に無ければ null。head と同じなら [] */
   after: Record<string, StalledCommit[] | null>;
@@ -987,10 +1001,12 @@ export function gateDecision(input: GateInput): GateResult {
     if (blocker) return stop(`${blocker} が付いている。`);
     if (input.comments.some((c) => START_MARK_RE.test(c.body) && c.createdAt > (input.lastStartAt ?? "")))
       return stop("起動のラベルが付いた後に、着手のコメントがもうある。");
-    if (input.closingPrs.length > 0) {
-      const own = input.closingPrs.find((p) => p.headRef === branch && p.headRepo === input.repo && p.draft && !p.reviewed);
+    // フォークの PR は数えない（外の人が「Closes #N」の PR を出して、実装の着手を止められないように）
+    const closing = input.closingPrs.filter((p) => isOwnHead(p.headRepo, input.repo));
+    if (closing.length > 0) {
+      const own = closing.find((p) => p.headRef === branch && p.draft && !p.reviewed);
       if (own) return withLabeler({ ...base, decision: "takeover", reason: `残った draft の PR #${own.number} がある（レビュー前）。引き継ぐ。`, pr: own.number, branch, ops: null });
-      return stop(`この Issue を Closes で参照する開いている PR（#${input.closingPrs[0].number}）がある。`);
+      return stop(`この Issue を Closes で参照する開いている PR（#${closing[0].number}）がある。`);
     }
     if (input.branchExists) return withLabeler({ ...base, decision: "takeover", reason: `ブランチ ${branch} が残っている（PR は無い）。取り出して続ける。`, pr: null, branch, ops: null });
     return withLabeler({ ...base, decision: "lock", reason: `着手の鍵（ブランチ ${branch}）を作ってよい。`, pr: null, branch, ops: null });
@@ -1000,7 +1016,7 @@ export function gateDecision(input: GateInput): GateResult {
   if (input.role === "review") {
     if (!pr.open) return stop("PR が閉じている。");
     if (pr.draft) return stop("PR が draft。");
-    if (pr.headRepo !== input.repo) return stop("PR の head がこのリポジトリのブランチでない（フォークの PR）。");
+    if (!isOwnHead(pr.headRepo, input.repo)) return stop("PR の head がこのリポジトリのブランチでない（フォークの PR）。");
     if (!pr.headRef.startsWith("claude/")) return stop("head のブランチが claude/ で始まらない。");
     if (pr.labels.includes(LABEL.needsHuman)) return stop("status:needs-human が付いている。");
     if (input.reviews.some((r) => sameCommit(r.commit, pr.headSha))) return stop("最新のコミットへのレビューがもうある。");
@@ -1023,7 +1039,7 @@ export function gateDecision(input: GateInput): GateResult {
   // fix
   if (!pr.open) return stop("PR が閉じている。");
   if (!pr.draft) return stop("PR が draft でない。");
-  if (pr.headRepo !== input.repo) return stop("PR の head がこのリポジトリのブランチでない（フォークの PR）。");
+  if (!isOwnHead(pr.headRepo, input.repo)) return stop("PR の head がこのリポジトリのブランチでない（フォークの PR）。");
   if (!pr.headRef.startsWith("claude/issue-")) return stop("head のブランチが claude/issue- で始まらない。");
   if (pr.labels.includes(LABEL.needsHuman)) return stop("status:needs-human が付いている。");
   const latest = input.reviews.at(-1);
@@ -1050,4 +1066,19 @@ export function gateDecision(input: GateInput): GateResult {
     ops: null,
     fix: { changes, conflict, removeMergeRequested: pr.labels.includes(LABEL.merge) },
   };
+}
+
+export type HeadRef = { ref: string; repo?: { full_name: string } | null };
+
+/**
+ * 役が扱う PR か: このリポジトリのブランチで、名前が `claude/` で始まる。
+ * フォークの PR は、ブランチ名を `claude/...` にしても対象にしない（片付けのラベル・draft の付け外し・コメントを、外の人が起こせないように）
+ */
+export function isOwnClaudePr(p: { head: HeadRef }, repo: string): boolean {
+  return p.head.ref.startsWith("claude/") && isOwnHead(p.head.repo?.full_name ?? null, repo);
+}
+
+/** PR の head がこのリポジトリのブランチか（フォーク・消えたフォークは false）。フォークの判定はここだけに置く */
+export function isOwnHead(headRepo: string | null, repo: string): boolean {
+  return headRepo !== null && headRepo === repo;
 }
