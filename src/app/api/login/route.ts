@@ -3,6 +3,7 @@
 import { NextResponse } from "next/server";
 import { jsonError, readJson } from "@/lib/api";
 import { SESSION_COOKIE, SESSION_TTL_MS, login } from "@/lib/auth";
+import { loginErrorPath } from "@/lib/login-error";
 
 export async function POST(request: Request) {
   const isJson = (request.headers.get("content-type") ?? "").includes("application/json");
@@ -19,17 +20,13 @@ export async function POST(request: Request) {
   }
 
   const result = login(userId, password, undefined, undefined, request.headers.get("user-agent"));
-  if (!result.ok && result.reason === "locked") {
-    return isJson
-      ? jsonError(429, "ログインに続けて失敗したため、しばらくログインできません", [
-          `あと ${result.retryAfterMinutes} 分後に試せます`,
-        ])
-      : NextResponse.redirect(new URL("/login?error=locked", request.url), 303);
-  }
   if (!result.ok) {
-    return isJson
-      ? jsonError(401, "ID またはパスワードが正しくありません")
-      : NextResponse.redirect(new URL("/login?error=1", request.url), 303);
+    if (!isJson) return NextResponse.redirect(new URL(loginErrorPath(result), request.url), 303);
+    if (result.reason === "invalid") return jsonError(401, "ID またはパスワードが正しくありません");
+    const details = [`あと ${result.retryAfterMinutes} 分後に試せます`];
+    return result.reason === "lock-started"
+      ? jsonError(429, "ID またはパスワードが正しくありません。続けて失敗したため、ログインをロックしました", details)
+      : jsonError(429, "ログインに続けて失敗したため、しばらくログインできません", details);
   }
 
   const response = isJson
