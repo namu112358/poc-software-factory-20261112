@@ -1,5 +1,6 @@
 // API Route 共通の処理（認証の確認とエラー応答）。
 import { NextResponse } from "next/server";
+import { IDEMPOTENCY_CONFLICT_MESSAGE, type IdempotentResult } from "./idempotency.ts";
 import { getCurrentUser } from "./session.ts";
 import { PASSWORD_CHANGE_REQUIRED_DETAIL, PASSWORD_CHANGE_REQUIRED_MESSAGE, mustChangePassword, type User } from "./users.ts";
 
@@ -32,4 +33,10 @@ export async function readJson(request: Request): Promise<unknown> {
   } catch {
     return undefined;
   }
+}
+
+/** キーつきの作成の結果を応答にする。同じキーで本文が違えば 409、それ以外は作った（または 1 回目の）状態と本文（#528）。 */
+export function idempotentResponse<T>(result: IdempotentResult<T>): NextResponse {
+  if (result.kind === "conflict") return jsonError(409, IDEMPOTENCY_CONFLICT_MESSAGE);
+  return NextResponse.json(result.body, { status: result.status });
 }
