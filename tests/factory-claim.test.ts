@@ -70,7 +70,11 @@ describe("待つ（wait）とセッションの ID（session-id）", () => {
     const repo = "o/r";
     assert.equal(parseRestPath("/repos/o/r/issues/1/events", repo), "/repos/o/r/issues/1/events");
     assert.equal(parseRestPath("/repos/o/r/issues/1/comments?since=2026-11-13T00:00:00Z", repo), "/repos/o/r/issues/1/comments?since=2026-11-13T00:00:00Z");
-    for (const bad of [undefined, "", "/repos/o/other/issues", "/repos/o/r2/issues", "/user", "/repos/o/r/../x/issues", "/repos/o/r/issues?per_page=5", "/repos/o/r/issues?state=all&page=2", "/repos/o/r/issues x"]) {
+    // `?` より後の符号化（ラベル名の `:` など）は受け付ける
+    assert.equal(parseRestPath("/repos/o/r/issues?labels=status%3Aready", repo), "/repos/o/r/issues?labels=status%3Aready");
+    for (const bad of [undefined, "", "/repos/o/other/issues", "/repos/o/r2/issues", "/user", "/repos/o/r/../x/issues", "/repos/o/r/issues?per_page=5", "/repos/o/r/issues?state=all&page=2", "/repos/o/r/issues x",
+      // 符号化した `..`・バックスラッシュ・`#` で、許可したパスの外に出る形
+      "/repos/o/r/%2e%2e/%2e%2e/user", "/repos/o/r/%2E%2E/other/issues", "/repos/o/r/%2fx", "/repos/o/r/\\..\\x", "/repos/o/r/\\x", "/repos/o/r/#/../../user", "/repos/o/r/issues#x"]) {
       assert.throws(() => parseRestPath(bad, repo), /\/repos\/o\/r\//, String(bad));
     }
   });
