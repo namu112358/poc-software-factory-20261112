@@ -1,5 +1,5 @@
 // タスク作成画面（/tasks/new）の入力の組み立てと、API の応答から表示する理由の取り出し。
-import type { TaskStatus } from "./task-types.ts";
+import type { TaskPriority, TaskStatus } from "./task-types.ts";
 
 export const TASK_CREATE_FAILED_MESSAGE = "タスクを作成できませんでした";
 
@@ -8,11 +8,20 @@ export type TaskFormValues = {
   assignee: string;
   dueDate: string;
   status: TaskStatus;
+  priority: TaskPriority;
+  memo: string;
 };
 
 /** フォームの入力を、`POST /api/tasks` に送る本文にする（検証は API 側の `validateTaskInput` が行う）。 */
 export function buildTaskBody(values: TaskFormValues): Record<string, string> {
-  return { title: values.title, assignee: values.assignee, dueDate: values.dueDate, status: values.status };
+  return {
+    title: values.title,
+    assignee: values.assignee,
+    dueDate: values.dueDate,
+    status: values.status,
+    priority: values.priority,
+    memo: values.memo,
+  };
 }
 
 /** API のエラー応答（`{ error, details? }`）から、画面の上に並べる理由を取り出す。 */

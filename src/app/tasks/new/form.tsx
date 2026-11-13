@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import { TASK_CREATE_FAILED_MESSAGE, buildTaskBody, taskDetailHref, taskFormErrorMessages } from "@/lib/task-form";
 import { fieldErrorId, fieldErrorProps, fieldErrorText, toFormErrorItems, type FormErrorItem, type TaskFormField } from "@/lib/form-errors";
-import { STATUS_LABELS, TASK_STATUSES, isTaskStatus } from "@/lib/task-types";
+import { MEMO_MAX_LENGTH, PRIORITY_LABELS, STATUS_LABELS, TASK_PRIORITIES, TASK_STATUSES, isTaskPriority, isTaskStatus } from "@/lib/task-types";
 
 const ERROR_PREFIX = "new-task";
 
@@ -31,11 +31,14 @@ export function TaskForm({ users, defaultAssignee }: Props) {
     event.preventDefault();
     const data = new FormData(event.currentTarget);
     const status = String(data.get("status") ?? "");
+    const priority = String(data.get("priority") ?? "");
     const body = buildTaskBody({
       title: String(data.get("title") ?? ""),
       assignee: String(data.get("assignee") ?? ""),
       dueDate: String(data.get("dueDate") ?? ""),
       status: isTaskStatus(status) ? status : "todo",
+      priority: isTaskPriority(priority) ? priority : "medium",
+      memo: String(data.get("memo") ?? ""),
     });
     setErrors([]);
     setPending(true);
@@ -108,6 +111,26 @@ export function TaskForm({ users, defaultAssignee }: Props) {
             ))}
           </select>
         </label>
+      </p>
+      <p>
+        <label>
+          優先度{" "}
+          <select name="priority" defaultValue="medium" {...fieldErrorProps(errors, ERROR_PREFIX, "priority")}>
+            {TASK_PRIORITIES.map((p) => (
+              <option key={p} value={p}>
+                {PRIORITY_LABELS[p]}
+              </option>
+            ))}
+          </select>
+        </label>
+        <FieldError items={errors} field="priority" />
+      </p>
+      <p>
+        <label>
+          メモ{" "}
+          <textarea name="memo" rows={4} cols={50} maxLength={MEMO_MAX_LENGTH} {...fieldErrorProps(errors, ERROR_PREFIX, "memo")} />
+        </label>
+        <FieldError items={errors} field="memo" />
       </p>
       <button type="submit" disabled={pending}>
         作成
