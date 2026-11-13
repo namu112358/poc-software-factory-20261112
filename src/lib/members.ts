@@ -1,6 +1,7 @@
 import { getDb, type Db } from "./db/index.ts";
 import { formatLeaveNote, listLeaveEndDates, listUpcomingLeaveEndDates } from "./absence.ts";
 import { todayInJapan } from "./task-dates.ts";
+import type { UserRole } from "./user-role.ts";
 
 export type MemberOpenTask = { id: number; title: string; label: string };
 /** leaveUntil は、今日（日本時間）が休みの期間に入っていれば、その終了日（YYYY-MM-DD）。休みでなければ null。 */
@@ -13,6 +14,8 @@ export type MemberRow = {
   leaveUntil: string | null;
   /** ログインを停止しているか（#522）。 */
   suspended: boolean;
+  /** 役割（#524）。 */
+  role: UserRole;
 };
 
 const TITLE_MAX = 10;
@@ -28,10 +31,11 @@ export function truncateTitle(title: string): string {
  * ログインを停止したメンバーも含め、`suspended` で分かるようにする（#522）。
  */
 export function listMemberWorkload(db: Db = getDb(), today: string = todayInJapan()): MemberRow[] {
-  const users = db.prepare("SELECT id, name, suspended_at FROM users ORDER BY id").all() as {
+  const users = db.prepare("SELECT id, name, suspended_at, role FROM users ORDER BY id").all() as {
     id: string;
     name: string;
     suspended_at: string | null;
+    role: string;
   }[];
   const tasks = db
     .prepare("SELECT id, title, assignee, due_date AS dueDate FROM tasks WHERE status <> 'done' AND archived = 0 AND deleted_at IS NULL AND assignee IS NOT NULL ORDER BY due_date IS NULL, due_date, id")
@@ -49,6 +53,7 @@ export function listMemberWorkload(db: Db = getDb(), today: string = todayInJapa
       tasks: mine,
       leaveUntil: leaveEndDates.get(u.id) ?? null,
       suspended: u.suspended_at !== null,
+      role: u.role === "coordinator" ? "coordinator" : "member",
     };
   });
 }
@@ -77,6 +82,17 @@ export type AssigneeOption = { id: string; name: string; label: string };
 /** ログインを停止したメンバーの名前に付ける印。 */
 export const SUSPENDED_MARK = "（停止中）";
 
+/** 担当者の名前の表示。ログインを停止した人には「（停止中）」を付ける（#538）。 */
+export function withSuspendedMark(name: string, suspended: boolean): string {
+  return suspended ? `${name}${SUSPENDED_MARK}` : name;
+}
+
+/** ログインを停止している利用者の ID の集合（一覧の担当者の欄に印を付けるため）。 */
+export function listSuspendedUserIds(db: Db = getDb()): Set<string> {
+  const rows = db.prepare("SELECT id FROM users WHERE suspended_at IS NOT NULL").all() as { id: string }[];
+  return new Set(rows.map((r) => r.id));
+}
+
 /**
  * 担当者の選択肢（id・name・件数つきの label）。件数はメンバーの一覧と同じ数え方。並びはユーザー ID 順。
  * 休みは、休み中の人に加えて、これから始まる休みを登録している人にも付ける（先の休みに気づかず割り当てないため。#437）。
@@ -95,7 +111,7 @@ export function listAssigneeOptions(
       id: m.id,
       name: m.name,
       label: m.suspended
-        ? `${m.name}${SUSPENDED_MARK}`
+        ? withSuspendedMark(m.name, true)
         : formatAssigneeOption({ ...m, leaveUntil: leaveEndDates.get(m.id) ?? null }),
     }));
 }

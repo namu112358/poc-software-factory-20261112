@@ -14,7 +14,7 @@ Routine（`.claude/routines/`）が使う判定のスクリプトです。GitHub
 | `ci-wait --pr N [--minutes 15] [--role implement\|fix]` | 実装・修正 | PR の最新のコミットの `app-check` と `mergeable` を 30 秒ごと（`FACTORY_CI_POLL_MS`）に読み、終わるまで待つ。`result`: `success` / `failure`（`conclusion` が success 以外。`conclusion` も出す）/ `conflict`（`mergeable` が false。null は計算中として待つ）/ `head-changed`（待ち始めと head が変わった）/ `timeout`（時間切れの時刻に最後の読み直しをして、終わっていなければ。`comment` に Issue へ書く全文）/ `error`（読み取りの失敗が続けて 5 回）。1 回に 16 分ほどかかるので、役はバックグラウンドで実行する |
 | `handled --since <時刻>` | 割り当て | ほかの割り当てのセッションが、その時刻より後に処理した Issue・PR |
 | `budget` | （確かめ用） | 直近 60 分に `status:in-progress`・`status:in-progress-hard` を付けた回数と、残り |
-| `review-status <PR>` | GitHub Actions（`.github/workflows/factory-review-status.yml`。main の定義で動くきっかけだけで起動する） | レビューを通ったことを表す status（`factory-review`）の値。`merge-check` のレビューの部分と同じ判定で `ok` なら `success`（`risk:high` の PR と、品質のゲート〔CI の動きを決めるファイル・Mergify・手順書・判定のスクリプト・規約・Ruleset。一覧は `GATE_PATHS`〕を変える PR は付けない）、最新のコミットへのレビューが ok でなければ `failure`、それ以外は `null`（付けない）。Mergify は `risk:high` 以外の PR を、これが `success` ならキューに入れる |
+| `review-status <PR>` | GitHub Actions（`.github/workflows/factory-review-status.yml`。main の定義で動くきっかけだけで起動する） | レビューを通ったことを表す status（`factory-review`）の値。`merge-check` のレビューの部分と同じ判定で `ok` なら `success`（`risk:high` の PR と、品質のゲート〔CI の動きを決めるファイル・Mergify・手順書・判定のスクリプト・規約・Ruleset。一覧は `GATE_PATHS`〕を変える PR は付けない）、最新のコミットへのレビューが ok でなければ `failure`、それ以外は `null`（付けない）。Mergify は `risk:high` 以外の PR を、これが `success` ならキューに入れる。あわせて `reviewed` に、最新のコミットがレビューを通ったか（status `factory-reviewed`。`merge-check` のレビューの部分と同じ判定で、`risk:high`・品質のゲートでも付く）を返す。Mergify は `merge:requested` の PR を、これが `success` のときだけキューに入れる（#499） |
 | `merge-check <PR>` | 人（`merge:requested` を付ける前） | `merge:requested` を付けてよいか（`ok`）と理由。最新の `factory:review` が `verdict=ok` で、そのコミットより後が「取り込みだけのコミット」（`git show --remerge-diff` の差分が空）だけで、最新のコミットの `app-check`・`design-system-check`・`pr-body-check`（キューに入る条件）が成功していれば `ok` |
 
 `node scripts/factory/claim.ts <コマンド>` で動かす（Node 22.18 以上。クラウドのプロキシを通すため、自分を `NODE_USE_ENV_PROXY=1` で起動し直す）。`decision` が `error` のときは終了コード 2。
@@ -35,6 +35,8 @@ Routine（`.claude/routines/`）が使う判定のスクリプトです。GitHub
 
 レビューを通った PR は、`risk:high` と品質のゲートを変える PR 以外は自動でキューに入る（`review-status`）。人が `merge:requested` を付けるのは、`risk:high` の PR・品質のゲートを変える PR・自動で入らなかった PR（キューから外れたものなど）だけ。
 
+
+`merge:requested` を付けても、最新のコミットに `factory-reviewed`（レビューを通った）が無ければキューに入らない。付けた後に push すると、レビューで ok になるまで入らない（付けた後の push が未レビューのままマージされたため。#499）。
 
 PR に `merge:requested` を付ける前に、必ず `node scripts/factory/claim.ts merge-check <PR>` を実行し、`ok` が `true` のときだけ付ける。`false` なら `reason` のとおりにする（レビューを起こし直す、など）。レビューの ok が無いまま `merge:requested` が付いた PR が 4 本あったため（#293）。キューを通さずにマージするとき（`.mergify.yml` を変える PR など）も、マージの前に同じように実行する（#323 は、レビューの後に足した衝突の解消が未レビューのままマージされた）。
 
