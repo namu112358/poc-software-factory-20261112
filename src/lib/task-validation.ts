@@ -1,5 +1,6 @@
 import { getDb, type Db } from "./db/index.ts";
 import { getUser } from "./users.ts";
+import { isValidDate } from "./valid-date.ts";
 import { isTaskPriority, isTaskStatus, TASK_SORTS, UNASSIGNED, type TaskInput, type TaskSort, type ValidationResult, MEMO_MAX_LENGTH } from "./task-types.ts";
 
 /** URL のクエリの並び順を検証する。不正な値は「作成順」として扱う。 */
@@ -73,8 +74,6 @@ export function parseTaskId(value: unknown): number | undefined {
   return Number(value);
 }
 
-const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
-
 /**
  * API に送られたタスクの内容を検証する。partial = true（更新）のときは、送られた項目だけを検証する。
  * 担当者が存在するかは DB で確認する。
@@ -108,7 +107,7 @@ export function validateTaskInput(
     else value.assignee = b.assignee as string;
   }
   if (need("dueDate")) {
-    if (typeof b.dueDate !== "string" || !DATE_RE.test(b.dueDate) || Number.isNaN(Date.parse(b.dueDate))) {
+    if (typeof b.dueDate !== "string" || !isValidDate(b.dueDate)) {
       errors.push("期限は YYYY-MM-DD 形式で入力してください");
     } else value.dueDate = b.dueDate;
   }
