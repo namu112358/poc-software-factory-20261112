@@ -1,5 +1,6 @@
 "use client";
 // パスワード変更のフォーム。確認が一致しないときは送信しない。
+// ログインが切れていたら（401）、入力を残したまま、ログインし直す案内を出す（#491）。
 import { useState } from "react";
 import type { FormEvent } from "react";
 import {
@@ -9,9 +10,13 @@ import {
   passwordErrorMessages,
 } from "@/lib/password-form";
 import { passwordStrengthText } from "@/lib/password-strength";
+import { isSessionExpired } from "@/lib/session-expired";
+import { SessionExpiredNotice } from "../../session-expired";
 
-export function PasswordForm() {
+/** afterChangeHref: 変えた後に出す、次の画面へのリンク（仮のパスワードから変えたとき。#523）。 */
+export function PasswordForm({ afterChangeHref }: { afterChangeHref?: string } = {}) {
   const [errors, setErrors] = useState<string[]>([]);
+  const [expired, setExpired] = useState(false);
   const [done, setDone] = useState(false);
   const [pending, setPending] = useState(false);
   const [newPassword, setNewPassword] = useState("");
@@ -25,6 +30,7 @@ export function PasswordForm() {
     const newPassword = String(data.get("newPassword") ?? "");
     const mismatch = checkPasswordConfirmation(newPassword, String(data.get("confirmPassword") ?? ""));
     setDone(false);
+    setExpired(false);
     if (mismatch) {
       setErrors([mismatch]);
       return;
@@ -41,6 +47,8 @@ export function PasswordForm() {
         form.reset();
         setNewPassword("");
         setDone(true);
+      } else if (isSessionExpired(res.status)) {
+        setExpired(true);
       } else {
         setErrors(passwordErrorMessages(await res.json().catch(() => undefined)));
       }
@@ -78,7 +86,22 @@ export function PasswordForm() {
       <button type="submit" disabled={pending}>
         変更
       </button>
-      {done && <p role="status">{PASSWORD_CHANGED_MESSAGE}</p>}
+      {done && (
+        <p role="status">
+          {PASSWORD_CHANGED_MESSAGE}
+          {afterChangeHref && (
+            <>
+              {" "}
+              <a href={afterChangeHref} data-testid="password-continue">タスク一覧へ進む</a>
+            </>
+          )}
+        </p>
+      )}
+      {expired && (
+        <p role="alert" data-testid="password-session-expired">
+          <SessionExpiredNotice />
+        </p>
+      )}
       {errors.map((message) => (
         <p key={message} role="alert">
           {message}

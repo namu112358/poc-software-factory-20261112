@@ -1,6 +1,6 @@
 // Factory の Routine が使う「着手してよいか・待っている Issue のどれから着手するか」の判定（#137・#218・#220）。
 // GitHub への書き込み（ラベルの付け外し・コメント）はしない。判定だけを返し、割り当ての役がその結果に従う。
-// 決まりの説明は scripts/factory/README.md、役の手順は .claude/routines/dispatch.md の「2.」。
+// 決まりの説明は scripts/factory/README.md、役の手順は .claude/routines/dispatch.md の「1.」。
 // 用語: 「待っている Issue」は、status:ready があり status:in-progress / status:in-progress-hard の無い Issue（コード上は queued と呼ぶ。ラベルの queued はもう無い）。ラベルの名前は LABEL。
 
 export const WIP_LIMIT = 4;
@@ -19,6 +19,7 @@ export const LABEL = {
   kaizen: "kind:kaizen",
   merge: "merge:requested",
   fix: "type:fix",
+  riskHigh: "risk:high",
 } as const;
 
 /** 接頭を付ける前の名前 → 今の名前。過去のイベント（付けたときの名前のまま残る場合がある）を数えるときだけ使う */
@@ -534,7 +535,7 @@ export function errorActions(reason: string): Actions {
 export const START_MARK_RE = /<!--\s*factory:implement action=start\s*-->/;
 
 /**
- * 起動しなかった実装の付け直しの対象（dispatch.md の「3.」・patrol.md の「1.」）。
+ * 起動しなかった実装の付け直しの対象（dispatch.md の「2.」・patrol.md の「1.」）。
  * status:in-progress（status:in-progress-hard）が付いてから minMinutes 以上たち、その後に実装の着手のコメントも PR も無く、
  * まだ付け直していない（relabel-start のコメントが無い）Issue。古い順に remaining 件まで。
  * 付け直し済みのものは needsHuman に入れる（2 回目は人に回す）。
@@ -569,7 +570,21 @@ export function relabelTargets(args: {
 export const TRUSTED_ASSOCIATIONS = ["OWNER", "MEMBER", "COLLABORATOR"];
 
 /** Mergify のキューに入る条件のチェック（.mergify.yml の queue_conditions の check-success と合わせる） */
-export const REQUIRED_CHECKS = ["app-check", "pr-body-check"];
+export const REQUIRED_CHECKS = ["app-check", "design-system-check", "pr-body-check"];
+
+/** CI の結果として見るチェック（キューに入る条件のうち、PR 本文の検査を除いたもの）。巡回の「CI が通った・落ちた」の判定に使う */
+export const CI_CHECKS = ["app-check", "design-system-check"];
+
+/**
+ * 複数のチェックの状態を 1 つにまとめる。1 つでも落ちていれば failure、それ以外で 1 つでも動いていれば pending、
+ * 1 つでも無ければ none、すべて成功なら success。
+ */
+export function combineChecks(states: CheckState[]): CheckState {
+  if (states.includes("failure")) return "failure";
+  if (states.includes("pending")) return "pending";
+  if (states.length === 0 || states.includes("none")) return "none";
+  return "success";
+}
 
 /**
  * 最新のコミットで、キューに入る条件のチェックが成功しているか（#364）。
@@ -586,6 +601,59 @@ export function ciCheck(runs: { name: string; status: string; conclusion: string
     if (latest.conclusion !== "success") return { ok: false, reason: `${name} が ${latest.conclusion}。直して、CI が通ってから付ける。` };
   }
   return { ok: true, reason: "" };
+}
+
+/**
+ * レビューを通ったことを表すコミットの status（context=factory-review）の値（自動でキューに入れる仕組み）。
+ * 判定は merge-check のレビューの部分と同じ: 最新のコミットが ok のレビューを受けている（ok の後が取り込みだけのコミットなら引き継ぐ）なら success。
+ * 最新のコミットへのレビューが ok でなければ failure。それ以外（レビューの後に中身の変わるコミットがある・レビューが無い）は付けない（null）。
+ * risk:high の PR は人が merge:requested を付けてキューに入れるので、success は付けない（レビューの結果と risk:high の付く順が前後しても、自動で入らないように）。
+ * 品質のゲート（CI・Mergify・Routine の手順書・判定のスクリプト・エージェントの規約・Ruleset）を変える PR も、success は付けない（人が確かめてマージする）。
+ */
+// CI の動きを決めるファイル（package.json の test のスクリプト・依存・TypeScript の設定）も含める（書き換えると CI を空にできるため）。
+// tests/ は含めない（機能の PR はふつうテストを足す）。テストを外す・緩める変更は、レビューの役が見る（AGENTS.md の規約）。
+export const GATE_PATHS = [
+  ".mergify.yml",
+  ".mergify/",
+  ".github/",
+  ".claude/",
+  "scripts/",
+  "AGENTS.md",
+  "CLAUDE.md",
+  "docs/rulesets/",
+  "package.json",
+  "package-lock.json",
+  ".npmrc",
+  "tsconfig.json",
+  "tests/factory-claim.test.ts",
+];
+
+export function touchesGate(files: string[]): string[] {
+  return files.filter((f) => GATE_PATHS.some((g) => (g.endsWith("/") ? f.startsWith(g) : f === g || f.endsWith(`/${g}`))));
+}
+
+export function reviewStatus(mc: ReturnType<typeof mergeCheck>, headSha: string, labels: string[], files: string[] = []): { state: "success" | "failure" | null; description: string } {
+  const onHead = mc.review !== null && (headSha.startsWith(mc.review.commit) || mc.review.commit.startsWith(headSha));
+  if (mc.ok) {
+    if (labels.includes(LABEL.riskHigh)) return { state: null, description: "risk:high の PR は、人が merge:requested を付けてキューに入れる。" };
+    const gate = touchesGate(files);
+    if (gate.length > 0) return { state: null, description: `品質のゲートを変える PR（${gate.slice(0, 3).join("、")}）は、人が確かめて merge:requested を付ける。` };
+    return { state: "success", description: mc.reason };
+  }
+  if (onHead && mc.review !== null && mc.review.verdict !== "ok") return { state: "failure", description: mc.reason };
+  return { state: null, description: mc.reason };
+}
+
+/**
+ * 「最新のコミットがレビューを通った」ことを表す status（context=factory-reviewed）の値。merge:requested で人がキューに入れる PR にも要る
+ * （人がラベルを付けた後の push が、レビューを受けないままマージされたため。#499）。
+ * merge-check のレビューの部分と同じ判定で、ok なら success（risk:high・品質のゲートを変える PR でも付く）、最新のコミットへのレビューが ok でなければ failure、それ以外は付けない（null）。
+ */
+export function reviewedStatus(mc: ReturnType<typeof mergeCheck>, headSha: string): { state: "success" | "failure" | null; description: string } {
+  const onHead = mc.review !== null && (headSha.startsWith(mc.review.commit) || mc.review.commit.startsWith(headSha));
+  if (mc.ok) return { state: "success", description: mc.reason };
+  if (onHead && mc.review !== null && mc.review.verdict !== "ok") return { state: "failure", description: mc.reason };
+  return { state: null, description: mc.reason };
 }
 
 export function mergeCheck(args: {
@@ -610,4 +678,438 @@ export function mergeCheck(args: {
   const changed = args.after.filter((c) => !c.mergeOnly).map((c) => c.sha.slice(0, 7));
   if (changed.length > 0) return { ok: false, reason: `ok のレビューの後に中身の変わるコミット（${changed.join("、")}）がある。レビューを起こし直す（PR を draft にして Ready に戻す）。`, review };
   return { ok: true, reason: "ok のレビューの後は、取り込みだけのコミットだけ。", review };
+}
+
+// ---- 止まった実装・PR の片付け（`claim.ts stalled`。割り当ての「3.」・巡回の「1.」） ----
+
+export type StalledCommit = { sha: string; mergeOnly: boolean; merge?: boolean }; // merge: main を取り込んだマージのコミット（2 つ目の親が main に含まれる。ほかのブランチのマージは false）。gate の軽い再レビューの判定に使う
+export type CheckState = "success" | "failure" | "pending" | "none";
+
+export type StalledPr = {
+  number: number;
+  headRef: string;
+  headSha: string;
+  draft: boolean;
+  mergeable: boolean | null;
+  labels: string[]; // 今の名前に直したラベル
+  updatedAt: string; // PR の updated_at
+  readyAt: string | null; // 最後に Ready になった時刻（timeline の ready_for_review。無ければ PR を作った時刻）
+  appCheck: CheckState; // 最新のコミットの CI（CI_CHECKS: app-check・design-system-check）の最新の実行を combineChecks でまとめたもの
+  reviews: { verdict: string; commit: string }[]; // 書き込み権限のある人の factory:review（古い順）
+  /** レビューのコミット → それより後のコミット（first-parent）。PR の履歴に無ければ null。head と同じなら [] */
+  after: Record<string, StalledCommit[] | null>;
+  priorMarks: { action: string; commit: string }[]; // 割り当て・巡回の `action=<処置> commit=<sha>` のコメント（書き込み権限のある人のもの）。同じ処置のくり返しを数える
+  bodyCheck: CheckState; // 最新のコミットの pr-body-check の最新の実行
+  mergifyTimeout: { at: string } | null; // Mergify の状況のコメントの dequeue_reason.code が CHECKS_TIMEOUT のとき、外れた時刻
+};
+export type StalledIssue = { number: number; labels: string[]; updatedAt: string };
+
+export type StalledAction = {
+  target: "pr" | "issue";
+  number: number;
+  action: string;
+  removeLabels: string[];
+  addLabels: string[];
+  draft: null | "to-draft" | "to-ready" | "draft-then-ready" | "ready-then-draft";
+  issue: null | { number: number; removeLabels: string[]; addLabels: string[] };
+  comment: string | null;
+};
+
+const ISSUE_BRANCH_RE = /^claude\/issue-(\d+)$/;
+const sameCommit = (a: string, b: string) => a.length > 0 && b.length > 0 && (a.startsWith(b) || b.startsWith(a));
+const minutesSince = (at: string, now: string) => (new Date(now).getTime() - new Date(at).getTime()) / 60000;
+
+/** 最新のコミットが、ok のレビューを受けているか、その後が取り込みだけのコミットだけか（merge-check の ok と同じ見方） */
+function okCoversHead(pr: StalledPr): boolean {
+  const ok = pr.reviews.filter((r) => r.verdict === "ok").at(-1);
+  if (!ok) return false;
+  if (sameCommit(pr.headSha, ok.commit)) return true;
+  const after = pr.after[ok.commit];
+  return after != null && after.every((c) => c.mergeOnly);
+}
+
+/** 最新のレビューより後に、取り込みだけでないコミットがあるか（レビューが無ければ true）。履歴に見つからなければ true */
+function changedAfterLatestReview(pr: StalledPr): boolean {
+  const last = pr.reviews.at(-1);
+  if (!last) return true;
+  if (sameCommit(pr.headSha, last.commit)) return false;
+  const after = pr.after[last.commit];
+  return after == null || after.some((c) => !c.mergeOnly);
+}
+
+/**
+ * stalled の入力として、PR ごとに何を読むか（claim.ts の loadStalled が使う）。
+ * レビューと Ready の時刻は、claude/issue- 以外の PR でも読む（レビューの起こし直しは claude/ のすべての PR が対象。#559）。
+ * Ready の時刻は Ready の PR だけ。CI・PR 本文の検査・Mergify の状況は、claude/issue- の PR で mergeable が分かっているときだけ（ほかの行で使う）。
+ */
+export function stalledLoadPlan(p: { own: boolean; mergeable: boolean | null; draft: boolean }): { reviews: boolean; readyAt: boolean; checks: boolean } {
+  return { reviews: true, readyAt: !p.draft, checks: p.own && p.mergeable !== null };
+}
+
+export function stalledComment(role: string, action: string, text: string, sessionUrl: string | null, commit?: string): string {
+  const mark = `<!-- factory:${role} action=${action}${commit ? ` commit=${commit}` : ""} -->`;
+  return [mark, text, ...(sessionUrl ? [`セッション: ${sessionUrl}`] : [])].join("\n");
+}
+
+/**
+ * 止まった実装・PR の判定（dispatch.md・patrol.md の表を 1 つにしたもの）。GitHub には書かず、役が行う操作だけを返す。
+ * 1 つの PR・Issue に当てはまる処置は、行の順（1〜9）で最初の 1 つだけ。mergeable が null の PR は unknown に入れ、ほかの行も判定しない。
+ * 対象: claude/ の PR（claude/issue- 以外は「衝突」と「レビューが動かなかった」の行だけ。巡回は「レビューが動かなかった」だけ）。PR に status:needs-human、その Issue に blocked-question・needs-human・kind:epic があるものは対象外。
+ * issues: 開いていて status:in-progress（-hard）が付いた Issue と、PR の Issue（PR の Issue は prs の headRef から引く）。
+ * closedStarted: 閉じた Issue のうち、status:in-progress（-hard）が残っているもの（行 10）。
+ */
+export function stalledActions(input: {
+  role: string;
+  now: string;
+  sessionUrl: string | null;
+  prs: StalledPr[];
+  issues: StalledIssue[];
+  closedStarted: { number: number; labels: string[] }[];
+}): { role: string; now: string; actions: StalledAction[]; unknown: { pr: number; reason: string }[] } {
+  const { role, now, sessionUrl } = input;
+  const actions: StalledAction[] = [];
+  const unknown: { pr: number; reason: string }[] = [];
+  const humanWaiting: string[] = [LABEL.blockedQuestion, LABEL.needsHuman, LABEL.epic];
+  const issueByNumber = new Map(input.issues.map((i) => [i.number, i]));
+  const startOf = (labels: string[]) => START_LABELS.filter((l) => labels.includes(l));
+  const note = (text: string, action: string, commit?: string) => stalledComment(role, action, text, sessionUrl, commit);
+  const handledIssues = new Set<number>();
+
+  for (const pr of input.prs) {
+    const m = ISSUE_BRANCH_RE.exec(pr.headRef);
+    const issueNo = m ? Number(m[1]) : null;
+    const issue = issueNo !== null ? issueByNumber.get(issueNo) : undefined;
+    if (issueNo !== null) handledIssues.add(issueNo);
+    if (pr.labels.includes(LABEL.needsHuman)) continue;
+    if (issue && issue.labels.some((l) => humanWaiting.includes(l))) continue;
+    const idle = Math.min(
+      minutesSince(pr.updatedAt, now),
+      issue ? minutesSince(issue.updatedAt, now) : Infinity,
+    );
+    const started = issue ? startOf(issue.labels) : [];
+    const base = { target: "pr" as const, number: pr.number, removeLabels: [] as string[], addLabels: [] as string[], issue: null };
+    const push = (a: Partial<StalledAction> & { action: string; comment: string | null }) => {
+      actions.push({ ...base, draft: null, ...a });
+    };
+    const toHuman = (action: string, text: string, commit?: string) =>
+      push({ action, addLabels: [LABEL.needsHuman], comment: note(text, action, commit) });
+    const sha7 = pr.headSha.slice(0, 7);
+    // 同じコミットに同じ処置を 2 回しない。2 回目は draft の切り替えをせず、人に回す
+    const once = (a: Partial<StalledAction> & { action: string }, text: string) => {
+      if (pr.priorMarks.some((m) => m.action === a.action && sameCommit(m.commit, pr.headSha)))
+        push({ action: a.action, addLabels: [LABEL.needsHuman], comment: stalledComment(role, `${a.action}-repeat`, `同じ処置（${a.action}）を同じコミットに 2 回しても動かないので、人に回す。`, sessionUrl, sha7) });
+      else push({ ...a, comment: note(text, a.action, sha7) });
+    };
+    const stopIssue = (text: string) => {
+      actions.push({
+        target: "issue",
+        number: issue!.number,
+        action: "stalled",
+        removeLabels: started,
+        addLabels: [LABEL.needsHuman],
+        draft: null,
+        issue: null,
+        comment: note(text, "stalled"),
+      });
+    };
+
+    // 3: レビューが動かなかった（claude/ のすべての PR。レビューの起動の取りこぼしは、出したセッションでは気づきにくい。#482・#518）
+    const rereview = () => {
+      if (!pr.draft && !pr.reviews.some((r) => sameCommit(r.commit, pr.headSha)) && !okCoversHead(pr) && pr.readyAt && minutesSince(pr.readyAt, now) >= 10) {
+        once({ action: "rereview", draft: "draft-then-ready" }, "レビューが動かなかったので起こし直した。");
+        return true;
+      }
+      return false;
+    };
+    if (issueNo === null && role !== "dispatch") {
+      rereview(); // claude/issue- 以外の PR は、巡回はレビューの起こし直しだけ
+      continue;
+    }
+    if (pr.mergeable === null) {
+      unknown.push({ pr: pr.number, reason: "mergeable が null" });
+      continue;
+    }
+    // 1・2: 衝突
+    if (!pr.draft && pr.mergeable === false) {
+      once({ action: "conflict", draft: "to-draft" }, "`main` と衝突しているので draft に戻した。衝突を直して Ready に戻す。");
+      continue;
+    }
+    if (issueNo === null) {
+      rereview(); // claude/issue- 以外は、衝突とレビューの起こし直しだけ
+      continue;
+    }
+    if (pr.draft && pr.mergeable === false && idle >= 30) {
+      once({ action: "conflict-kick", draft: "ready-then-draft" }, "衝突したまま止まっているので、修正の役を起こし直した。");
+      continue;
+    }
+    if (rereview()) continue;
+    // 4: 必須の指摘が直されないまま
+    const latest = pr.reviews.at(-1);
+    if (pr.draft && latest?.verdict === "changes" && sameCommit(latest.commit, pr.headSha) && idle >= 30) {
+      toHuman("changes-stuck", "必須の指摘が直されないまま止まっているので、人に回す。");
+      continue;
+    }
+    // 5: CI が通ったまま止まった draft
+    if (pr.draft && pr.appCheck === "success" && changedAfterLatestReview(pr) && pr.mergeable === true && idle >= 15) {
+      once(
+        { action: "ready-stalled", draft: "to-ready", issue: started.length ? { number: issue!.number, removeLabels: started, addLabels: [] } : null },
+        "CI が通ったまま止まっていたので Ready にした（レビューの役が動く）。",
+      );
+      continue;
+    }
+    // 6・7: 作業中の印が付いたまま止まった Issue
+    if (issue && started.length && pr.draft) {
+      if (pr.appCheck === "failure" && idle >= 30) {
+        stopIssue("CI が落ちたまま 30 分動きが無いので、人に回す。");
+        continue;
+      }
+      if (idle >= 60) {
+        stopIssue("60 分動きが無いので、人に回す。");
+        continue;
+      }
+    }
+    // 8: 作業中の印が無く、CI が通らないまま止まった draft
+    if (pr.draft && pr.appCheck !== "success" && started.length === 0 && idle >= 60) {
+      toHuman("stalled-ci", "CI が通らないまま止まっているので、人に回す。");
+      continue;
+    }
+    // 9: Mergify の時間切れで外れ、その後 CI も レビューも通っている
+    const dequeued = pr.labels.some((l) => l === "merge:dequeued" || l === "dequeued");
+    // merge:requested で入った PR も、レビューの status で自動で入った PR も同じ（Mergify は、キューに入っていた PR にだけ dequeued を付ける）
+    if (dequeued && pr.mergifyTimeout && minutesSince(pr.mergifyTimeout.at, now) >= 5 && pr.appCheck === "success" && pr.bodyCheck === "success" && okCoversHead(pr)) {
+      toHuman("checks-timeout", "Mergify の時間切れでキューから外れた。その後 CI は成功し、レビューも ok。人が `merge:requested` を付ける（付いていれば外して付け直す）と入り直す。");
+      continue;
+    }
+  }
+
+  // 7（PR が無い Issue）。PR がある Issue は上の PR の判定で扱った
+  for (const issue of input.issues) {
+    if (handledIssues.has(issue.number)) continue;
+    const started = startOf(issue.labels);
+    if (started.length === 0 || issue.labels.some((l) => humanWaiting.includes(l))) continue;
+    if (minutesSince(issue.updatedAt, now) >= 60) {
+      actions.push({
+        target: "issue",
+        number: issue.number,
+        action: "stalled",
+        removeLabels: started,
+        addLabels: [LABEL.needsHuman],
+        draft: null,
+        issue: null,
+        comment: stalledComment(role, "stalled", "60 分動きが無いので、人に回す。", sessionUrl),
+      });
+    }
+  }
+  // 10: 閉じた Issue に残った印
+  for (const c of input.closedStarted) {
+    const started = START_LABELS.filter((l) => c.labels.includes(l));
+    if (started.length) actions.push({ target: "issue", number: c.number, action: "cleanup", removeLabels: started, addLabels: [], draft: null, issue: null, comment: null });
+  }
+  return { role, now, actions, unknown };
+}
+
+// ---- 各役の起動の判定（`claim.ts gate`。実装・レビュー・修正の手順書の「1.」） ----
+
+/** 高リスクの変更ファイル（レビューで risk:high の目印にする） */
+export const RISK_FILES: readonly string[] = ["src/lib/db/migrations.ts", "src/lib/auth.ts", "src/lib/session.ts", "src/lib/api.ts"];
+const FIX_ROUND_LIMIT = 3;
+
+export type GateReview = { verdict: string; commit: string }; // 書き込み権限のある人の factory:review（古い順）
+/** headRepo: PR の head のリポジトリ（head.repo.full_name。フォークの PR は別の名前。消えていれば null） */
+type GatePr = { open: boolean; draft: boolean; headRef: string; headSha: string; labels: string[]; headRepo: string | null };
+
+export type GateInput =
+  | {
+      role: "implement";
+      number: number;
+      sessionUrl: string | null;
+      repo: string; // このリポジトリ（owner/name）。フォークの PR を対象にしないために使う
+      issueOpen: boolean;
+      labels: string[]; // 今の名前に直したラベル
+      /** 起動のラベルの最後の labeled。イベントが読めなければ null */
+      lastStartAt: string | null; // 起動のラベルの最後の labeled の時刻。イベントが読めなければ null
+      labeler: string | null; // 起動のラベルを付けた人（その labeled の actor の login）。読めなければ null
+      comments: Comment[]; // 書き込み権限のある人のコメント
+      closingPrs: { number: number; headRef: string; headRepo: string | null; draft: boolean; reviewed: boolean }[]; // Closes #N で参照する開いている PR
+      branchExists: boolean; // claude/issue-<N> がある
+    }
+  | {
+      role: "review";
+      number: number;
+      sessionUrl: string | null;
+      repo: string; // このリポジトリ（owner/name）。フォークの PR を対象にしないために使う
+      pr: GatePr;
+      reviews: GateReview[];
+      /** 最新の verdict=ok のコミットより後のコミット。履歴に無ければ null。ok が無ければ null */
+      afterOk: StalledCommit[] | null;
+      files: string[];
+    }
+  | {
+      role: "fix";
+      number: number;
+      sessionUrl: string | null;
+      repo: string; // このリポジトリ（owner/name）。フォークの PR を対象にしないために使う
+      pr: GatePr;
+      reviews: GateReview[];
+      mergeable: boolean; // null は読み直した後に false（衝突）にしてから渡す
+    };
+
+export type GateResult = {
+  role: string;
+  number: number;
+  decision: "stop" | "needs-human" | "takeover" | "lock" | "go";
+  reason: string;
+  pr: number | null;
+  branch: string | null;
+  labeler?: string | null; // implement のとき: 起動のラベルを付けた人。役が書き込み権限を確かめる
+  ops: { removeLabels: string[]; addLabels: string[]; comment: string | null } | null;
+  light?: boolean;
+  riskFiles?: string[];
+  fix?: { changes: boolean; conflict: boolean; removeMergeRequested: boolean } | null;
+};
+
+/** mergeable が null（計算中）なら wait してから読み直す。tries 回読んでも null なら衝突（false）として扱う */
+export async function settleMergeable(read: () => Promise<boolean | null>, wait: () => Promise<void>, tries = 3): Promise<boolean> {
+  for (let i = 0; i < tries; i++) {
+    const v = await read();
+    if (v !== null) return v;
+    if (i < tries - 1) await wait();
+  }
+  return false;
+}
+
+export type CiWaitResult = "success" | "failure" | "conflict" | "head-changed" | "timeout" | "error";
+export type CiWaitState = { sha: string | null; deadlineMs: number; failures: number }; // sha: 待ち始めの head（最初の読み取りで決まる）
+/** 1 回の読み取り。ok が false のときは読めなかった回（ネットワーク）。appCheck は head の app-check（まだ無ければ null） */
+export type CiWaitRead = { ok: boolean; sha?: string; appCheck?: { status: string; conclusion: string | null } | null; mergeable?: boolean | null };
+export const CI_WAIT_MAX_FAILURES = 5;
+
+/**
+ * CI の待ち（implement.md の 4.・fix.md の 5.）の 1 回分の判定。終わりなら result を、続けるなら次の state を返す。
+ * 順: 読み取りの失敗 5 回 → error / head が変わった → head-changed / app-check が終わった → success・failure / mergeable が false → conflict
+ * （null は計算中なので待つ）/ 時間切れ → timeout。時間切れの回の読み取りが「最後の読み直し」なので、終わっていれば上の結果が先に出る。
+ */
+export function ciWaitStep(
+  state: CiWaitState,
+  read: CiWaitRead,
+  now: number,
+): { done: false; state: CiWaitState } | { done: true; result: CiWaitResult; conclusion: string | null; sha: string | null } {
+  const end = (result: CiWaitResult, conclusion: string | null = null) => ({ done: true as const, result, conclusion, sha: state.sha });
+  if (!read.ok) {
+    const failures = state.failures + 1;
+    if (failures >= CI_WAIT_MAX_FAILURES) return end("error");
+    return now >= state.deadlineMs ? end("timeout") : { done: false, state: { ...state, failures } };
+  }
+  const next: CiWaitState = { ...state, failures: 0, sha: state.sha ?? read.sha ?? null };
+  if (state.sha !== null && read.sha !== state.sha) return end("head-changed");
+  if (read.appCheck?.status === "completed") {
+    const conclusion = read.appCheck.conclusion;
+    return { ...end(conclusion === "success" ? "success" : "failure", conclusion), sha: next.sha };
+  }
+  if (read.mergeable === false) return { ...end("conflict"), sha: next.sha };
+  if (now >= state.deadlineMs) return { ...end("timeout"), sha: next.sha };
+  return { done: false, state: next };
+}
+
+/**
+ * 実装・レビュー・修正が、起動してよいか（手順書の「1.」）の判定。GitHub と git は読まず、集めた入力だけで決める。
+ * 表の行の順に、最初に当たった 1 つだけ。書き込み（ops）は返すだけで、役が行う。
+ */
+export function gateDecision(input: GateInput): GateResult {
+  const base = { role: input.role, number: input.number };
+  const stopBase = (reason: string): GateResult => ({ ...base, decision: "stop", reason, pr: null, branch: null, ops: null, ...(input.role === "fix" ? { fix: null } : {}) });
+  const stop = stopBase;
+  const note = (text: string, action: string) => stalledComment(input.role, action, text, input.sessionUrl);
+
+  if (input.role === "implement") {
+    const withLabeler = (r: GateResult): GateResult => ({ ...r, labeler: input.labeler });
+    const stop = (reason: string) => withLabeler(stopBase(reason));
+    const branch = `claude/issue-${input.number}`;
+    const hasStart = input.labels.some((l) => START_LABELS.includes(l));
+    if (!input.issueOpen) return stop("Issue が閉じている。");
+    if (!hasStart) return stop("起動のラベルが付いていない。");
+    const blocker = [LABEL.epic, LABEL.blockedQuestion, LABEL.needsHuman].find((l) => input.labels.includes(l));
+    if (blocker) return stop(`${blocker} が付いている。`);
+    if (input.comments.some((c) => START_MARK_RE.test(c.body) && c.createdAt > (input.lastStartAt ?? "")))
+      return stop("起動のラベルが付いた後に、着手のコメントがもうある。");
+    // フォークの PR は数えない（外の人が「Closes #N」の PR を出して、実装の着手を止められないように）
+    const closing = input.closingPrs.filter((p) => isOwnHead(p.headRepo, input.repo));
+    if (closing.length > 0) {
+      const own = closing.find((p) => p.headRef === branch && p.draft && !p.reviewed);
+      if (own) return withLabeler({ ...base, decision: "takeover", reason: `残った draft の PR #${own.number} がある（レビュー前）。引き継ぐ。`, pr: own.number, branch, ops: null });
+      return stop(`この Issue を Closes で参照する開いている PR（#${closing[0].number}）がある。`);
+    }
+    if (input.branchExists) return withLabeler({ ...base, decision: "takeover", reason: `ブランチ ${branch} が残っている（PR は無い）。取り出して続ける。`, pr: null, branch, ops: null });
+    return withLabeler({ ...base, decision: "lock", reason: `着手の鍵（ブランチ ${branch}）を作ってよい。`, pr: null, branch, ops: null });
+  }
+
+  const pr = input.pr;
+  if (input.role === "review") {
+    if (!pr.open) return stop("PR が閉じている。");
+    if (pr.draft) return stop("PR が draft。");
+    if (!isOwnHead(pr.headRepo, input.repo)) return stop("PR の head がこのリポジトリのブランチでない（フォークの PR）。");
+    if (!pr.headRef.startsWith("claude/")) return stop("head のブランチが claude/ で始まらない。");
+    if (pr.labels.includes(LABEL.needsHuman)) return stop("status:needs-human が付いている。");
+    if (input.reviews.some((r) => sameCommit(r.commit, pr.headSha))) return stop("最新のコミットへのレビューがもうある。");
+    const after = input.afterOk;
+    if (after && after.length > 0 && after.every((c) => c.mergeOnly)) return stop("最新の ok のレビューの後は、取り込みだけのコミットだけ。");
+    const light = after !== null && after.length > 0 && after.every((c) => c.merge === true);
+    const riskFiles = input.files.filter((f) => RISK_FILES.includes(f));
+    return {
+      ...base,
+      decision: "go",
+      reason: light ? "ok の後が、マージのコミット（衝突の解消あり）だけ。軽い再レビュー。" : "レビューする。",
+      pr: input.number,
+      branch: null,
+      ops: null,
+      light,
+      riskFiles,
+    };
+  }
+
+  // fix
+  if (!pr.open) return stop("PR が閉じている。");
+  if (!pr.draft) return stop("PR が draft でない。");
+  if (!isOwnHead(pr.headRepo, input.repo)) return stop("PR の head がこのリポジトリのブランチでない（フォークの PR）。");
+  if (!pr.headRef.startsWith("claude/issue-")) return stop("head のブランチが claude/issue- で始まらない。");
+  if (pr.labels.includes(LABEL.needsHuman)) return stop("status:needs-human が付いている。");
+  const latest = input.reviews.at(-1);
+  const changes = !!latest && latest.verdict === "changes" && sameCommit(latest.commit, pr.headSha);
+  const conflict = !input.mergeable;
+  if (!changes && !conflict) return stop("直すものが無い（最新のレビューの指摘は直してあり、衝突も無い）。");
+  const rounds = input.reviews.filter((r) => r.verdict === "changes").length;
+  if (rounds >= FIX_ROUND_LIMIT)
+    return {
+      ...base,
+      decision: "needs-human",
+      reason: `verdict=changes のレビューが ${rounds} 件ある。`,
+      pr: input.number,
+      branch: null,
+      ops: { removeLabels: [], addLabels: [LABEL.needsHuman], comment: note("2 往復直しても指摘が残っているので、人に回す。", "round-limit") },
+      fix: null,
+    };
+  return {
+    ...base,
+    decision: "go",
+    reason: [changes ? "最新のレビューの指摘が未対応" : null, conflict ? "main と衝突している" : null].filter(Boolean).join("。") + "。",
+    pr: input.number,
+    branch: null,
+    ops: null,
+    fix: { changes, conflict, removeMergeRequested: pr.labels.includes(LABEL.merge) },
+  };
+}
+
+export type HeadRef = { ref: string; repo?: { full_name: string } | null };
+
+/**
+ * 役が扱う PR か: このリポジトリのブランチで、名前が `claude/` で始まる。
+ * フォークの PR は、ブランチ名を `claude/...` にしても対象にしない（片付けのラベル・draft の付け外し・コメントを、外の人が起こせないように）
+ */
+export function isOwnClaudePr(p: { head: HeadRef }, repo: string): boolean {
+  return p.head.ref.startsWith("claude/") && isOwnHead(p.head.repo?.full_name ?? null, repo);
+}
+
+/** PR の head がこのリポジトリのブランチか（フォーク・消えたフォークは false）。フォークの判定はここだけに置く */
+export function isOwnHead(headRepo: string | null, repo: string): boolean {
+  return headRepo !== null && headRepo === repo;
 }

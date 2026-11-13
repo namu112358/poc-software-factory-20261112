@@ -1,13 +1,25 @@
+import { formatPageTitle } from "@/lib/page-title";
 import { formatMonthDay } from "@/lib/absence";
 import { listMemberWorkload, sortMembersByOverdue } from "@/lib/members";
+import { VISIBLE_TASK_LIMIT, memberMoreHref, splitVisible } from "@/lib/task-overflow";
 import { requireUser } from "@/lib/session";
+import { isCoordinator } from "@/lib/users";
+import { showSuspensionControl } from "@/lib/member-suspension";
+import { SuspensionButton } from "./suspension-button";
+import { showAddMemberControl } from "@/lib/member-create";
+import { AddMemberForm } from "./add-member-form";
+import { roleControlFor, roleLabel } from "@/lib/member-role";
+import { RoleButton } from "./role-button";
+
+export const metadata = { title: formatPageTitle("メンバー一覧") };
 
 export default async function MembersPage() {
-  await requireUser();
+  const user = await requireUser();
+  const viewer = { id: user.id, isCoordinator: isCoordinator(user.id) };
   const members = sortMembersByOverdue(listMemberWorkload());
 
   return (
-    <main>
+    <main id="main-content" tabIndex={-1}>
       <h1>メンバー一覧</h1>
       <table>
         <thead>
@@ -16,10 +28,15 @@ export default async function MembersPage() {
             <th>休み</th>
             <th>未完了のタスク数</th>
             <th>未完了のタスク</th>
+            <th>ログイン</th>
+            <th>役割</th>
           </tr>
         </thead>
         <tbody>
-          {members.map((m) => (
+          {members.map((m) => {
+            const { shown, hiddenCount } = splitVisible(m.tasks, VISIBLE_TASK_LIMIT);
+            const roleTo = roleControlFor(viewer, m);
+            return (
             <tr key={m.id} data-testid="member-row" style={m.overdueCount > 0 ? { background: "#fdecea", fontWeight: "bold" } : undefined}>
               <td>
                 {m.name}
@@ -37,18 +54,46 @@ export default async function MembersPage() {
                   "なし"
                 ) : (
                   <ul>
-                    {m.tasks.map((t) => (
+                    {shown.map((t) => (
                       <li key={t.id}>
-                        <a href={`/tasks/${t.id}`}>{t.label}</a>
+                        <a href={`/tasks/${t.id}`} title={t.title}>{t.label}</a>
                       </li>
                     ))}
                   </ul>
                 )}
+                {hiddenCount > 0 && (
+                  <>
+                    <a href={memberMoreHref(m.id)} data-testid="member-more">
+                      ほか {hiddenCount} 件
+                    </a>
+                    <small>（リンク先は、完了したタスクも含めた {m.name} さんの担当の一覧です）</small>
+                  </>
+                )}
+              </td>
+              <td data-testid="member-login">
+                {m.suspended ? "停止中" : "利用中"}
+                {showSuspensionControl(viewer, m.id) && (
+                  <>
+                    {" "}
+                    <SuspensionButton memberId={m.id} name={m.name} suspended={m.suspended} />
+                  </>
+                )}
+              </td>
+              <td data-testid="member-role">
+                {roleLabel(m.role)}
+                {roleTo && (
+                  <>
+                    {" "}
+                    <RoleButton memberId={m.id} name={m.name} to={roleTo} self={m.id === viewer.id} />
+                  </>
+                )}
               </td>
             </tr>
-          ))}
+            );
+          })}
         </tbody>
       </table>
+      {showAddMemberControl(viewer) && <AddMemberForm />}
     </main>
   );
 }

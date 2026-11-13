@@ -3,8 +3,9 @@
 // ほかの人が先に更新していたら（409）上書きせずに知らせ、入力は残したまま、相手が変えた項目を並べる。
 // 「今の値で編集し直す」を押すまでは保存できない（自分の入力のまま、確かめずに上書きしないため）。
 // 編集し直すと、相手が変えた項目だけが今の値になり、ほかの項目は自分の入力が残る。
+// ログインが切れていたら（401）、フォームを閉じず入力を残したまま、誤りの一覧にログインし直す案内を出す（#491）。
 import { useRouter } from "next/navigation";
-import { useMemo, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import {
   TASK_EDIT_CONFLICT_MESSAGE,
   TASK_EDIT_NO_CHANGED_FIELDS_MESSAGE,
@@ -19,7 +20,18 @@ import {
   type TaskEditState,
   type TaskEditValues,
 } from "@/lib/task-edit";
+import { SessionExpiredNotice } from "../../session-expired";
+import { fieldErrorId, fieldErrorProps, fieldErrorText, toFormErrorItems, type FormErrorItem, type TaskFormField } from "@/lib/form-errors";
 import { MEMO_MAX_LENGTH, PRIORITY_LABELS, STATUS_LABELS, TASK_PRIORITIES, TASK_STATUSES, isTaskPriority, isTaskStatus, type Task } from "@/lib/task-types";
+
+const ERROR_PREFIX = "edit-task";
+
+function FieldError({ items, field }: { items: FormErrorItem[]; field: TaskFormField }) {
+  const text = fieldErrorText(items, field);
+  return text === "" ? null : (
+    <span id={fieldErrorId(ERROR_PREFIX, field)}> {text}</span>
+  );
+}
 
 type Props = { task: Task; users: { id: string; name: string; label?: string }[] };
 
@@ -28,27 +40,43 @@ export function EditTaskForm({ task, users }: Props) {
   const [open, setOpen] = useState(false);
   const [edit, setEdit] = useState<TaskEditState>(() => startTaskEdit(task));
   const [received, setReceived] = useState<Task>();
-  const [errors, setErrors] = useState<string[]>([]);
+  const [errors, setErrors] = useState<FormErrorItem[]>([]);
+  const [expired, setExpired] = useState(false);
+  const titleRef = useRef<HTMLInputElement>(null);
+  const errorListRef = useRef<HTMLUListElement>(null);
   const [pending, setPending] = useState(false);
   const values = edit.values;
   const userNames = useMemo(() => new Map(users.map((u) => [u.id, u.name])), [users]);
   const rows = edit.conflict ? conflictRows(edit.base, taskToEditValues(edit.conflict), values, userNames) : [];
   const canSave = canSaveTaskEdit(edit);
 
+  // 「編集」を押してフォームが開いたら、タイトルの欄にフォーカスを移す。
+  useEffect(() => {
+    if (open) titleRef.current?.focus();
+  }, [open]);
+
+  // 誤りやログイン切れで断られたら、誤りの一覧にフォーカスを移す。
+  useEffect(() => {
+    if (errors.length > 0 || expired) errorListRef.current?.focus();
+  }, [errors, expired]);
+
   function startEditing() {
     setEdit(startTaskEdit(newerTask(task, received)));
     setErrors([]);
+    setExpired(false);
     setOpen(true);
   }
 
   function close() {
     setOpen(false);
     setErrors([]);
+    setExpired(false);
   }
 
   function rebase() {
     setEdit(rebaseOnCurrent);
     setErrors([]);
+    setExpired(false);
   }
 
   function set<K extends keyof TaskEditValues>(key: K, value: TaskEditValues[K]) {
@@ -60,6 +88,7 @@ export function EditTaskForm({ task, users }: Props) {
     if (pending || !canSave) return;
     setPending(true);
     setErrors([]);
+    setExpired(false);
     const result = await saveTaskEdit(task.id, values, edit.expectedUpdatedAt, { fetch: (url, init) => fetch(url, init) });
     setPending(false);
     switch (result.status) {
@@ -74,13 +103,13 @@ export function EditTaskForm({ task, users }: Props) {
         router.refresh();
         return;
       case "invalid":
-        setErrors(result.messages);
+        setErrors(toFormErrorItems(result.messages, { dueDate: values.dueDate }));
         return;
       case "unauthorized":
-        window.location.href = "/login";
+        setExpired(true);
         return;
       case "error":
-        setErrors([result.message]);
+        setErrors([{ message: result.message }]);
         return;
     }
   }
@@ -100,17 +129,33 @@ export function EditTaskForm({ task, users }: Props) {
           {TASK_EDIT_CONFLICT_MESSAGE}
         </p>
       )}
-      {errors.length > 0 && (
-        <ul role="alert" data-testid="edit-errors">
+      {(errors.length > 0 || expired) && (
+        <ul role="alert" data-testid="edit-errors" ref={errorListRef} tabIndex={-1}>
+          {expired && (
+            <li data-testid="edit-session-expired">
+              <SessionExpiredNotice />
+            </li>
+          )}
           {errors.map((e) => (
-            <li key={e}>{e}</li>
+            <li key={e.message}>{e.message}</li>
           ))}
         </ul>
       )}
       <p>
         <label>
-          タイトル <input name="title" maxLength={200} value={values.title} onChange={(e) => set("title", e.target.value)} />
+          タイトル<span aria-hidden="true">（必須）</span>{" "}
+          <input
+            ref={titleRef}
+            name="title"
+            maxLength={200}
+            required
+            aria-required="true"
+            {...fieldErrorProps(errors, ERROR_PREFIX, "title")}
+            value={values.title}
+            onChange={(e) => set("title", e.target.value)}
+          />
         </label>
+        <FieldError items={errors} field="title" />
       </p>
       <p>
         <label>
@@ -142,8 +187,18 @@ export function EditTaskForm({ task, users }: Props) {
       </p>
       <p>
         <label>
-          期限 <input name="dueDate" type="date" value={values.dueDate} onChange={(e) => set("dueDate", e.target.value)} />
+          期限<span aria-hidden="true">（必須）</span>{" "}
+          <input
+            name="dueDate"
+            type="date"
+            required
+            aria-required="true"
+            {...fieldErrorProps(errors, ERROR_PREFIX, "dueDate")}
+            value={values.dueDate}
+            onChange={(e) => set("dueDate", e.target.value)}
+          />
         </label>
+        <FieldError items={errors} field="dueDate" />
       </p>
       <p>
         <label>

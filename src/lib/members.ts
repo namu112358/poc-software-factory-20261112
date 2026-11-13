@@ -1,6 +1,7 @@
 import { getDb, type Db } from "./db/index.ts";
 import { formatLeaveNote, listLeaveEndDates, listUpcomingLeaveEndDates } from "./absence.ts";
 import { todayInJapan } from "./task-dates.ts";
+import type { UserRole } from "./user-role.ts";
 
 export type MemberOpenTask = { id: number; title: string; label: string };
 /** leaveUntil は、今日（日本時間）が休みの期間に入っていれば、その終了日（YYYY-MM-DD）。休みでなければ null。 */
@@ -11,6 +12,10 @@ export type MemberRow = {
   overdueCount: number;
   tasks: MemberOpenTask[];
   leaveUntil: string | null;
+  /** ログインを停止しているか（#522）。 */
+  suspended: boolean;
+  /** 役割（#524）。 */
+  role: UserRole;
 };
 
 const TITLE_MAX = 10;
@@ -21,9 +26,17 @@ export function truncateTitle(title: string): string {
   return chars.length > TITLE_MAX ? `${chars.slice(0, TITLE_MAX).join("")}…` : title;
 }
 
-/** メンバーごとの、担当している未完了（完了以外）で、アーカイブしていないタスク。メンバーはユーザー ID 順、タスクは期限の早い順。 */
+/**
+ * メンバーごとの、担当している未完了（完了以外）で、アーカイブしていないタスク。メンバーはユーザー ID 順、タスクは期限の早い順。
+ * ログインを停止したメンバーも含め、`suspended` で分かるようにする（#522）。
+ */
 export function listMemberWorkload(db: Db = getDb(), today: string = todayInJapan()): MemberRow[] {
-  const users = db.prepare("SELECT id, name FROM users ORDER BY id").all() as { id: string; name: string }[];
+  const users = db.prepare("SELECT id, name, suspended_at, role FROM users ORDER BY id").all() as {
+    id: string;
+    name: string;
+    suspended_at: string | null;
+    role: string;
+  }[];
   const tasks = db
     .prepare("SELECT id, title, assignee, due_date AS dueDate FROM tasks WHERE status <> 'done' AND archived = 0 AND deleted_at IS NULL AND assignee IS NOT NULL ORDER BY due_date IS NULL, due_date, id")
     .all() as { id: number; title: string; assignee: string; dueDate: string | null }[];
@@ -32,7 +45,16 @@ export function listMemberWorkload(db: Db = getDb(), today: string = todayInJapa
     const own = tasks.filter((t) => t.assignee === u.id);
     const mine = own.map((t) => ({ id: t.id, title: t.title, label: truncateTitle(t.title) }));
     const overdueCount = own.filter((t) => t.dueDate !== null && t.dueDate < today).length;
-    return { id: u.id, name: u.name, openCount: mine.length, overdueCount, tasks: mine, leaveUntil: leaveEndDates.get(u.id) ?? null };
+    return {
+      id: u.id,
+      name: u.name,
+      openCount: mine.length,
+      overdueCount,
+      tasks: mine,
+      leaveUntil: leaveEndDates.get(u.id) ?? null,
+      suspended: u.suspended_at !== null,
+      role: u.role === "coordinator" ? "coordinator" : "member",
+    };
   });
 }
 
@@ -57,15 +79,39 @@ export function formatAssigneeOption(
 
 export type AssigneeOption = { id: string; name: string; label: string };
 
+/** ログインを停止したメンバーの名前に付ける印。 */
+export const SUSPENDED_MARK = "（停止中）";
+
+/** 担当者の名前の表示。ログインを停止した人には「（停止中）」を付ける（#538）。 */
+export function withSuspendedMark(name: string, suspended: boolean): string {
+  return suspended ? `${name}${SUSPENDED_MARK}` : name;
+}
+
+/** ログインを停止している利用者の ID の集合（一覧の担当者の欄に印を付けるため）。 */
+export function listSuspendedUserIds(db: Db = getDb()): Set<string> {
+  const rows = db.prepare("SELECT id FROM users WHERE suspended_at IS NOT NULL").all() as { id: string }[];
+  return new Set(rows.map((r) => r.id));
+}
+
 /**
  * 担当者の選択肢（id・name・件数つきの label）。件数はメンバーの一覧と同じ数え方。並びはユーザー ID 順。
  * 休みは、休み中の人に加えて、これから始まる休みを登録している人にも付ける（先の休みに気づかず割り当てないため。#437）。
+ * ログインを停止したメンバーは出さない（#522）。ただし keepAssignee（編集するタスクの今の担当者）が停止していれば、
+ * その人だけを「（停止中）」付きで残す（選択肢に無いと、保存したときに知らないうちに別の人に替わるため）。
  */
-export function listAssigneeOptions(db: Db = getDb(), today: string = todayInJapan()): AssigneeOption[] {
+export function listAssigneeOptions(
+  db: Db = getDb(),
+  today: string = todayInJapan(),
+  keepAssignee?: string,
+): AssigneeOption[] {
   const leaveEndDates = listUpcomingLeaveEndDates(db, today);
-  return listMemberWorkload(db, today).map((m) => ({
-    id: m.id,
-    name: m.name,
-    label: formatAssigneeOption({ ...m, leaveUntil: leaveEndDates.get(m.id) ?? null }),
-  }));
+  return listMemberWorkload(db, today)
+    .filter((m) => !m.suspended || m.id === keepAssignee)
+    .map((m) => ({
+      id: m.id,
+      name: m.name,
+      label: m.suspended
+        ? withSuspendedMark(m.name, true)
+        : formatAssigneeOption({ ...m, leaveUntil: leaveEndDates.get(m.id) ?? null }),
+    }));
 }

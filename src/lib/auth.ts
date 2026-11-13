@@ -4,6 +4,7 @@ import { getDb, transaction, type Db } from "./db/index.ts";
 import { clearFailures, getLockState, recordFailure } from "./login-throttle.ts";
 import { hashPassword, verifyPassword } from "./password.ts";
 import type { ValidationResult } from "./tasks.ts";
+import { unknownFieldErrors } from "./body-fields.ts";
 import type { User } from "./users.ts";
 
 export const SESSION_COOKIE = "poc_session";
@@ -13,21 +14,25 @@ export const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 // ダミーのパスワードは起動ごとにランダムにし、推測で一致させられないようにする。
 const DUMMY_HASH = hashPassword(randomBytes(32).toString("hex"));
 
-/** ID とパスワードが正しければユーザーを返す。 */
+/**
+ * ID とパスワードが正しければユーザーを返す。
+ * ログインを停止した利用者は、パスワードが正しくても undefined（ほかの失敗と同じ扱い。停止しているかを外から見分けられないようにする。#522）。
+ */
 export function authenticate(userId: string, password: string, db: Db = getDb()): User | undefined {
-  const row = db.prepare("SELECT id, name, password_hash FROM users WHERE id = ?").get(userId) as
-    | { id: string; name: string; password_hash: string }
+  const row = db.prepare("SELECT id, name, password_hash, suspended_at FROM users WHERE id = ?").get(userId) as
+    | { id: string; name: string; password_hash: string; suspended_at: string | null }
     | undefined;
   const ok = verifyPassword(password, row?.password_hash || DUMMY_HASH);
   // パスワード未設定（ハッシュが空）のユーザーはログインさせない。
-  if (!row || !row.password_hash || !ok) return undefined;
+  if (!row || !row.password_hash || !ok || row.suspended_at !== null) return undefined;
   return { id: row.id, name: row.name };
 }
 
 export type LoginResult =
   | { ok: true; user: User; token: string }
   | { ok: false; reason: "invalid" }
-  | { ok: false; reason: "locked"; retryAfterMinutes: number };
+  | { ok: false; reason: "locked"; retryAfterMinutes: number }
+  | { ok: false; reason: "lock-started"; retryAfterMinutes: number };
 
 /**
  * ログインする（POST /api/login の判定）。ロック中なら照合しない。ID・パスワードが誤りなら失敗を数える。
@@ -36,6 +41,11 @@ export type LoginResult =
  * 作ったセッションには、ログインした日時（now）と User-Agent を記録する（ログイン中の端末の一覧で使う）。
  * パスワードの誤りとロック中の試行は、その ID の利用者の「前回のログインのあとの失敗の回数」に数える。
  * 成功したら、その回数をセッションに写して 0 に戻す（ログイン後に知らせる）。
+ * 成功したら、ログインの記録（login_events）も 1 行残す（ログイン中のほかの端末に知らせる。login-notices.ts）。
+ * この誤りでロックした（続けて MAX_FAILURES 回目）ときは "lock-started" と、あと何分で試せるかを返す。
+ * 成功したら、前回のログインのあとにロックされた回数と最後の日時もセッションに写し、0 と NULL に戻す（ログイン後に知らせる）。
+ * 失敗の数とロックは「ID と接続元（source）の組」と「アカウント全体」で持つ（login-throttle.ts。#526）。
+ * source は接続元の IP アドレス（login-source.ts）。見分けられなければ null で、ID ごとに数える。成功で 0 に戻すのは、その組の数だけ。
  */
 export function login(
   userId: unknown,
@@ -43,8 +53,9 @@ export function login(
   db: Db = getDb(),
   now: Date = new Date(),
   userAgent: string | null = null,
+  source: string | null = null,
 ): LoginResult {
-  const lock = typeof userId === "string" ? getLockState(userId, db, now) : { locked: false as const };
+  const lock = typeof userId === "string" ? getLockState(userId, db, now, source) : { locked: false as const };
   if (lock.locked) {
     countFailedLogin(userId as string, db);
     return { ok: false, reason: "locked", retryAfterMinutes: lock.retryAfterMinutes };
@@ -53,23 +64,33 @@ export function login(
     typeof userId === "string" && typeof password === "string" ? authenticate(userId, password, db) : undefined;
   if (!user) {
     if (typeof userId === "string") {
-      transaction(db, () => {
-        recordFailure(userId, db, now);
+      const locked = transaction(db, () => {
+        const state = recordFailure(userId, db, now, source);
         countFailedLogin(userId, db);
+        return state;
       });
+      if (locked.locked) return { ok: false, reason: "lock-started", retryAfterMinutes: locked.retryAfterMinutes };
     }
     return { ok: false, reason: "invalid" };
   }
   const token = transaction(db, () => {
-    clearFailures(user.id, db);
-    const row = db.prepare("SELECT last_login_at, failed_logins_since_login FROM users WHERE id = ?").get(user.id) as
-      | { last_login_at: string | null; failed_logins_since_login: number }
+    clearFailures(user.id, db, source);
+    const row = db
+      .prepare("SELECT last_login_at, failed_logins_since_login, locks_since_login, last_locked_at FROM users WHERE id = ?")
+      .get(user.id) as
+      | { last_login_at: string | null; failed_logins_since_login: number; locks_since_login: number; last_locked_at: string | null }
       | undefined;
-    db.prepare("UPDATE users SET last_login_at = ?, failed_logins_since_login = 0 WHERE id = ?").run(
+    db.prepare(
+      "UPDATE users SET last_login_at = ?, failed_logins_since_login = 0, locks_since_login = 0, last_locked_at = NULL WHERE id = ?",
+    ).run(
       now.toISOString(),
       user.id,
     );
-    return createSession(
+    // ログインの記録は、セッションを作る前に残す（作ったセッションが自分のログインを「確かめた」扱いにするため）。
+    db.prepare(
+      "INSERT INTO login_events (user_id, logged_in_at, user_agent, failed_logins_before) VALUES (?, ?, ?, ?)",
+    ).run(user.id, now.toISOString(), normalizeUserAgent(userAgent), row?.failed_logins_since_login ?? 0);
+    const sessionToken = createSession(
       user.id,
       db,
       now,
@@ -77,6 +98,14 @@ export function login(
       userAgent,
       row?.failed_logins_since_login ?? 0,
     );
+    if (row && row.locks_since_login > 0) {
+      db.prepare("UPDATE sessions SET locks_before = ?, last_locked_at_before = ? WHERE token = ?").run(
+        row.locks_since_login,
+        row.last_locked_at,
+        sessionToken,
+      );
+    }
+    return sessionToken;
   });
   return { ok: true, user, token };
 }
@@ -91,8 +120,10 @@ export function createSession(
 ): string {
   const token = randomBytes(32).toString("hex");
   const expiresAt = new Date(now.getTime() + SESSION_TTL_MS).toISOString();
+  // その時点までの自分のログインの記録は、このセッションには知らせない（自分より前のログインは知らせない）。
   db.prepare(
-    "INSERT INTO sessions (token, user_id, expires_at, previous_login_at, created_at, last_used_at, user_agent, device_id, failed_logins_before) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+    `INSERT INTO sessions (token, user_id, expires_at, previous_login_at, created_at, last_used_at, user_agent, device_id, failed_logins_before, login_notices_seen_through)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, (SELECT COALESCE(MAX(id), 0) FROM login_events WHERE user_id = ?))`,
   ).run(
     token,
     userId,
@@ -103,6 +134,7 @@ export function createSession(
     normalizeUserAgent(userAgent),
     newDeviceId(),
     failedLoginsBefore,
+    userId,
   );
   return token;
 }
@@ -131,6 +163,34 @@ export function getFailedLoginsBefore(token: string | undefined, db: Db = getDb(
 export function formatFailedLoginNotice(count: number | undefined): string | undefined {
   if (!count || count < 1) return undefined;
   return `前回のログインのあと、パスワードを誤ったログインが ${count} 回ありました`;
+}
+
+export type LockNotice = {
+  /** 前回のログインのあと、このログインまでにロックされた回数（1 以上）。 */
+  count: number;
+  /** 最後にロックされた日時（ISO 8601・UTC）。 */
+  lastLockedAt: string;
+};
+
+/**
+ * 有効なセッションの「ログインした時点で、前回のログインのあとにロックされた回数と最後の日時」を返す。
+ * ログインした時点で決まり、そのあとのロックでは変わらない。ロックされていなければ null、期限切れ・不明なトークンは undefined。
+ * 本人のセッションからだけ読む。
+ */
+export function getLockNotice(token: string | undefined, db: Db = getDb(), now: Date = new Date()): LockNotice | null | undefined {
+  if (!token) return undefined;
+  const row = db
+    .prepare("SELECT locks_before, last_locked_at_before FROM sessions WHERE token = ? AND expires_at > ?")
+    .get(token, now.toISOString()) as { locks_before: number; last_locked_at_before: string | null } | undefined;
+  if (!row) return undefined;
+  if (row.locks_before < 1 || !row.last_locked_at_before) return null;
+  return { count: row.locks_before, lastLockedAt: row.last_locked_at_before };
+}
+
+/** ログイン後のロックの知らせの文言。ロックされていない（null・不明）なら出さない（undefined）。 */
+export function formatLockNotice(notice: LockNotice | null | undefined): string | undefined {
+  if (!notice) return undefined;
+  return `前回のログインのあと、ログインが ${notice.count} 回ロックされました（最後は ${formatJstDateTime(notice.lastLockedAt)}）`;
 }
 
 /** User-Agent の保存できる長さの上限（文字数）。これより長いものは切って保存する。 */
@@ -183,11 +243,16 @@ export function formatJstDateTime(iso: string): string {
   return `${parts.year}/${parts.month}/${parts.day} ${parts.hour}:${parts.minute}`;
 }
 
-/** 有効なセッションのユーザーを返す。期限切れ・不明なトークンは undefined。 */
+/**
+ * 有効なセッションのユーザーを返す。期限切れ・不明なトークンは undefined。
+ * ログインを停止した利用者のセッションも undefined（停止のときにセッションは消すが、残っていても通さない。#522）。
+ */
 export function getSessionUser(token: string | undefined, db: Db = getDb(), now: Date = new Date()): User | undefined {
   if (!token) return undefined;
   return db
-    .prepare("SELECT u.id, u.name FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token = ? AND s.expires_at > ?")
+    .prepare(
+      "SELECT u.id, u.name FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token = ? AND s.expires_at > ? AND u.suspended_at IS NULL",
+    )
     .get(token, now.toISOString()) as User | undefined;
 }
 
@@ -239,13 +304,13 @@ export const MIN_PASSWORD_LENGTH = 8;
 
 export type PasswordChangeInput = { currentPassword: string; newPassword: string };
 
-/** パスワード変更の本文を検証する。文字数は見た目の文字（コードポイント）で数える。 */
+/** パスワード変更の本文を検証する。文字数は見た目の文字（コードポイント）で数える。`currentPassword`・`newPassword` のほかの項目があれば誤り（#527）。 */
 export function validatePasswordChangeInput(body: unknown): ValidationResult<PasswordChangeInput> {
   if (typeof body !== "object" || body === null || Array.isArray(body)) {
     return { ok: false, errors: ["リクエストの形式が正しくありません"] };
   }
   const { currentPassword, newPassword } = body as Record<string, unknown>;
-  const errors: string[] = [];
+  const errors: string[] = unknownFieldErrors(body as Record<string, unknown>, ["currentPassword", "newPassword"]);
   if (typeof currentPassword !== "string" || currentPassword === "") errors.push("今のパスワードを入力してください");
   if (typeof newPassword !== "string" || [...newPassword].length < MIN_PASSWORD_LENGTH) {
     errors.push(`新しいパスワードは ${MIN_PASSWORD_LENGTH} 文字以上で入力してください`);
@@ -265,6 +330,8 @@ export type PasswordChangeResult =
  * ログイン中の本人のパスワードを変える。今のパスワードが正しければ、ハッシュの更新と
  * 同じ利用者のほかのセッションの削除を 1 つのトランザクションで行い、keepToken のセッションだけを残す。
  * 今のパスワードの誤りはログインの失敗と同じ回数制限に数え、ロック中は照合しない。
+ * 接続元は見分けず（ID ごとの組）、アカウント全体の数にも入る。アカウント全体のロック中も変えられない（#526）。
+ * 仮のパスワードの利用者（#523）は、仮のパスワードを今のパスワードとして変え、変えたら仮のパスワードの止めが外れる。
  */
 export function changePassword(
   userId: string,
@@ -280,7 +347,8 @@ export function changePassword(
     return { ok: false, reason: "wrong-password" };
   }
   transaction(db, () => {
-    db.prepare("UPDATE users SET password_hash = ? WHERE id = ?").run(hashPassword(input.newPassword), userId);
+    // 仮のパスワードの間（#523）だったなら、ここで止めを外す（仮のパスワードはハッシュが替わるので使えなくなる）。
+    db.prepare("UPDATE users SET password_hash = ?, must_change_password = 0 WHERE id = ?").run(hashPassword(input.newPassword), userId);
     db.prepare("DELETE FROM sessions WHERE user_id = ? AND token <> ?").run(userId, keepToken);
     clearFailures(userId, db);
   });

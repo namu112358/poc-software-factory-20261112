@@ -1,8 +1,11 @@
+import { formatPageTitle } from "@/lib/page-title";
+import { taskRowAnchorId } from "@/lib/task-list-anchor";
 import { Fragment } from "react";
 import { bulkSelectionKey } from "@/lib/bulk-select";
 import { listCommentersByTask } from "@/lib/comments";
-import { NOTHING_TO_DO_TEXT, listExtensionsAwaitingMe, listMyDueTasks } from "@/lib/my-attention";
-import { listAssigneeOptions } from "@/lib/members";
+import { NOTHING_TO_DO_TEXT, countMyDueTasks, limitItems, listExtensionsAwaitingMe, listMyDueTasks, listSuspendedBacklog, myDueTasksHref } from "@/lib/my-attention";
+import { memberTasksHref } from "@/lib/member-suspension";
+import { listAssigneeOptions, listSuspendedUserIds, withSuspendedMark } from "@/lib/members";
 import { BulkBar, BulkCheckbox, BulkSelection } from "./BulkActions";
 import { buildAssigneeFilterOptions, buildCheckboxOptions } from "@/lib/task-filter-form";
 import { exportHref } from "@/lib/export";
@@ -17,6 +20,24 @@ import { DUE_FILTER_LABELS, TASK_DUE_FILTERS, parseDueFilter, assigneeName, PRIO
 type Props = {
   searchParams: Promise<{ status?: string; assignee?: string | string[]; tag?: string | string[]; q?: string; due?: string; sort?: string; archived?: string; reset?: string }>;
 };
+
+// 狭い画面（600px 未満）では、表の 1 行を「題名の段」と「ステータス・担当者・期限・優先度の段」に積む。
+// 表の意味づけ（table・th）は残し、読み上げで列名が伝わるよう role も付ける。広い画面の表は変えない。
+const TASK_LIST_CSS = `@media (max-width:599px){
+.task-list,.task-list thead,.task-list tbody{display:block}
+.task-list thead tr{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
+.task-list tbody tr{display:flex;flex-wrap:wrap;align-items:baseline;gap:2px 12px;padding:6px 0 6px 32px;border-bottom:1px solid #ddd}
+.task-list td{display:block;padding:0}
+.task-list td.c-select{flex:0 0 20px;margin-left:-32px;margin-right:-12px;align-self:center;line-height:0}
+.task-list td.c-select input{display:block}
+.task-list td.c-title{flex:1 1 calc(100% - 44px);min-width:0;overflow-wrap:anywhere}
+.task-list td.c-tags{flex:1 0 100%}
+.task-list td.c-tags:empty,.task-list td.c-created,.task-list td.c-estimate,.task-list td.c-commenters{display:none}
+.task-list td.c-status,.task-list td.c-assignee,.task-list td.c-due,.task-list td.c-priority{font-size:.875rem}
+.task-list td.c-status::before,.task-list td.c-assignee::before,.task-list td.c-due::before,.task-list td.c-priority::before{content:attr(data-label) "：";color:#595959}
+}`;
+
+export const metadata = { title: formatPageTitle("タスク一覧") };
 
 export default async function TasksPage({ searchParams }: Props) {
   const user = await requireUser();
@@ -41,12 +62,17 @@ export default async function TasksPage({ searchParams }: Props) {
   const users = listAssigneeOptions();
   const myTasks = listMyDueTasks(user.id, undefined, today);
   const myExtensions = listExtensionsAwaitingMe(user.id);
+  const suspendedBacklog = listSuspendedBacklog(user.id);
+  const suspendedIds = listSuspendedUserIds();
+  const myTasksView = limitItems(myTasks);
+  const myExtensionsView = limitItems(myExtensions);
+  const myCounts = countMyDueTasks(myTasks);
   const loginWindow = await getCurrentLoginWindow();
   const newlyAssigned = listNewlyAssignedTasks(user.id, loginWindow?.previousLoginAt, loginWindow?.loginAt);
   const selectionKey = bulkSelectionKey({ status, assignees: selectedAssignees, tags, q, due, sort, includeArchived });
 
   return (
-    <main>
+    <main id="main-content" tabIndex={-1}>
       <h1>タスク一覧</h1>
       <p data-testid="current-user">{formatCurrentUser(user.name)}</p>
       <p data-testid="list-help">{TASK_LIST_HELP}</p>
@@ -67,14 +93,34 @@ export default async function TasksPage({ searchParams }: Props) {
       )}
       <section aria-labelledby="my-attention-heading" data-testid="my-attention">
         <h2 id="my-attention-heading">あなたの対応が必要なもの</h2>
-        {myTasks.length === 0 && myExtensions.length === 0 && <p data-testid="my-attention-empty">{NOTHING_TO_DO_TEXT}</p>}
+        {myTasks.length === 0 && myExtensions.length === 0 && suspendedBacklog.length === 0 && <p data-testid="my-attention-empty">{NOTHING_TO_DO_TEXT}</p>}
         {myTasks.length > 0 && (
           <>
             <h3>担当のタスク（期限切れ・期限間近）</h3>
+            <p data-testid="my-task-total">全部で {myTasks.length} 件（期限切れ {myCounts.overdue} 件・期限間近 {myCounts.dueSoon} 件）</p>
             <ul>
-              {myTasks.map((t) => (
+              {myTasksView.shown.map((t) => (
                 <li key={t.id} data-testid="my-task">
                   <strong>{t.kind === "overdue" ? "期限切れ" : "期限間近"}</strong> <a href={`/tasks/${t.id}`}>{t.title}</a>（期限 {t.dueDate}）
+                </li>
+              ))}
+            </ul>
+            {myTasksView.hidden > 0 && (
+              <p>
+                <a href={myDueTasksHref(user.id)} data-testid="my-task-more">
+                  ほか {myTasksView.hidden} 件
+                </a>
+              </p>
+            )}
+          </>
+        )}
+        {suspendedBacklog.length > 0 && (
+          <>
+            <h3>ログインを停止したメンバーの担当のタスク</h3>
+            <ul>
+              {suspendedBacklog.map((b) => (
+                <li key={b.id} data-testid="suspended-backlog">
+                  <a href={memberTasksHref(b.id)}>{b.name}さん</a>が担当のまま、未完了のタスクが {b.count} 件残っています
                 </li>
               ))}
             </ul>
@@ -83,13 +129,21 @@ export default async function TasksPage({ searchParams }: Props) {
         {myExtensions.length > 0 && (
           <>
             <h3>承認待ちの期限延長</h3>
+            <p data-testid="my-extension-total">全部で {myExtensions.length} 件</p>
             <ul>
-              {myExtensions.map((e) => (
+              {myExtensionsView.shown.map((e) => (
                 <li key={e.id} data-testid="my-extension">
                   <a href="/extensions">{e.taskTitle}</a>（{e.requesterName}さんの申請: {e.currentDueDate} → {e.newDueDate}）
                 </li>
               ))}
             </ul>
+            {myExtensionsView.hidden > 0 && (
+              <p>
+                <a href="/extensions" data-testid="my-extension-more">
+                  ほか {myExtensionsView.hidden} 件
+                </a>
+              </p>
+            )}
           </>
         )}
       </section>
@@ -181,33 +235,36 @@ export default async function TasksPage({ searchParams }: Props) {
       )}
       <BulkSelection key={selectionKey} visibleIds={tasks.map((t) => t.id)}>
       <BulkBar users={users} />
-      <table>
-        <thead>
-          <tr>
-            <th>選択</th>
-            <th>タイトル</th>
-            <th>ステータス</th>
-            <th>担当者</th>
-            <th>優先度</th>
-            <th>期限</th>
-            <th>作成日</th>
-            <th>見積もり</th>
-            <th>タグ</th>
-            <th>コメントした人</th>
+      <style>{TASK_LIST_CSS}</style>
+      <table className="task-list" role="table">
+        <thead role="rowgroup">
+          <tr role="row">
+            <th role="columnheader">選択</th>
+            <th role="columnheader">タイトル</th>
+            <th role="columnheader">ステータス</th>
+            <th role="columnheader">担当者</th>
+            <th role="columnheader">優先度</th>
+            <th role="columnheader">期限</th>
+            <th role="columnheader">作成日</th>
+            <th role="columnheader">見積もり</th>
+            <th role="columnheader">タグ</th>
+            <th role="columnheader">コメントした人</th>
           </tr>
         </thead>
-        <tbody>
+        <tbody role="rowgroup">
           {tasks.map((task) => (
             <tr
               key={task.id}
+              id={taskRowAnchorId(task.id)}
               data-testid="task-row"
+              role="row"
+              style={{ scrollMarginTop: 16, ...(task.status === "done" ? { color: "#8a8a8a" } : {}) }}
               {...taskRowDoneAttr(task.status)}
-              style={task.status === "done" ? { color: "#8a8a8a" } : undefined}
             >
-              <td>
+              <td role="cell" className="c-select">
                 <BulkCheckbox id={task.id} title={task.title} />
               </td>
-              <td>
+              <td role="cell" className="c-title">
                 <a href={`/tasks/${task.id}`} title={memoTooltip(task.memo)} style={task.status === "done" ? { color: "inherit" } : undefined}>
                   {task.title}
                 </a>
@@ -223,10 +280,10 @@ export default async function TasksPage({ searchParams }: Props) {
                   </small>
                 )}
               </td>
-              <td>{STATUS_LABELS[task.status]}</td>
-              <td data-testid="task-assignee">{assigneeName(task.assignee, assignees)}</td>
-              <td data-testid="task-priority" style={{ fontWeight: priorityFontWeight(task.priority) }}>{PRIORITY_LABELS[task.priority]}</td>
-              <td>
+              <td role="cell" className="c-status" data-label="ステータス">{STATUS_LABELS[task.status]}</td>
+              <td role="cell" className="c-assignee" data-label="担当者" data-testid="task-assignee">{withSuspendedMark(assigneeName(task.assignee, assignees), suspendedIds.has(task.assignee))}</td>
+              <td role="cell" className="c-priority" data-label="優先度" data-testid="task-priority" style={{ fontWeight: priorityFontWeight(task.priority) }}>{PRIORITY_LABELS[task.priority]}</td>
+              <td role="cell" className="c-due" data-label="期限">
                 {task.dueDate}
                 {isOverdue(task, today) && (
                   <>
@@ -241,9 +298,9 @@ export default async function TasksPage({ searchParams }: Props) {
                   </>
                 )}
               </td>
-              <td data-testid="created-at">{formatJstDate(task.createdAt)}</td>
-              <td data-testid="task-estimate">{formatEstimate(task.estimateMinutes)}</td>
-              <td>
+              <td role="cell" className="c-created" data-testid="created-at">{formatJstDate(task.createdAt)}</td>
+              <td role="cell" className="c-estimate" data-testid="task-estimate">{formatEstimate(task.estimateMinutes)}</td>
+              <td role="cell" className="c-tags">
                 {(tagsByTask.get(task.id) ?? []).map((name, i) => (
                   <Fragment key={name}>
                     {i > 0 && "、"}
@@ -253,7 +310,7 @@ export default async function TasksPage({ searchParams }: Props) {
                   </Fragment>
                 ))}
               </td>
-              <td data-testid="commenters">{(commentersByTask.get(task.id) ?? []).join("、")}</td>
+              <td role="cell" className="c-commenters" data-testid="commenters">{(commentersByTask.get(task.id) ?? []).join("、")}</td>
             </tr>
           ))}
         </tbody>

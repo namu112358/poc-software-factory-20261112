@@ -1,0 +1,32 @@
+import { Meta, Canvas, Controls, Stories } from "@storybook/addon-docs/blocks";
+import * as LabelStories from "./label.stories";
+
+<Meta of={LabelStories} />
+
+# Label
+
+入力欄・チェックボックスなどの名前。欄の上に、小さめの文字で置く。
+
+<Canvas of={LabelStories.Default} />
+<Controls of={LabelStories.Default} />
+
+## 使う場面
+
+- 入力欄・チェックボックス・選択欄に、読み上げでも読まれる名前を付けるとき（`htmlFor` と欄の `id` を合わせる）。
+- 必須の欄に印を付けるとき（`required`）。見た目は「*」、読み上げは「必須」になる。
+- 押せない欄の名前を薄く見せるとき（`disabled`。欄の側にも `disabled` を付ける）。
+
+## 使わない場面
+
+- 欄の中に薄く出す入力例（プレースホルダー）の代わりには使わない。名前は欄の外に常に出しておく。
+- 文章の見出しや、欄と結び付かない説明文には使わない。見出し（`<h2>` など）や段落を使う。
+- 欄の使い方の補足や誤りの説明には使わない。名前は短く、補足は別の文として欄の近くに置く。
+
+## 書き方の決まり
+
+- 名前は短い名詞で書く（「表示名」「期限」）。
+- 必須の印は `required` で付ける。「*」を自分で文言に書かない（読み上げが二重になる）。
+
+## すべての状態
+
+<Stories includePrimary={false} />

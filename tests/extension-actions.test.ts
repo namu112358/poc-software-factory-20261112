@@ -1,7 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { openDb } from "../src/lib/db/index.ts";
-import { createExtension, DECIDE_FORBIDDEN_MESSAGE, decideExtension, getExtension, listPendingExtensions } from "../src/lib/extensions.ts";
+import { approveResponse, createExtension, DECIDE_FORBIDDEN_MESSAGE, decideExtension, getExtension, listPendingExtensions } from "../src/lib/extensions.ts";
 import {
   ALREADY_DECIDED_MESSAGE,
   canDecideExtension,
@@ -29,7 +29,7 @@ function apiFetch(db: Db, userId: string) {
     if (out.result === "not_found") return respond(404, { error: "延長申請が見つかりません" });
     if (out.result === "forbidden") return respond(403, { error: DECIDE_FORBIDDEN_MESSAGE[out.reason] });
     if (out.result === "conflict") return respond(409, { error: "この延長申請はすでに判断されています" });
-    return respond(200, { extension: out.extension });
+    return respond(200, m[3] === "approve" ? approveResponse(out) : { extension: out.extension });
   };
   return { fetch, sent };
 }
@@ -47,6 +47,7 @@ function setup() {
     taskTitle: row.taskTitle,
     requester: row.requester,
     newDueDate: row.newDueDate,
+    alreadyExtended: row.alreadyExtended,
   };
   return { db, target };
 }
@@ -185,4 +186,62 @@ describe("一覧から承認・却下する: 取りまとめる人でないと�
       assert.deepEqual(getExtension(target.id, db), extBefore);
     });
   }
+});
+
+describe("一覧から承認する: 申請の後でタスクの期限が希望の期限以降に変わっていたとき（#505）", () => {
+  /** 佐藤の申請（希望 2026-11-30）の後で、タスク 3 の期限を dueDate に変え、一覧を開き直した行を返す。 */
+  function reopened(dueDate: string) {
+    const { db, target } = setup();
+    db.prepare("UPDATE tasks SET due_date = ? WHERE id = 3").run(dueDate);
+    const row = listPendingExtensions(db).find((r) => r.id === target.id)!;
+    return { db, target: { ...target, alreadyExtended: row.alreadyExtended } };
+  }
+
+  it("一覧の行で、承認しても期限が変わらないことが分かる（後ろ・同じ日）。前に変わったときは出さない", () => {
+    assert.equal(reopened("2026-12-12").target.alreadyExtended, true);
+    assert.equal(reopened("2026-11-30").target.alreadyExtended, true);
+    assert.equal(reopened("2026-11-29").target.alreadyExtended, false);
+    assert.equal(reopened("2026-11-01").target.alreadyExtended, false);
+    assert.equal(setup().target.alreadyExtended, false); // 申請のときのまま
+  });
+
+  it("確認のダイアログで、期限は変えずに承認すると分かる。却下の文言は変わらない", () => {
+    const { target } = reopened("2026-12-12");
+    const m = decideConfirmMessage(target, "approve");
+    assert.ok(m.includes("すでに希望の期限（2026-11-30）以降"), m);
+    assert.ok(m.includes("期限は変えずに"), m);
+    assert.equal(decideConfirmMessage(target, "reject"), decideConfirmMessage({ ...target, alreadyExtended: false }, "reject"));
+  });
+
+  it("承認すると、期限は縮まず、承認として閉じ、理由がメッセージに出る", async () => {
+    const { db, target } = reopened("2026-12-12");
+    const api = apiFetch(db, "tanaka");
+    const result = await confirmAndDecideExtension(target, "approve", { confirm: () => true, fetch: api.fetch });
+    assert.deepEqual(result, {
+      status: "decided",
+      message: "タスクの期限（2026-12-12）がすでに希望の期限（2026-11-30）以降のため、期限は変えずに承認しました",
+    });
+    assert.equal(getTask(3, db)!.dueDate, "2026-12-12");
+    assert.equal(getExtension(target.id, db)!.status, "approved");
+    assert.equal(listPendingExtensions(db).some((r) => r.id === target.id), false);
+  });
+
+  it("一覧を開いた後で期限が後ろへ変わっても、承認の結果のメッセージで分かる", async () => {
+    const { db, target } = setup(); // 一覧を開いたときは、まだ期限が希望より前
+    assert.equal(target.alreadyExtended, false);
+    db.prepare("UPDATE tasks SET due_date = '2026-12-12' WHERE id = 3").run();
+    const api = apiFetch(db, "tanaka");
+    const result = await confirmAndDecideExtension(target, "approve", { confirm: () => true, fetch: api.fetch });
+    assert.equal(result.status, "decided");
+    assert.ok(result.status === "decided" && result.message.includes("期限は変えずに承認しました"));
+    assert.equal(getTask(3, db)!.dueDate, "2026-12-12");
+  });
+
+  it("期限が希望の期限より前に変わっていたら、今と同じく希望の期限にし「承認しました」と出る", async () => {
+    const { db, target } = reopened("2026-11-20");
+    const api = apiFetch(db, "tanaka");
+    const result = await confirmAndDecideExtension(target, "approve", { confirm: () => true, fetch: api.fetch });
+    assert.deepEqual(result, { status: "decided", message: "承認しました" });
+    assert.equal(getTask(3, db)!.dueDate, "2026-11-30");
+  });
 });

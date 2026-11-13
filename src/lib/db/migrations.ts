@@ -292,4 +292,123 @@ export const MIGRATIONS: readonly Migration[] = [
       ALTER TABLE comments ADD COLUMN deleted_at TEXT;
     `,
   },
+  {
+    version: 25,
+    name: "comment_revisions",
+    sql: `
+      -- コメントを編集したときの、編集の前の本文。本文が変わった編集 1 回につき 1 行。
+      -- edited_at は、その本文を書き換えた日時（ISO 8601（UTC））。コメントの edited_at と同じ値を入れる。
+      -- 既存のコメントの前の本文は残っていないので、履歴は空から始まる。
+      CREATE TABLE comment_revisions (
+        id         INTEGER PRIMARY KEY AUTOINCREMENT,
+        comment_id INTEGER NOT NULL REFERENCES comments(id) ON DELETE CASCADE,
+        body       TEXT NOT NULL,
+        edited_at  TEXT NOT NULL
+      );
+      CREATE INDEX comment_revisions_comment ON comment_revisions(comment_id);
+    `,
+  },
+  {
+    version: 26,
+    name: "login_events",
+    sql: `
+      -- ログインに成功した記録。成功 1 回につき 1 行。ログイン中のほかの端末に「新しいログインがあった」と知らせるのに使う。
+      -- セッション（端末）がログアウト・切られても記録は残す。利用者を消すと一緒に消える。
+      -- logged_in_at は ISO 8601（UTC）。user_agent は保存した User-Agent（無ければ NULL）。
+      -- failed_logins_before は、そのログインの前（1 つ前のログインのあと）にパスワードを誤ったログインの回数。
+      CREATE TABLE login_events (
+        id                   INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id              TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        logged_in_at         TEXT NOT NULL,
+        user_agent           TEXT,
+        failed_logins_before INTEGER NOT NULL DEFAULT 0
+      );
+      CREATE INDEX login_events_user ON login_events(user_id, id);
+      -- そのセッションで、どのログインの記録（login_events.id）までを確かめたか。これより後の記録を知らせる。
+      -- 作ったときは、その時点の自分の最新の記録（自分のログインを含む）にする。既存のセッションは 0（記録は空から始まる）。
+      ALTER TABLE sessions ADD COLUMN login_notices_seen_through INTEGER NOT NULL DEFAULT 0;
+    `,
+  },
+  {
+    version: 27,
+    name: "locks_since_login",
+    sql: `
+      -- 前回のログインのあとに、その利用者の ID でログインがロックされた回数と、最後にロックされた日時（ISO 8601（UTC））。
+      -- ロックをかけたとき（続けて誤った回数が上限に達したとき）に増やし、ログインに成功したら 0 と NULL に戻す。
+      ALTER TABLE users ADD COLUMN locks_since_login INTEGER NOT NULL DEFAULT 0;
+      ALTER TABLE users ADD COLUMN last_locked_at TEXT;
+      -- ログインした時点で、前回のログインのあとにロックされた回数と最後の日時。ログイン後に知らせる。既存のセッションは 0（知らせない）。
+      ALTER TABLE sessions ADD COLUMN locks_before INTEGER NOT NULL DEFAULT 0;
+      ALTER TABLE sessions ADD COLUMN last_locked_at_before TEXT;
+    `,
+  },
+  {
+    version: 28,
+    name: "user_suspension",
+    sql: `
+      -- 取りまとめる人が利用者のログインを停止した日時（ISO 8601（UTC））。停止していなければ NULL（既存の利用者は NULL から始まる）。
+      -- 停止した利用者はログインできず、担当者の選択肢に出ない。利用者の行は消さないので、過去の記録の名前は残る。再開したら NULL に戻す。
+      ALTER TABLE users ADD COLUMN suspended_at TEXT;
+    `,
+  },
+  {
+    version: 29,
+    name: "login_attempts_by_source",
+    sql: `
+      -- ログインの失敗を「入力された ID と接続元の組」で数える（#526）。source は接続元の IP アドレス。見分けられなければ ''（ID ごとに数える）。
+      -- 既存の行は、接続元の分からない組として引き継ぐ。
+      CREATE TABLE login_attempts_new (
+        user_id      TEXT NOT NULL, -- 入力された ID（存在しない ID も数える）
+        source       TEXT NOT NULL DEFAULT '',
+        failures     INTEGER NOT NULL,
+        locked_until TEXT, -- ISO 8601（UTC）。ロックしていなければ NULL
+        PRIMARY KEY (user_id, source)
+      );
+      INSERT INTO login_attempts_new (user_id, source, failures, locked_until)
+        SELECT user_id, '', failures, locked_until FROM login_attempts;
+      DROP TABLE login_attempts;
+      ALTER TABLE login_attempts_new RENAME TO login_attempts;
+      -- アカウント全体（接続元をまたいだ）の失敗の時刻。直前 1 時間の数でアカウント全体をロックする。1 時間より古い行は書くついでに消す。
+      CREATE TABLE login_failure_log (
+        id        INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id   TEXT NOT NULL, -- 入力された ID（存在しない ID も数える）
+        failed_at TEXT NOT NULL  -- ISO 8601（UTC）
+      );
+      CREATE INDEX login_failure_log_user ON login_failure_log(user_id, failed_at);
+      -- アカウント全体のロック。locked_until を過ぎたら明ける。
+      CREATE TABLE account_login_locks (
+        user_id      TEXT PRIMARY KEY, -- 入力された ID（存在しない ID も数える）
+        locked_until TEXT NOT NULL     -- ISO 8601（UTC）
+      );
+    `,
+  },
+  {
+    version: 30,
+    name: "must_change_password",
+    sql: `
+      -- 仮のパスワードのままか（1: 本人が自分のパスワードに変えるまで、ほかの画面と API を使えない。0: ふつう）。#523
+      -- 取りまとめる人がアカウントを作ったときに 1 にし、本人がパスワードを変えたら 0 に戻す。既存の利用者は 0 から始まる。
+      ALTER TABLE users ADD COLUMN must_change_password INTEGER NOT NULL DEFAULT 0 CHECK (must_change_password IN (0, 1));
+    `,
+  },
+  {
+    version: 31,
+    name: "idempotency_keys",
+    sql: `
+      -- 作成の API に付けられた Idempotency-Key と、最初の応答（#528）。同じ利用者が同じ用途・同じキーで送り直したら、新しく作らずにこの応答を返す。
+      -- scope は用途（'tasks.create'・'comments.create'）。fingerprint は送られた本文（コメントは対象のタスクの ID も含む）の SHA-256。
+      -- 成功した応答（response_status と、JSON の response_body）だけを残す。created_at は ISO 8601（UTC）。24 時間を過ぎた行は、書くついでに消す。
+      CREATE TABLE idempotency_keys (
+        user_id         TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        scope           TEXT NOT NULL,
+        key             TEXT NOT NULL,
+        fingerprint     TEXT NOT NULL,
+        response_status INTEGER NOT NULL,
+        response_body   TEXT NOT NULL,
+        created_at      TEXT NOT NULL,
+        PRIMARY KEY (user_id, scope, key)
+      );
+      CREATE INDEX idempotency_keys_created_at ON idempotency_keys(created_at);
+    `,
+  },
 ];

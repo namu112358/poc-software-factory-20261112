@@ -1,12 +1,14 @@
+import { formatTaskDetailTitle } from "@/lib/page-title";
 import { notFound } from "next/navigation";
 import { formatAssigneeChange, listAssigneeChanges } from "@/lib/assignee-history";
-import { commentEditedLabel, listComments, listDeletedComments, splitCommentBody } from "@/lib/comments";
+import { commentEditedLabel, listCommentRevisions, listComments, listDeletedComments, splitCommentBody } from "@/lib/comments";
 import { commentPreview } from "@/lib/comment-delete";
-import { requireUser } from "@/lib/session";
+import { getCurrentUser, requireUser } from "@/lib/session";
 import { listTags, listTagSuggestions } from "@/lib/tags";
 import { PRIORITY_LABELS, RESTORE_DAYS, STATUS_LABELS, formatCompletedAt, formatEstimate, formatJstDateTime, formatTaskNumber, getTask, isDueSoon, isOverdue, parseTaskId, todayInJapan } from "@/lib/tasks";
 import { listAssigneeOptions } from "@/lib/members";
 import { getUser } from "@/lib/users";
+import { backToTaskListHref } from "@/lib/task-list-anchor";
 import { ArchiveButton } from "./archive";
 import { DeleteTaskButton } from "./delete";
 import { DuplicateButton } from "./duplicate";
@@ -16,6 +18,12 @@ import { listExtensions } from "@/lib/extensions";
 import { canRequestExtension, extensionResultLabel, findPendingExtension, pendingExtensionLabel, recentExtensionResults } from "@/lib/task-extension-panel";
 import { ExtensionRequestForm } from "./extension-form";
 import { RemoveTagButton, TagForm } from "./tags";
+
+export async function generateMetadata({ params }: Props) {
+  const user = await getCurrentUser();
+  const id = parseTaskId((await params).id);
+  return { title: formatTaskDetailTitle(user !== undefined, () => (id === undefined ? undefined : getTask(id))) };
+}
 
 type Props = {
   params: Promise<{ id: string }>;
@@ -29,6 +37,7 @@ export default async function TaskDetailPage({ params }: Props) {
   const assignee = getUser(task.assignee);
   const comments = listComments(task.id);
   const deletedComments = listDeletedComments(task.id);
+  const commentRevisions = listCommentRevisions(task.id);
   const tags = listTags(task.id);
   const tagSuggestions = listTagSuggestions(task.id);
   const assigneeChanges = listAssigneeChanges(task.id);
@@ -37,9 +46,9 @@ export default async function TaskDetailPage({ params }: Props) {
   const extensionResults = recentExtensionResults(extensions);
 
   return (
-    <main>
+    <main id="main-content" tabIndex={-1}>
       <p>
-        <a href="/tasks">← タスク一覧へ戻る</a>
+        <a href={backToTaskListHref(task.id)}>← タスク一覧へ戻る</a>
       </p>
       <h1>
         <span data-testid="task-title">{task.title}</span>{" "}
@@ -91,7 +100,7 @@ export default async function TaskDetailPage({ params }: Props) {
         <dt>完了</dt>
         <dd data-testid="completed-at">{formatCompletedAt(task)}</dd>
       </dl>
-      <EditTaskForm task={task} users={listAssigneeOptions()} />
+      <EditTaskForm task={task} users={listAssigneeOptions(undefined, undefined, task.assignee)} />
       <p>
         <DuplicateButton taskId={task.id} /> <ArchiveButton taskId={task.id} archived={task.archived} updatedAt={task.updatedAt} />{" "}
         <DeleteTaskButton taskId={task.id} title={task.title} />
@@ -177,6 +186,19 @@ export default async function TaskDetailPage({ params }: Props) {
                     ),
                   )}
                 </p>
+                {(commentRevisions.get(c.id)?.length ?? 0) > 0 && (
+                  <details data-testid="comment-revisions">
+                    <summary>編集の前の本文（{commentRevisions.get(c.id)!.length} 件）</summary>
+                    <ol>
+                      {commentRevisions.get(c.id)!.map((r, i) => (
+                        <li key={i} data-testid="comment-revision">
+                          <time dateTime={r.editedAt}>{formatJstDateTime(r.editedAt)}</time> に編集する前
+                          <p style={{ whiteSpace: "pre-wrap" }}>{r.body}</p>
+                        </li>
+                      ))}
+                    </ol>
+                  </details>
+                )}
                 {c.author === user.id && (
                   <>
                     <EditCommentForm taskId={task.id} commentId={c.id} body={c.body} />{" "}

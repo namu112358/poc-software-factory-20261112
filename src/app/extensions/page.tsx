@@ -1,7 +1,10 @@
+import { formatPageTitle } from "@/lib/page-title";
 import { countLongWaiting, extensionStatusLabel, formatExtensionRequestedAt, longWaitDays, listMyExtensions, listPendingExtensions } from "@/lib/extensions";
 import { requireUser } from "@/lib/session";
 import { isCoordinator } from "@/lib/users";
 import { PendingExtensionsTable } from "./extension-actions";
+
+export const metadata = { title: formatPageTitle("承認待ちの期限延長") };
 
 export default async function ExtensionsPage() {
   const user = await requireUser();
@@ -16,6 +19,7 @@ export default async function ExtensionsPage() {
     requesterName: r.requesterName,
     currentDueDate: r.currentDueDate,
     newDueDate: r.newDueDate,
+    alreadyExtended: r.alreadyExtended,
     reason: r.reason,
     requestedAt: formatExtensionRequestedAt(r.createdAt),
     waitDays: longWaitDays(r.createdAt, now),
@@ -24,7 +28,7 @@ export default async function ExtensionsPage() {
   const mine = listMyExtensions(user.id);
 
   return (
-    <main>
+    <main id="main-content" tabIndex={-1}>
       <h1>承認待ちの期限延長</h1>
       {longWaiting > 0 && (
         <p data-testid="long-waiting-count" style={{ color: "#a00", fontWeight: "bold" }}>

@@ -5,24 +5,47 @@
 //   node scripts/factory/claim.ts relabel --minutes 15                  起動しなかった実装の付け直しの対象（付け直す数は budget の残りまで）
 //   node scripts/factory/claim.ts handled --since <ISO 8601>            ほかの割り当てがもう処理した Issue・PR
 //   node scripts/factory/claim.ts merge-check <PR>                      merge:requested のラベルを付けてよいか（最新のレビューが ok で、その後は取り込みだけか）
+//   node scripts/factory/claim.ts review-status <PR>                    レビューの結果の status の値（state: 自動でキューに入ってよいか〔factory-review〕、reviewed: 最新のコミットがレビューを通ったか〔factory-reviewed〕）。GitHub Actions が使う
+//   node scripts/factory/claim.ts stalled --role dispatch|patrol       止まった実装・PR の片付け（actions に、そのまま行う操作。unknown は 1 分後にもう一度）
+//   node scripts/factory/claim.ts gate --role implement|review|fix --number <N>   実装・レビュー・修正が起動してよいか（decision と、役が行う ops）
+//   node scripts/factory/claim.ts ci-wait --pr <N> [--minutes 15] [--role implement|fix]   PR の CI（app-check）が終わるまで待つ（result のとおりに動く。1 回に 16 分ほどかかるのでバックグラウンドで実行する）
 //   node scripts/factory/claim.ts budget                                直近 60 分に status:in-progress を付けた回数と、あと何回付けてよいか
 // Node 22.18 以上（型を外して .ts をそのまま動かす）。クラウドのプロキシを通すため、NODE_USE_ENV_PROXY=1 で自分を起動し直す。
 import { spawnSync } from "node:child_process";
 import {
   dependencies,
+  gateDecision,
+  ciWaitStep,
+  type CiWaitState,
+  stalledComment,
+  settleMergeable,
+  type GateInput,
+  type GateReview,
   handledByOthers,
   makeIsStalled,
   pick,
   STALLED_LABELS,
+  stalledActions,
+  type StalledPr,
+  type StalledIssue,
+  type StalledCommit,
+  type CheckState,
   START_LABELS,
   LABEL,
   normalizeLabel,
   errorActions,
   mergeCheck,
+  reviewStatus,
+  reviewedStatus,
   ciCheck,
+  CI_CHECKS,
+  combineChecks,
   TRUSTED_ASSOCIATIONS,
   precheck,
   precheckActions,
+  stalledLoadPlan,
+  isOwnClaudePr,
+  type HeadRef,
   readyBudget,
   relabelTargets,
   splitFiles,
@@ -46,7 +69,11 @@ type RawIssue = { number: number; body: string | null; state: string; pull_reque
 type RawComment = { body: string | null; created_at: string; issue_url: string; user?: { login: string } };
 
 async function get<T>(path: string): Promise<{ status: number; data: T }> {
-  const res = await fetch(`${API}${path}`, { headers: { Accept: "application/vnd.github+json" } });
+  const token = process.env.GITHUB_TOKEN;
+  const res = await fetch(`${API}${path}`, {
+    // GitHub Actions の中では GITHUB_TOKEN で読む（クラウドのセッションでは、プロキシが認証を付ける）
+    headers: { Accept: "application/vnd.github+json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+  });
   if (res.status === 404) return { status: 404, data: [] as T };
   if (!res.ok) throw new Error(`GET ${path} → ${res.status} ${await res.text()}`);
   return { status: res.status, data: (await res.json()) as T };
@@ -134,8 +161,8 @@ async function loadMainBroken(): Promise<boolean> {
 }
 
 async function loadOpenPrs(): Promise<PrInfo[]> {
-  const prs = await getAll<{ number: number; head: { ref: string }; labels?: { name: string }[] }>(`/repos/${REPO}/pulls?state=open`);
-  const mine = prs.filter((p) => p.head.ref.startsWith("claude/"));
+  const prs = await getAll<{ number: number; head: HeadRef; labels?: { name: string }[] }>(`/repos/${REPO}/pulls?state=open`);
+  const mine = prs.filter((p) => isOwnClaudePr(p, REPO));
   await loadOpen(mine.map((p) => issueOf(p.head.ref)).filter((n) => Number.isInteger(n)));
   return Promise.all(
     mine.map(async (p) => ({
@@ -177,6 +204,246 @@ function mySession(): string | null {
   return m ? `session_${m[1]}` : null;
 }
 
+const git = (...a: string[]) => spawnSync("git", a, { encoding: "utf-8" });
+
+/**
+ * レビューのコミット（last）より後の PR のコミット（first-parent）と、それが「取り込みだけのコミット」か。
+ * head が last と同じなら []。last が PR の履歴に無ければ null。手元の参照が古い・fetch に失敗したときは例外（付けずに、後でやり直す）。
+ * merge-check と stalled が使う。
+ */
+function commitsAfter(n: number, last: string, headSha: string): StalledCommit[] | null {
+  if (headSha.startsWith(last)) return [];
+  const fetched = git("fetch", "-q", "origin", `+pull/${n}/head:refs/factory/pr-${n}`, "+main:refs/factory/main");
+  if (fetched.status !== 0) throw new Error(`git fetch に失敗した（${fetched.stderr.trim()}）。付けずに、後でやり直す。`);
+  // 手元の参照が古いまま判定しないよう、取り込んだ PR の先頭が GitHub の head と同じかを確かめる
+  const local = git("rev-parse", `refs/factory/pr-${n}`).stdout.trim();
+  if (local !== headSha) throw new Error(`手元の PR の先頭（${local.slice(0, 7)}）が GitHub の head（${headSha.slice(0, 7)}）と違う。付けずに、後でやり直す。`);
+  const list = git("rev-list", "--first-parent", `${last}..refs/factory/pr-${n}`);
+  if (list.status !== 0) return null;
+  return list.stdout.split("\n").filter(Boolean).map((sha) => {
+    const parents = git("rev-list", "--parents", "-n1", sha).stdout.trim().split(" ").slice(1);
+    const diff = git("show", "--format=", "--remerge-diff", sha).stdout.trim();
+    // 取り込みだけのコミット: main を取り込んだ（2 つ目の親が main に含まれる）マージで、--remerge-diff の差分が空
+    const fromMain = parents.length === 2 && git("merge-base", "--is-ancestor", parents[1], "refs/factory/main").status === 0;
+    return { sha, mergeOnly: fromMain && diff === "", merge: fromMain };
+  });
+}
+
+const COMMIT_MARK_RE = /<!--\s*factory:review\s+verdict=(\w+)[^>]*?commit=([0-9a-f]+)/;
+type RawPull = { number: number; draft: boolean; mergeable?: boolean | null; created_at: string; updated_at: string; head: HeadRef & { sha: string }; labels?: { name: string }[] };
+type RawTrustedComment = { body: string | null; updated_at: string; author_association: string; user?: { login: string } };
+
+/** 止まった実装・PR の判定の入力を GitHub と git から集める（読むだけ） */
+async function loadStalled(role: string) {
+  const list = (await getAll<RawPull>(`/repos/${REPO}/pulls?state=open`)).filter((p) => isOwnClaudePr(p, REPO));
+  const prs: StalledPr[] = [];
+  const unknown: { pr: number; reason: string }[] = [];
+  const issues = new Map<number, StalledIssue>();
+  const addIssue = (raw: { number: number; labels?: { name: string }[]; updated_at?: string }) =>
+    issues.set(raw.number, { number: raw.number, labels: (raw.labels ?? []).map((l) => normalizeLabel(l.name)), updatedAt: raw.updated_at ?? "" });
+  for (const label of START_LABELS) {
+    for (const i of (await getAll<RawIssue & { updated_at: string }>(`/repos/${REPO}/issues?state=open&labels=${encodeURIComponent(label)}`)).filter((x) => !x.pull_request)) addIssue(i);
+  }
+  for (const p of list) {
+    const no = issueOf(p.head.ref);
+    if (Number.isInteger(no) && !issues.has(no)) {
+      const { status, data } = await get<RawIssue & { updated_at: string }>(`/repos/${REPO}/issues/${no}`);
+      if (status !== 404) addIssue(data);
+    }
+  }
+  for (const p of list) {
+    const n = p.number;
+    const own = Number.isInteger(issueOf(p.head.ref));
+    const full = (await get<RawPull>(`/repos/${REPO}/pulls/${n}`)).data; // 一覧には mergeable が入らない
+    const labels = (full.labels ?? []).map((l) => normalizeLabel(l.name));
+    const mergeable = full.mergeable ?? null;
+    let appCheck: CheckState = "none";
+    let reviews: StalledPr["reviews"] = [];
+    let after: StalledPr["after"] = {};
+    let readyAt: string | null = null;
+    let priorMarks: StalledPr["priorMarks"] = [];
+    let bodyCheck: CheckState = "none";
+    let mergifyTimeout: StalledPr["mergifyTimeout"] = null;
+    try {
+      if (mergeable !== null) {
+        const comments = (await getAll<RawTrustedComment>(`/repos/${REPO}/issues/${n}/comments`)).filter((c) => TRUSTED_ASSOCIATIONS.includes(c.author_association));
+        priorMarks = comments
+          .map((c) => /factory:(?:dispatch|patrol) action=([\w-]+) commit=([0-9a-f]+)/.exec(c.body ?? ""))
+          .filter((m): m is RegExpExecArray => m !== null)
+          .map((m) => ({ action: m[1], commit: m[2] }));
+      }
+      const plan = stalledLoadPlan({ own, mergeable, draft: full.draft });
+      if (plan.reviews) {
+        reviews = (await getAll<{ body: string | null; submitted_at: string; author_association: string }>(`/repos/${REPO}/pulls/${n}/reviews`))
+          .sort((a, b) => (a.submitted_at < b.submitted_at ? -1 : 1))
+          .filter((r) => TRUSTED_ASSOCIATIONS.includes(r.author_association))
+          .map((r) => COMMIT_MARK_RE.exec(r.body ?? ""))
+          .filter((m): m is RegExpExecArray => m !== null)
+          .map((m) => ({ verdict: m[1], commit: m[2] }));
+        for (const commit of new Set([reviews.at(-1)?.commit, reviews.filter((r) => r.verdict === "ok").at(-1)?.commit])) {
+          if (commit) after[commit] = commitsAfter(n, commit, full.head.sha);
+        }
+      }
+      if (plan.readyAt) {
+        const tl = await getAll<{ event: string; created_at: string }>(`/repos/${REPO}/issues/${n}/timeline`);
+        readyAt = tl.filter((e) => e.event === "ready_for_review").at(-1)?.created_at ?? full.created_at;
+      }
+      if (plan.checks) {
+        const checkState = async (name: string): Promise<CheckState> => {
+          const runs = (await get<{ check_runs: { status: string; conclusion: string | null; started_at: string }[] }>(`/repos/${REPO}/commits/${full.head.sha}/check-runs?check_name=${name}&per_page=100`)).data.check_runs ?? [];
+          const latest = runs.sort((a, b) => (a.started_at < b.started_at ? -1 : 1)).at(-1);
+          return !latest ? "none" : latest.status !== "completed" ? "pending" : latest.conclusion === "success" ? "success" : "failure";
+        };
+        appCheck = combineChecks(await Promise.all(CI_CHECKS.map((name) => checkState(name))));
+        bodyCheck = await checkState("pr-body-check");
+        if (labels.some((l) => l === "merge:dequeued" || l === "dequeued")) {
+          const comments = await getAll<RawTrustedComment>(`/repos/${REPO}/issues/${n}/comments`);
+          // Mergify のボットの状況のコメントだけを読む（ほかの人が同じ文字を書いても、判定に使わない）
+          const m = comments.filter((c) => c.user?.login === "mergify[bot]" && /dequeue_reason[\s\S]{0,300}?CHECKS_TIMEOUT/.test(c.body ?? "")).at(-1);
+          if (m) mergifyTimeout = { at: m.updated_at };
+        }
+      }
+    } catch (e) {
+      unknown.push({ pr: n, reason: e instanceof Error ? e.message : String(e) });
+      continue;
+    }
+    prs.push({ number: n, headRef: full.head.ref, headSha: full.head.sha, draft: full.draft, mergeable, labels, updatedAt: full.updated_at, readyAt, appCheck, reviews, after, priorMarks, bodyCheck, mergifyTimeout });
+  }
+  const closed = (await get<(RawIssue & { updated_at: string })[]>(`/repos/${REPO}/issues?state=closed&per_page=100&sort=updated&direction=desc`)).data.filter((i) => !i.pull_request);
+  const closedStarted = closed.map((i) => ({ number: i.number, labels: (i.labels ?? []).map((l) => normalizeLabel(l.name)) })).filter((i) => i.labels.some((l) => START_LABELS.includes(l)));
+  const sessionId = mySession();
+  const r = stalledActions({ role, now: new Date().toISOString(), sessionUrl: sessionId ? `https://claude.ai/code/${sessionId}` : null, prs, issues: [...issues.values()], closedStarted });
+  return { ...r, unknown: [...r.unknown, ...unknown] };
+}
+
+const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+const GATE_WAIT_MS = Number(process.env.FACTORY_GATE_WAIT_MS ?? "60000");
+const sessionUrl = () => (mySession() ? `https://claude.ai/code/${mySession()}` : null);
+
+/** 書き込み権限のある人の factory:review（古い順）。reviews の API から読む */
+async function loadReviewMarks(n: number): Promise<GateReview[]> {
+  return (await getAll<{ body: string | null; submitted_at: string; author_association: string }>(`/repos/${REPO}/pulls/${n}/reviews`))
+    .sort((a, b) => (a.submitted_at < b.submitted_at ? -1 : 1))
+    .filter((r) => TRUSTED_ASSOCIATIONS.includes(r.author_association))
+    .map((r) => COMMIT_MARK_RE.exec(r.body ?? ""))
+    .filter((m): m is RegExpExecArray => m !== null)
+    .map((m) => ({ verdict: m[1], commit: m[2] }));
+}
+
+async function loadImplementGate(n: number): Promise<GateInput> {
+  const { status, data: issue } = await get<RawIssue>(`/repos/${REPO}/issues/${n}`);
+  const labels = status === 404 ? [] : (issue.labels ?? []).map((l) => normalizeLabel(l.name));
+  const events = await getAll<{ event: string; created_at: string; label?: { name: string }; actor?: { login: string } }>(`/repos/${REPO}/issues/${n}/events`);
+  const last = events.filter((e) => e.event === "labeled" && START_LABELS.includes(normalizeLabel(e.label?.name ?? ""))).at(-1);
+  const comments = (await getAll<RawTrustedComment & { created_at: string }>(`/repos/${REPO}/issues/${n}/comments`))
+    .filter((c) => TRUSTED_ASSOCIATIONS.includes(c.author_association))
+    .map((c): Comment => ({ body: c.body ?? "", createdAt: c.created_at, author: c.user?.login }));
+  const closes = new RegExp(`\\bcloses\\s+#${n}\\b`, "i");
+  const prs = (await getAll<{ number: number; body: string | null; draft: boolean; head: { ref: string; repo: { full_name: string } | null } }>(`/repos/${REPO}/pulls?state=open`)).filter((p) => closes.test(p.body ?? ""));
+  const closingPrs = await Promise.all(
+    prs.map(async (p) => {
+      const issueComments = await getAll<RawTrustedComment>(`/repos/${REPO}/issues/${p.number}/comments`);
+      const reviewed = (await loadReviewMarks(p.number)).length > 0 || issueComments.some((c) => TRUSTED_ASSOCIATIONS.includes(c.author_association) && /<!--\s*factory:review\b/.test(c.body ?? ""));
+      return { number: p.number, headRef: p.head.ref, headRepo: p.head.repo?.full_name ?? null, draft: p.draft, reviewed };
+    }),
+  );
+  const branchExists = (await get<unknown>(`/repos/${REPO}/branches/${encodeURIComponent(`claude/issue-${n}`)}`)).status === 200; // 読めない（404 以外の失敗）ときは無いものとして lock に進む。鍵は create_branch の成否で決まる
+  return {
+    role: "implement", number: n, sessionUrl: sessionUrl(), repo: REPO, issueOpen: status !== 404 && issue.state === "open", labels,
+    lastStartAt: last?.created_at ?? null, labeler: last?.actor?.login ?? null, comments, closingPrs, branchExists,
+  };
+}
+
+async function loadPrGate(role: "review" | "fix", n: number): Promise<GateInput> {
+  const read = async () => (await get<RawPull>(`/repos/${REPO}/pulls/${n}`)).data;
+  const full = await read();
+  const pr = {
+    open: (full as RawPull & { state?: string }).state === "open",
+    draft: full.draft,
+    headRef: full.head?.ref ?? "",
+    headSha: full.head?.sha ?? "",
+    headRepo: full.head?.repo?.full_name ?? null,
+    labels: (full.labels ?? []).map((l) => normalizeLabel(l.name)),
+  };
+  if (role === "fix") {
+    // mergeable は、マージの直後は計算中（null）のことがある。直す対象になりうるときだけ、待って読み直す
+    const eligible = pr.open && pr.draft && pr.headRef.startsWith("claude/issue-") && !pr.labels.includes(LABEL.needsHuman);
+    const firstRead: (boolean | null)[] = [full.mergeable ?? null]; // 最初の読み取りは、取得済みの値を使う
+    const mergeable = eligible ? await settleMergeable(async () => (firstRead.length > 0 ? firstRead.shift()! : ((await read()).mergeable ?? null)), () => sleep(GATE_WAIT_MS)) : true;
+    return { role, number: n, sessionUrl: sessionUrl(), repo: REPO, pr, reviews: await loadReviewMarks(n), mergeable };
+  }
+  const reviews = await loadReviewMarks(n);
+  const ok = reviews.filter((r) => r.verdict === "ok").at(-1);
+  const afterOk = ok && !pr.headSha.startsWith(ok.commit) ? commitsAfter(n, ok.commit, pr.headSha) : null;
+  const files = (await getAll<{ filename: string }>(`/repos/${REPO}/pulls/${n}/files`)).map((f) => f.filename);
+  return { role, number: n, sessionUrl: sessionUrl(), repo: REPO, pr, reviews, afterOk, files };
+}
+
+async function runGate(role: string | undefined, n: number) {
+  if (role !== "implement" && role !== "review" && role !== "fix") throw new Error("--role implement・review・fix のどれかを指定する");
+  if (!Number.isInteger(n)) throw new Error("--number に Issue か PR の番号を指定する");
+  if (role !== "implement") return gateDecision(await loadPrGate(role, n));
+  const first = gateDecision(await loadImplementGate(n));
+  // 鍵（ブランチ）だけがあり PR が無いときは、別のセッションが鍵を作ってから着手のコメントを書くまでのすき間を待って、読み直す
+  if (first.decision === "takeover" && first.pr === null) {
+    await sleep(GATE_WAIT_MS);
+    return gateDecision(await loadImplementGate(n));
+  }
+  return first;
+}
+
+const CI_POLL_MS = Number(process.env.FACTORY_CI_POLL_MS ?? "30000");
+
+/** PR の head・mergeable と、その head の app-check を 1 回読む。読めなければ ok: false（その回は飛ばす） */
+async function readCiWait(n: number): Promise<{ ok: boolean; sha?: string; appCheck?: { status: string; conclusion: string | null } | null; mergeable?: boolean | null }> {
+  try {
+    const pr = await get<RawPull>(`/repos/${REPO}/pulls/${n}`);
+    const sha = pr.data.head?.sha;
+    if (pr.status !== 200 || !sha) return { ok: false };
+    const runs = await get<{ check_runs?: { status: string; conclusion: string | null; started_at: string }[] }>(`/repos/${REPO}/commits/${sha}/check-runs?check_name=app-check`);
+    if (runs.status !== 200) return { ok: false };
+    const latest = (runs.data.check_runs ?? []).sort((a, b) => (a.started_at < b.started_at ? -1 : 1)).at(-1);
+    return { ok: true, sha, appCheck: latest ? { status: latest.status, conclusion: latest.conclusion } : null, mergeable: pr.data.mergeable ?? null };
+  } catch {
+    return { ok: false };
+  }
+}
+
+async function runCiWait(n: number, minutes: number, role: string) {
+  if (!Number.isInteger(n)) throw new Error("--pr に PR の番号を指定する");
+  if (!(minutes > 0)) throw new Error("--minutes には正の数を指定する");
+  const start = Date.now();
+  let state: CiWaitState = { sha: null, deadlineMs: start + minutes * 60_000, failures: 0 };
+  for (;;) {
+    const step = ciWaitStep(state, await readCiWait(n), Date.now());
+    if (step.done) {
+      const endedAt = new Date();
+      const startedAt = new Date(start).toISOString();
+      const comment =
+        step.result === "timeout"
+          ? stalledComment(role, "ci-timeout", `CI（app-check）が ${minutes} 分たっても終わらないので、待つのをやめる（待ち始め ${startedAt}、打ち切り ${endedAt.toISOString()}）。PR は draft のまま。`, sessionUrl())
+          : null;
+      return { pr: n, sha: step.sha, result: step.result, conclusion: step.conclusion, startedAt, endedAt: endedAt.toISOString(), waitedSeconds: Math.round((endedAt.getTime() - start) / 1000), comment };
+    }
+    state = step.state;
+    await sleep(Math.max(0, Math.min(CI_POLL_MS, state.deadlineMs - Date.now()))); // 時間切れの時刻に最後の読み直しをする
+  }
+}
+
+/** merge-check・review-status に共通のレビューの判定（人の merge-check と自動の判定が食い違わないよう、1 か所にする） */
+async function reviewCheck(n: number, headSha: string): Promise<ReturnType<typeof mergeCheck>> {
+  const reviews = (await getAll<{ body: string | null; submitted_at: string; author_association: string }>(`/repos/${REPO}/pulls/${n}/reviews`))
+    .sort((a, b) => (a.submitted_at < b.submitted_at ? -1 : 1))
+    .map((r) => ({ body: r.body ?? "", association: r.author_association }));
+  const commitOf = /<!--\s*factory:review\s+verdict=\w+[^>]*?commit=([0-9a-f]+)/;
+  const last = reviews
+    .filter((r) => TRUSTED_ASSOCIATIONS.includes(r.association))
+    .map((r) => commitOf.exec(r.body)?.[1])
+    .filter(Boolean)
+    .at(-1);
+  return mergeCheck({ reviews, headSha, after: last ? commitsAfter(n, last, headSha) : [] });
+}
+
 async function main(): Promise<unknown> {
   const [cmd, num] = process.argv.slice(2);
   const n = Number(num);
@@ -200,35 +467,7 @@ async function main(): Promise<unknown> {
     case "merge-check": {
       if (!Number.isInteger(n)) throw new Error("PR の番号を指定する");
       const pr = (await get<{ head: { sha: string } }>(`/repos/${REPO}/pulls/${n}`)).data;
-      const reviews = (await getAll<{ body: string | null; submitted_at: string; author_association: string }>(`/repos/${REPO}/pulls/${n}/reviews`))
-        .sort((a, b) => (a.submitted_at < b.submitted_at ? -1 : 1))
-        .map((r) => ({ body: r.body ?? "", association: r.author_association }));
-      const git = (...a: string[]) => spawnSync("git", a, { encoding: "utf-8" });
-      const commitOf = /<!--\s*factory:review\s+verdict=\w+[^>]*?commit=([0-9a-f]+)/;
-      const last = reviews
-        .filter((r) => TRUSTED_ASSOCIATIONS.includes(r.association))
-        .map((r) => commitOf.exec(r.body)?.[1])
-        .filter(Boolean)
-        .at(-1);
-      let after: { sha: string; mergeOnly: boolean }[] | null = [];
-      if (last && !pr.head.sha.startsWith(last)) {
-        const fetched = git("fetch", "-q", "origin", `+pull/${n}/head:refs/factory/pr-${n}`, "+main:refs/factory/main");
-        if (fetched.status !== 0) throw new Error(`git fetch に失敗した（${fetched.stderr.trim()}）。付けずに、後でやり直す。`);
-        // 手元の参照が古いまま判定しないよう、取り込んだ PR の先頭が GitHub の head と同じかを確かめる
-        const local = git("rev-parse", `refs/factory/pr-${n}`).stdout.trim();
-        if (local !== pr.head.sha) throw new Error(`手元の PR の先頭（${local.slice(0, 7)}）が GitHub の head（${pr.head.sha.slice(0, 7)}）と違う。付けずに、後でやり直す。`);
-        const list = git("rev-list", "--first-parent", `${last}..refs/factory/pr-${n}`);
-        if (list.status !== 0) after = null;
-        else
-          after = list.stdout.split("\n").filter(Boolean).map((sha) => {
-            const parents = git("rev-list", "--parents", "-n1", sha).stdout.trim().split(" ").slice(1);
-            const diff = git("show", "--format=", "--remerge-diff", sha).stdout.trim();
-            // 取り込みだけのコミット: main を取り込んだ（2 つ目の親が main に含まれる）マージで、--remerge-diff の差分が空
-            const fromMain = parents.length === 2 && git("merge-base", "--is-ancestor", parents[1], "refs/factory/main").status === 0;
-            return { sha, mergeOnly: fromMain && diff === "" };
-          });
-      }
-      const review = mergeCheck({ reviews, headSha: pr.head.sha, after });
+      const review = await reviewCheck(n, pr.head.sha);
       if (!review.ok) return { pr: n, ...review };
       // レビューが ok でも、キューに入る条件のチェックが落ちていればキューに入らない（#364）
       const runs = (
@@ -236,6 +475,31 @@ async function main(): Promise<unknown> {
       ).data.check_runs.map((r) => ({ name: r.name, status: r.status, conclusion: r.conclusion, startedAt: r.started_at }));
       const ci = ciCheck(runs);
       return { pr: n, ...review, ...(ci.ok ? {} : { ok: false, reason: ci.reason }) };
+    }
+    case "ci-wait":
+      return runCiWait(Number(arg("pr")), Number(arg("minutes") ?? "15"), arg("role") ?? "implement");
+    case "gate":
+      return runGate(arg("role"), Number(arg("number")));
+    case "review-status": {
+      if (!Number.isInteger(n)) throw new Error("PR の番号を指定する");
+      const pr = (await get<{ head: { sha: string }; labels: { name: string }[] }>(`/repos/${REPO}/pulls/${n}`)).data;
+      const review = await reviewCheck(n, pr.head.sha);
+      const raw = await getAll<{ filename: string; previous_filename?: string }>(`/repos/${REPO}/pulls/${n}/files`);
+      // 一覧が途中で切れた・判定の間に head が変わったときは、付けない（安全側に倒す）
+      const now = (await get<{ head: { sha: string }; changed_files: number }>(`/repos/${REPO}/pulls/${n}`)).data;
+      const none = { state: null, description: "判定の間に PR の最新のコミットが変わった。次のきっかけで判定し直す。" };
+      if (now.head.sha !== pr.head.sha) return { pr: n, sha: pr.head.sha, ...none, reviewed: none };
+      // factory-reviewed（レビューを通ったか）は、変更ファイルによらない
+      const reviewed = reviewedStatus(review, pr.head.sha);
+      if (raw.length !== now.changed_files) return { pr: n, sha: pr.head.sha, state: null, description: `変更ファイルの一覧（${raw.length} 件）が PR の変更ファイル数（${now.changed_files} 件）と合わない。人が確かめる。`, reviewed };
+      // 判定のよりどころは GitHub の変更ファイル（PR の側の記述は読まない）
+      const files = raw.flatMap((f) => [f.filename, ...(f.previous_filename ? [f.previous_filename] : [])]);
+      return { pr: n, sha: pr.head.sha, ...reviewStatus(review, pr.head.sha, pr.labels.map((l) => l.name), files), reviewed };
+    }
+    case "stalled": {
+      const role = arg("role");
+      if (role !== "dispatch" && role !== "patrol") throw new Error("--role dispatch か --role patrol を指定する");
+      return loadStalled(role);
     }
     case "relabel": {
       const minutes = Number(arg("minutes") ?? "15");
@@ -258,7 +522,7 @@ async function main(): Promise<unknown> {
       return { since, mySession: mySession(), handled: handledByOthers({ comments, since, mySession: mySession() }) };
     }
     default:
-      throw new Error("pick / precheck / relabel / handled / budget / merge-check のどれかを指定する");
+      throw new Error("pick / precheck / relabel / stalled / gate / ci-wait / handled / budget / merge-check / review-status のどれかを指定する");
   }
 }
 

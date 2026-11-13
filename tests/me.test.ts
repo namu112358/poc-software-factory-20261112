@@ -12,17 +12,21 @@ describe("GET /api/me の応答", () => {
     const db = openDb();
     const user = getSessionUser(createSession("sato", db, now), db, now);
     assert.ok(user);
-    assert.deepEqual(toMeResponse(user), { user: { id: "sato", name: "佐藤" } });
+    assert.deepEqual(toMeResponse({ ...user, role: "member" }), {
+      user: { id: "sato", name: "佐藤", role: "member" },
+      loginNotice: null,
+      lockNotice: null,
+    });
   });
 
   it("パスワードのハッシュやトークンが混ざっていても、id と name 以外は返さない", () => {
     const db = openDb();
     const token = createSession("sato", db, now);
     const row = db.prepare("SELECT id, name, password_hash FROM users WHERE id = 'sato'").get() as Record<string, string>;
-    const leaky = { ...row, token } as unknown as User;
+    const leaky = { ...row, token, role: "member" } as unknown as User & { role: "member" };
     const body = toMeResponse(leaky);
-    assert.deepEqual(Object.keys(body), ["user"]);
-    assert.deepEqual(Object.keys(body.user).sort(), ["id", "name"]);
+    assert.deepEqual(Object.keys(body), ["user", "loginNotice", "lockNotice"]);
+    assert.deepEqual(Object.keys(body.user).sort(), ["id", "name", "role"]);
     const text = JSON.stringify(body);
     assert.ok(!text.includes(row.password_hash));
     assert.ok(!text.includes(token));
@@ -32,8 +36,8 @@ describe("GET /api/me の応答", () => {
     const db = openDb();
     const sato = createSession("sato", db, now);
     const suzuki = createSession("suzuki", db, now);
-    assert.equal(toMeResponse(getSessionUser(sato, db, now)!).user.id, "sato");
-    assert.equal(toMeResponse(getSessionUser(suzuki, db, now)!).user.id, "suzuki");
+    assert.equal(toMeResponse({ ...getSessionUser(sato, db, now)!, role: "member" }).user.id, "sato");
+    assert.equal(toMeResponse({ ...getSessionUser(suzuki, db, now)!, role: "member" }).user.id, "suzuki");
   });
 });
 

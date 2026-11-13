@@ -1,0 +1,32 @@
+import { Meta, Canvas, Stories } from "@storybook/addon-docs/blocks";
+import * as TableStories from "./table.stories";
+
+<Meta of={TableStories} />
+
+# Table
+
+一覧を表で見せる部品。`Table`・`TableHeader`・`TableBody`・`TableRow`・`TableHead`・`TableCell`・`TableCaption` に分けてあり、意味のある HTML（`<table>`・`<thead>`・`<th scope="col">`）で描く。
+
+<Canvas of={TableStories.Default} />
+
+## 使う場面
+
+- 同じ項目を持つ複数のものを、行と列で見比べたいとき（一覧、集計の結果）。
+- 数字の列を桁をそろえて見せたいとき。数字の列は `align="right"` にする（右寄せになり、`tabular-nums` が付く）。
+- 縦に長い一覧で、スクロールしても見出しを見せたいとき。表を包む要素に高さと `overflow-auto` を与え、キーボードでもスクロールできるよう `role="region"`・`aria-label`・`tabIndex={0}` を付ける。
+
+## 使わない場面
+
+- 見た目を並べたいだけのとき（画面の骨組み・カードの並び）。表は「行と列の関係」があるものだけに使う。
+- 項目が 1 つか 2 つで、行ごとに中身が大きく違うとき。リストや見出し付きの文章にする。
+- 並べ替え・絞り込み・選択の機能が要るとき。この部品には含まれない（業務の型で別に決める）。
+
+## 書き方の決まり
+
+- 表には名前を付ける。`<TableCaption>` か `aria-label` のどちらか。
+- 行が無いときは、`TableEmpty` に列の数を `colSpan` で渡し、「該当するものはありません」のような案内を出す。
+- 見出し行を `hover:bg-hover` の対象にしたくないときは、見出しの `TableRow` に `hover:bg-transparent` を渡す。
+
+## すべての状態
+
+<Stories />

@@ -1,5 +1,6 @@
 // タスク一覧で複数のタスクを選び、担当者・ステータスをまとめて変える画面の処理。
 // 画面（クライアント）からも読み込むので、DB を使うモジュールは読み込まない。確認のダイアログと通信は引数で受け取る。
+import { isSessionExpired } from "./session-expired.ts";
 import { STATUS_LABELS, isTaskStatus, type TaskStatus } from "./task-types.ts";
 
 /** 一度に選べるタスクの最大件数。まとめて変える API の上限と同じ。 */
@@ -19,7 +20,12 @@ export type BulkUndoOffer = { id: number; count: number };
 export type BulkSubmitResult =
   | { status: "cancelled" }
   | { status: "updated"; count: number; message: string; undo?: BulkUndoOffer }
-  | { status: "error"; message: string };
+  | { status: "error"; message: string }
+  // ログインが切れていた（401）。選択と選んだ値は残し、画面は読み直さない（読み直すとログイン画面へ移るため。#491）。
+  | { status: "expired"; message: string };
+
+/** ログインが切れていて、まとめての変更を断られたときに、ログイン切れの案内に添える文。 */
+export const BULK_NOT_CHANGED_MESSAGE = "1 件も変更していません。";
 
 type Deps = {
   confirm: (message: string) => boolean;
@@ -125,7 +131,6 @@ export function parseUndoOffer(data: unknown): BulkUndoOffer | undefined {
 /** 失敗したときの文言。API の応答の状態と本文から、日本語の理由を作る。 */
 export function bulkErrorMessage(httpStatus: number, body: unknown): string {
   if (httpStatus === 404) return "見つからないタスクがあります。1 件も変更していません。";
-  if (httpStatus === 401) return "ログインし直してください。1 件も変更していません。";
   if (httpStatus === 400) {
     const details = (body as { details?: unknown } | null)?.details;
     const reasons = Array.isArray(details) ? details.filter((d): d is string => typeof d === "string") : [];
@@ -159,13 +164,18 @@ export async function confirmAndBulkUpdate(
       if (undo === undefined) return { status: "updated", count: ids.length, message: bulkDoneMessage(ids.length) };
       return { status: "updated", count: ids.length, message: bulkUndoOfferMessage(undo.count, changes), undo };
     }
+    if (isSessionExpired(res.status)) return { status: "expired", message: BULK_NOT_CHANGED_MESSAGE };
     return { status: "error", message: bulkErrorMessage(res.status, data) };
   } catch {
     return { status: "error", message: bulkErrorMessage(0, null) };
   }
 }
 
-export type BulkUndoSubmitResult = { status: "undone" | "error"; message: string };
+/** expired はログインが切れていた（401）とき。元に戻すボタンを残し、画面は読み直さない（#491）。 */
+export type BulkUndoSubmitResult = { status: "undone" | "error" | "expired"; message: string };
+
+/** ログインが切れていて、元に戻すを断られたときに、ログイン切れの案内に添える文。 */
+export const BULK_UNDO_NOT_DONE_MESSAGE = "まだ元に戻していません。";
 
 type UndoDeps = {
   fetch: (
@@ -178,7 +188,7 @@ type UndoDeps = {
 export function bulkUndoDoneMessage(restored: number, skipped: number): string {
   const done = `${restored} 件を元に戻しました。`;
   if (skipped === 0) return done;
-  return `${done}${skipped} 件は、変えた後にほかの変更があった（または削除された）ため、戻していません。`;
+  return `${done}${skipped} 件は、変えた後にほかの変更があった（または削除された・担当者のログインが停止された）ため、戻していません。`;
 }
 
 /** POST /api/tasks/bulk-update/undo を 1 回送る。断られたら API のエラー文言を、通信に失敗したら決まった文言を返す。 */
@@ -196,6 +206,7 @@ export async function requestBulkUndo(id: number, deps: UndoDeps): Promise<BulkU
       const skipped = Array.isArray(data?.skippedIds) ? data.skippedIds.length : 0;
       return { status: "undone", message: bulkUndoDoneMessage(restored, skipped) };
     }
+    if (isSessionExpired(res.status)) return { status: "expired", message: BULK_UNDO_NOT_DONE_MESSAGE };
     return { status: "error", message: typeof data?.error === "string" ? data.error : fallback };
   } catch {
     return { status: "error", message: fallback };

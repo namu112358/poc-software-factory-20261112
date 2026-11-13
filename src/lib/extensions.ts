@@ -1,7 +1,9 @@
 import { getDb, type Db } from "./db/index.ts";
 import { getTask, type Task } from "./tasks.ts";
 import type { ValidationResult } from "./tasks.ts";
+import { unknownFieldErrors } from "./body-fields.ts";
 import { isCoordinator } from "./users.ts";
+import { isValidDate } from "./valid-date.ts";
 
 export type ExtensionStatus = "pending" | "approved" | "rejected";
 
@@ -48,24 +50,22 @@ function toExtension(row: ExtensionRow): Extension {
 
 export const EXTENSION_REASON_MAX_LENGTH = 500;
 
-const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+export const EXTENSION_NOT_AFTER_MESSAGE = "希望の期限は、今の期限より後の日付にしてください";
 
-/** YYYY-MM-DD 形式で、実在する日付か。 */
-function isValidDate(value: string): boolean {
-  if (!DATE_RE.test(value)) return false;
-  const date = new Date(`${value}T00:00:00.000Z`);
-  return !Number.isNaN(date.getTime()) && date.toISOString().slice(0, 10) === value;
-}
-
-/** 申請の本文（newDueDate・reason）を検証する。理由は前後の空白を除いて 1〜500 文字。 */
-export function validateExtensionInput(body: unknown): ValidationResult<{ newDueDate: string; reason: string }> {
+/**
+ * 申請の本文（newDueDate・reason）を検証する。希望の期限は、タスクの今の期限より後の日付だけ。理由は前後の空白を除いて 1〜500 文字。
+ * `newDueDate`・`reason` のほかの項目があれば誤り（#527）。
+ */
+export function validateExtensionInput(body: unknown, currentDueDate: string): ValidationResult<{ newDueDate: string; reason: string }> {
   if (typeof body !== "object" || body === null || Array.isArray(body)) {
     return { ok: false, errors: ["リクエストの形式が正しくありません"] };
   }
   const b = body as Record<string, unknown>;
-  const errors: string[] = [];
+  const errors: string[] = unknownFieldErrors(b, ["newDueDate", "reason"]);
   if (typeof b.newDueDate !== "string" || !isValidDate(b.newDueDate)) {
     errors.push("新しい期限は YYYY-MM-DD 形式で入力してください");
+  } else if (b.newDueDate <= currentDueDate) {
+    errors.push(EXTENSION_NOT_AFTER_MESSAGE);
   }
   const reason = typeof b.reason === "string" ? b.reason.trim() : "";
   if (typeof b.reason !== "string" || reason.length < 1 || reason.length > EXTENSION_REASON_MAX_LENGTH) {
@@ -105,7 +105,7 @@ export function createExtension(
 }
 
 export type DecideResult =
-  | { result: "decided"; extension: Extension; task: Task }
+  | { result: "decided"; extension: Extension; task: Task; dueDateChanged: boolean } // dueDateChanged: 承認でタスクの期限を変えたか（却下は常に false）
   | { result: "not_found" }
   | { result: "forbidden"; reason: "own" } // 申請した本人（自分の申請は自分で判断できない）
   | { result: "forbidden"; reason: "not_coordinator" } // 取りまとめる人ではない
@@ -122,6 +122,8 @@ export const DECIDE_FORBIDDEN_MESSAGE: Record<"own" | "not_coordinator", string>
  * 判定の順は「申請が無い（not_found）→ 申請した本人（forbidden）→ 取りまとめる人でない（forbidden）→ 判断済み（conflict）」。
  * 取りまとめる人でない人には、判断済みかどうかを知らせない（409 より先に 403）。
  * 申請の更新は保留中のときだけ行い、先にほかの人が判断していればタスクも変えずに conflict を返す。
+ * 承認でも、タスクの今の期限が希望の期限以降（申請の後で後ろへ変えられた）なら、期限も最終更新日時も変えずに承認として閉じる。
+ * 期限を変えるかの判定と書き込みは 1 つの UPDATE 文の条件で行い、読んでから書くまでに期限が編集されても縮めない。
  */
 export function decideExtension(
   taskId: number,
@@ -136,6 +138,7 @@ export function decideExtension(
   if (current.requester === userId) return { result: "forbidden", reason: "own" };
   if (!isCoordinator(userId, db)) return { result: "forbidden", reason: "not_coordinator" };
   if (current.status !== "pending") return { result: "conflict" };
+  let dueDateChanged = false;
   db.exec("BEGIN");
   try {
     const { changes } = db
@@ -148,18 +151,36 @@ export function decideExtension(
       return { result: "conflict" };
     }
     if (decision === "approved") {
-      db.prepare("UPDATE tasks SET due_date = ?, updated_at = ? WHERE id = ? AND deleted_at IS NULL").run(
-        current.newDueDate,
-        now.toISOString(),
-        taskId,
-      );
+      const updated = db
+        .prepare("UPDATE tasks SET due_date = ?, updated_at = ? WHERE id = ? AND deleted_at IS NULL AND due_date < ?")
+        .run(current.newDueDate, now.toISOString(), taskId, current.newDueDate);
+      dueDateChanged = Number(updated.changes) > 0;
     }
     db.exec("COMMIT");
   } catch (e) {
     db.exec("ROLLBACK");
     throw e;
   }
-  return { result: "decided", extension: getExtension(extensionId, db)!, task: getTask(taskId, db)! };
+  return { result: "decided", extension: getExtension(extensionId, db)!, task: getTask(taskId, db)!, dueDateChanged };
+}
+
+/** 今の期限が希望の期限以降で、承認しても期限が変わらないか（YYYY-MM-DD の文字列で比べる）。 */
+export function isAlreadyExtended(currentDueDate: string, newDueDate: string): boolean {
+  return currentDueDate >= newDueDate;
+}
+
+/** 承認したが期限を変えなかったときに、承認した人へ出す説明。 */
+export function dueDateUnchangedNotice(currentDueDate: string, newDueDate: string): string {
+  return `タスクの期限（${currentDueDate}）がすでに希望の期限（${newDueDate}）以降のため、期限は変えずに承認しました`;
+}
+
+export type ApproveResponse = { extension: Extension; task: Task; dueDateChanged: boolean; notice?: string };
+
+/** 承認の API の応答の本文。期限を変えなかったときは、その理由（notice）を付ける。 */
+export function approveResponse(decided: { extension: Extension; task: Task; dueDateChanged: boolean }): ApproveResponse {
+  const { extension, task, dueDateChanged } = decided;
+  if (dueDateChanged) return { extension, task, dueDateChanged };
+  return { extension, task, dueDateChanged, notice: dueDateUnchangedNotice(task.dueDate, extension.newDueDate) };
 }
 
 export type WithdrawResult =
@@ -198,6 +219,7 @@ export type PendingExtensionRow = {
   requesterName: string; // 申請者の表示名（利用者が見つからなければ ID）
   currentDueDate: string; // タスクの今の期限 YYYY-MM-DD
   newDueDate: string; // 希望の期限 YYYY-MM-DD
+  alreadyExtended: boolean; // 今の期限がすでに希望の期限以降（承認しても期限は変わらない）
   reason: string;
   createdAt: string; // ISO 8601（UTC）
 };
@@ -232,6 +254,7 @@ export function listPendingExtensions(db: Db = getDb()): PendingExtensionRow[] {
     requesterName: r.requester_name ?? r.requester,
     currentDueDate: r.due_date,
     newDueDate: r.new_due_date,
+    alreadyExtended: isAlreadyExtended(r.due_date, r.new_due_date),
     reason: r.reason,
     createdAt: r.created_at,
   }));
