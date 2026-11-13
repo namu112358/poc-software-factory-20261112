@@ -43,6 +43,7 @@ import {
   TRUSTED_ASSOCIATIONS,
   precheck,
   precheckActions,
+  stalledLoadPlan,
   isOwnClaudePr,
   type HeadRef,
   readyBudget,
@@ -271,14 +272,8 @@ async function loadStalled(role: string) {
           .filter((m): m is RegExpExecArray => m !== null)
           .map((m) => ({ action: m[1], commit: m[2] }));
       }
-      if (mergeable !== null && own) {
-        const checkState = async (name: string): Promise<CheckState> => {
-          const runs = (await get<{ check_runs: { status: string; conclusion: string | null; started_at: string }[] }>(`/repos/${REPO}/commits/${full.head.sha}/check-runs?check_name=${name}&per_page=100`)).data.check_runs ?? [];
-          const latest = runs.sort((a, b) => (a.started_at < b.started_at ? -1 : 1)).at(-1);
-          return !latest ? "none" : latest.status !== "completed" ? "pending" : latest.conclusion === "success" ? "success" : "failure";
-        };
-        appCheck = combineChecks(await Promise.all(CI_CHECKS.map((name) => checkState(name))));
-        bodyCheck = await checkState("pr-body-check");
+      const plan = stalledLoadPlan({ own, mergeable, draft: full.draft });
+      if (plan.reviews) {
         reviews = (await getAll<{ body: string | null; submitted_at: string; author_association: string }>(`/repos/${REPO}/pulls/${n}/reviews`))
           .sort((a, b) => (a.submitted_at < b.submitted_at ? -1 : 1))
           .filter((r) => TRUSTED_ASSOCIATIONS.includes(r.author_association))
@@ -288,10 +283,19 @@ async function loadStalled(role: string) {
         for (const commit of new Set([reviews.at(-1)?.commit, reviews.filter((r) => r.verdict === "ok").at(-1)?.commit])) {
           if (commit) after[commit] = commitsAfter(n, commit, full.head.sha);
         }
-        if (!full.draft) {
-          const tl = await getAll<{ event: string; created_at: string }>(`/repos/${REPO}/issues/${n}/timeline`);
-          readyAt = tl.filter((e) => e.event === "ready_for_review").at(-1)?.created_at ?? full.created_at;
-        }
+      }
+      if (plan.readyAt) {
+        const tl = await getAll<{ event: string; created_at: string }>(`/repos/${REPO}/issues/${n}/timeline`);
+        readyAt = tl.filter((e) => e.event === "ready_for_review").at(-1)?.created_at ?? full.created_at;
+      }
+      if (plan.checks) {
+        const checkState = async (name: string): Promise<CheckState> => {
+          const runs = (await get<{ check_runs: { status: string; conclusion: string | null; started_at: string }[] }>(`/repos/${REPO}/commits/${full.head.sha}/check-runs?check_name=${name}&per_page=100`)).data.check_runs ?? [];
+          const latest = runs.sort((a, b) => (a.started_at < b.started_at ? -1 : 1)).at(-1);
+          return !latest ? "none" : latest.status !== "completed" ? "pending" : latest.conclusion === "success" ? "success" : "failure";
+        };
+        appCheck = combineChecks(await Promise.all(CI_CHECKS.map((name) => checkState(name))));
+        bodyCheck = await checkState("pr-body-check");
         if (labels.some((l) => l === "merge:dequeued" || l === "dequeued")) {
           const comments = await getAll<RawTrustedComment>(`/repos/${REPO}/issues/${n}/comments`);
           // Mergify のボットの状況のコメントだけを読む（ほかの人が同じ文字を書いても、判定に使わない）
