@@ -538,7 +538,7 @@ describe("stalled: 止まった実装・PR の片付け", () => {
   const HEAD = "aaaaaaa1111111";
   const pr = (o: Partial<StalledPr> = {}): StalledPr => ({
     number: 10, headRef: "claude/issue-5", headSha: HEAD, draft: true, mergeable: true, labels: [], updatedAt: ago(0), readyAt: null,
-    appCheck: "none", reviews: [], after: {}, rereviewCommits: [], mergifyTimeout: null, ...o,
+    appCheck: "none", bodyCheck: "success", reviews: [], after: {}, priorMarks: [], mergifyTimeout: null, ...o,
   });
   const iss = (o: Partial<StalledIssue> = {}): StalledIssue => ({ number: 5, labels: ["status:in-progress"], updatedAt: ago(0), ...o });
   const run = (prs: StalledPr[], issues: StalledIssue[] = [iss()], closedStarted: { number: number; labels: string[] }[] = [], sessionUrl: string | null = "https://claude.ai/code/session_X") =>
@@ -553,7 +553,7 @@ describe("stalled: 止まった実装・PR の片付け", () => {
     assert.equal(a.action, "conflict");
     assert.equal(a.target, "pr");
     assert.equal(a.draft, "to-draft");
-    assert.match(a.comment!, /^<!-- factory:dispatch action=conflict -->\n.*\nセッション: https:\/\/claude\.ai\/code\/session_X$/s);
+    assert.match(a.comment!, /^<!-- factory:dispatch action=conflict commit=aaaaaaa -->\n.*\nセッション: https:\/\/claude\.ai\/code\/session_X$/s);
     assert.equal(only(run([pr({ number: 11, headRef: "claude/other", draft: false, mergeable: false })], [])).action, "conflict");
   });
 
@@ -588,12 +588,12 @@ describe("stalled: 止まった実装・PR の片付け", () => {
   });
 
   it("3: 同じコミットへの 2 回目は、人に回す", () => {
-    const a = only(run([pr({ draft: false, readyAt: ago(30), rereviewCommits: ["aaaaaaa"] })], []));
+    const a = only(run([pr({ draft: false, readyAt: ago(30), priorMarks: [{ action: "rereview", commit: "aaaaaaa" }] })], []));
     assert.equal(a.action, "rereview");
     assert.equal(a.draft, null);
     assert.deepEqual(a.addLabels, ["status:needs-human"]);
     // 別のコミットへの起こし直しは数えない
-    assert.equal(only(run([pr({ draft: false, readyAt: ago(30), rereviewCommits: ["ccccccc"] })], [])).draft, "draft-then-ready");
+    assert.equal(only(run([pr({ draft: false, readyAt: ago(30), priorMarks: [{ action: "rereview", commit: "ccccccc" }] })], [])).draft, "draft-then-ready");
   });
 
   it("4: 最新のレビューが changes で、そのコミットが最新のまま 30 分動かなければ人に回す", () => {
@@ -663,6 +663,8 @@ describe("stalled: 止まった実装・PR の片付け", () => {
     it("5 分たたない・CI が成功でない・ok が最新でない・ラベルが足りないときは何もしない", () => {
       assert.equal(run([base({ mergifyTimeout: { at: ago(4) } })], []).actions.length, 0);
       assert.equal(run([base({ appCheck: "failure" })], []).actions.length, 0);
+      assert.equal(run([base({ bodyCheck: "failure" })], []).actions.length, 0);
+      assert.equal(run([base({ bodyCheck: "pending" })], []).actions.length, 0);
       assert.equal(run([base({ mergifyTimeout: null })], []).actions.length, 0);
       assert.equal(run([base({ labels: ["merge:requested"] })], []).actions.length, 0);
       assert.equal(run([base({ labels: ["merge:dequeued"] })], []).actions.length, 0);
@@ -703,6 +705,42 @@ describe("stalled: 止まった実装・PR の片付け", () => {
 
   it("コメントの印は役の名前になり、セッションが無ければ行を省く", () => {
     const r = stalledActions({ role: "patrol", now: NOW, sessionUrl: null, prs: [pr({ draft: false, mergeable: false })], issues: [], closedStarted: [] });
-    assert.equal(r.actions[0].comment, "<!-- factory:patrol action=conflict -->\n`main` と衝突しているので draft に戻した。衝突を直して Ready に戻す。");
+    assert.equal(r.actions[0].comment, "<!-- factory:patrol action=conflict commit=aaaaaaa -->\n`main` と衝突しているので draft に戻した。衝突を直して Ready に戻す。");
+  });
+
+  it("巡回は claude/issue- 以外の PR を扱わず、割り当てだけが衝突を知らせる", () => {
+    const foo = pr({ headRef: "claude/foo", draft: false, mergeable: false, readyAt: ago(1) });
+    const patrol = stalledActions({ role: "patrol", now: NOW, sessionUrl: null, prs: [foo], issues: [], closedStarted: [] });
+    assert.deepEqual(patrol.actions, []);
+    assert.deepEqual(patrol.unknown, []);
+    assert.equal(only(run([foo], [])).action, "conflict");
+  });
+
+  describe("同じコミットに同じ処置は 1 回まで", () => {
+    const kick = { mergeable: false, updatedAt: ago(40) };
+    const kickIssue = [iss({ updatedAt: ago(40) })];
+    it("初回の印には commit が付く", () => {
+      assert.match(only(run([pr(kick)], kickIssue)).comment!, /^<!-- factory:dispatch action=conflict-kick commit=aaaaaaa -->/);
+      assert.match(only(run([pr({ draft: false, mergeable: false })], [])).comment!, /action=conflict commit=aaaaaaa -->/);
+      assert.match(only(run([pr({ appCheck: "success", updatedAt: ago(20) })], [iss({ updatedAt: ago(20) })])).comment!, /action=ready-stalled commit=aaaaaaa -->/);
+    });
+    it("同じコミットへの 2 回目は、draft を切り替えずに人に回す", () => {
+      for (const [action, p, is] of [
+        ["conflict-kick", pr({ ...kick, priorMarks: [{ action: "conflict-kick", commit: "aaaaaaa" }] }), kickIssue],
+        ["conflict", pr({ draft: false, mergeable: false, priorMarks: [{ action: "conflict", commit: "aaaaaaa" }] }), []],
+        ["ready-stalled", pr({ appCheck: "success", updatedAt: ago(20), priorMarks: [{ action: "ready-stalled", commit: "aaaaaaa" }] }), [iss({ updatedAt: ago(20) })]],
+      ] as const) {
+        const a = only(run([p], [...is]));
+        assert.equal(a.action, action);
+        assert.equal(a.draft, null);
+        assert.equal(a.issue, null);
+        assert.deepEqual(a.addLabels, ["status:needs-human"]);
+        assert.match(a.comment!, new RegExp(`^<!-- factory:dispatch action=${action}-repeat commit=aaaaaaa -->\\n同じ処置（${action}）を同じコミットに 2 回しても動かないので、人に回す。\\nセッション: `));
+      }
+    });
+    it("別のコミット・別の処置の記録は数えない", () => {
+      assert.equal(only(run([pr({ ...kick, priorMarks: [{ action: "conflict-kick", commit: "ccccccc" }] })], kickIssue)).draft, "ready-then-draft");
+      assert.equal(only(run([pr({ ...kick, priorMarks: [{ action: "conflict", commit: "aaaaaaa" }] })], kickIssue)).draft, "ready-then-draft");
+    });
   });
 });

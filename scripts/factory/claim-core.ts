@@ -630,7 +630,8 @@ export type StalledPr = {
   reviews: { verdict: string; commit: string }[]; // 書き込み権限のある人の factory:review（古い順）
   /** レビューのコミット → それより後のコミット（first-parent）。PR の履歴に無ければ null。head と同じなら [] */
   after: Record<string, StalledCommit[] | null>;
-  rereviewCommits: string[]; // 割り当て・巡回の action=rereview コメントの commit=（書き込み権限のある人のもの）
+  priorMarks: { action: string; commit: string }[]; // 割り当て・巡回の `action=<処置> commit=<sha>` のコメント（書き込み権限のある人のもの）。同じ処置のくり返しを数える
+  bodyCheck: CheckState; // 最新のコミットの pr-body-check の最新の実行
   mergifyTimeout: { at: string } | null; // Mergify の状況のコメントの dequeue_reason.code が CHECKS_TIMEOUT のとき、外れた時刻
 };
 export type StalledIssue = { number: number; labels: string[]; updatedAt: string };
@@ -715,6 +716,13 @@ export function stalledActions(input: {
     };
     const toHuman = (action: string, text: string, commit?: string) =>
       push({ action, addLabels: [LABEL.needsHuman], comment: note(text, action, commit) });
+    const sha7 = pr.headSha.slice(0, 7);
+    // 同じコミットに同じ処置を 2 回しない。2 回目は draft の切り替えをせず、人に回す
+    const once = (a: Partial<StalledAction> & { action: string }, text: string) => {
+      if (pr.priorMarks.some((m) => m.action === a.action && sameCommit(m.commit, pr.headSha)))
+        push({ action: a.action, addLabels: [LABEL.needsHuman], comment: stalledComment(role, `${a.action}-repeat`, `同じ処置（${a.action}）を同じコミットに 2 回しても動かないので、人に回す。`, sessionUrl, sha7) });
+      else push({ ...a, comment: note(text, a.action, sha7) });
+    };
     const stopIssue = (text: string) => {
       actions.push({
         target: "issue",
@@ -728,25 +736,24 @@ export function stalledActions(input: {
       });
     };
 
+    if (issueNo === null && role !== "dispatch") continue; // claude/issue- 以外の PR は、割り当ての衝突の知らせだけ（巡回は扱わない）
     if (pr.mergeable === null) {
       unknown.push({ pr: pr.number, reason: "mergeable が null" });
       continue;
     }
     // 1・2: 衝突
     if (!pr.draft && pr.mergeable === false) {
-      push({ action: "conflict", draft: "to-draft", comment: note("`main` と衝突しているので draft に戻した。衝突を直して Ready に戻す。", "conflict") });
+      once({ action: "conflict", draft: "to-draft" }, "`main` と衝突しているので draft に戻した。衝突を直して Ready に戻す。");
       continue;
     }
     if (issueNo === null) continue; // claude/issue- 以外は、衝突の行だけ
     if (pr.draft && pr.mergeable === false && idle >= 30) {
-      push({ action: "conflict-kick", draft: "ready-then-draft", comment: note("衝突したまま止まっているので、修正の役を起こし直した。", "conflict-kick") });
+      once({ action: "conflict-kick", draft: "ready-then-draft" }, "衝突したまま止まっているので、修正の役を起こし直した。");
       continue;
     }
     // 3: レビューが動かなかった
     if (!pr.draft && !pr.reviews.some((r) => sameCommit(r.commit, pr.headSha)) && !okCoversHead(pr) && pr.readyAt && minutesSince(pr.readyAt, now) >= 10) {
-      const sha7 = pr.headSha.slice(0, 7);
-      if (pr.rereviewCommits.some((c) => sameCommit(c, pr.headSha))) toHuman("rereview", "レビューを起こし直しても動かなかったので、人に回す。", sha7);
-      else push({ action: "rereview", draft: "draft-then-ready", comment: note("レビューが動かなかったので起こし直した。", "rereview", sha7) });
+      once({ action: "rereview", draft: "draft-then-ready" }, "レビューが動かなかったので起こし直した。");
       continue;
     }
     // 4: 必須の指摘が直されないまま
@@ -757,12 +764,10 @@ export function stalledActions(input: {
     }
     // 5: CI が通ったまま止まった draft
     if (pr.draft && pr.appCheck === "success" && changedAfterLatestReview(pr) && pr.mergeable === true && idle >= 15) {
-      push({
-        action: "ready-stalled",
-        draft: "to-ready",
-        issue: started.length ? { number: issue!.number, removeLabels: started, addLabels: [] } : null,
-        comment: note("CI が通ったまま止まっていたので Ready にした（レビューの役が動く）。", "ready-stalled"),
-      });
+      once(
+        { action: "ready-stalled", draft: "to-ready", issue: started.length ? { number: issue!.number, removeLabels: started, addLabels: [] } : null },
+        "CI が通ったまま止まっていたので Ready にした（レビューの役が動く）。",
+      );
       continue;
     }
     // 6・7: 作業中の印が付いたまま止まった Issue
@@ -783,7 +788,7 @@ export function stalledActions(input: {
     }
     // 9: Mergify の時間切れで外れ、その後 CI も レビューも通っている
     const dequeued = pr.labels.some((l) => l === "merge:dequeued" || l === "dequeued");
-    if (pr.labels.includes(LABEL.merge) && dequeued && pr.mergifyTimeout && minutesSince(pr.mergifyTimeout.at, now) >= 5 && pr.appCheck === "success" && okCoversHead(pr)) {
+    if (pr.labels.includes(LABEL.merge) && dequeued && pr.mergifyTimeout && minutesSince(pr.mergifyTimeout.at, now) >= 5 && pr.appCheck === "success" && pr.bodyCheck === "success" && okCoversHead(pr)) {
       toHuman("checks-timeout", "Mergify の時間切れでキューから外れた。その後 CI は成功し、レビューも ok。人が `merge:requested` を外して付け直すと入り直す。");
       continue;
     }

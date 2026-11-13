@@ -240,13 +240,25 @@ async function loadStalled(role: string) {
     let reviews: StalledPr["reviews"] = [];
     let after: StalledPr["after"] = {};
     let readyAt: string | null = null;
-    let rereviewCommits: string[] = [];
+    let priorMarks: StalledPr["priorMarks"] = [];
+    let bodyCheck: CheckState = "none";
     let mergifyTimeout: StalledPr["mergifyTimeout"] = null;
     try {
+      if (mergeable !== null) {
+        const comments = (await getAll<RawTrustedComment>(`/repos/${REPO}/issues/${n}/comments`)).filter((c) => TRUSTED_ASSOCIATIONS.includes(c.author_association));
+        priorMarks = comments
+          .map((c) => /factory:(?:dispatch|patrol) action=([\w-]+) commit=([0-9a-f]+)/.exec(c.body ?? ""))
+          .filter((m): m is RegExpExecArray => m !== null)
+          .map((m) => ({ action: m[1], commit: m[2] }));
+      }
       if (mergeable !== null && own) {
-        const runs = (await get<{ check_runs: { status: string; conclusion: string | null; started_at: string }[] }>(`/repos/${REPO}/commits/${full.head.sha}/check-runs?check_name=app-check&per_page=100`)).data.check_runs ?? [];
-        const latest = runs.sort((a, b) => (a.started_at < b.started_at ? -1 : 1)).at(-1);
-        appCheck = !latest ? "none" : latest.status !== "completed" ? "pending" : latest.conclusion === "success" ? "success" : "failure";
+        const checkState = async (name: string): Promise<CheckState> => {
+          const runs = (await get<{ check_runs: { status: string; conclusion: string | null; started_at: string }[] }>(`/repos/${REPO}/commits/${full.head.sha}/check-runs?check_name=${name}&per_page=100`)).data.check_runs ?? [];
+          const latest = runs.sort((a, b) => (a.started_at < b.started_at ? -1 : 1)).at(-1);
+          return !latest ? "none" : latest.status !== "completed" ? "pending" : latest.conclusion === "success" ? "success" : "failure";
+        };
+        appCheck = await checkState("app-check");
+        bodyCheck = await checkState("pr-body-check");
         reviews = (await getAll<{ body: string | null; submitted_at: string; author_association: string }>(`/repos/${REPO}/pulls/${n}/reviews`))
           .sort((a, b) => (a.submitted_at < b.submitted_at ? -1 : 1))
           .filter((r) => TRUSTED_ASSOCIATIONS.includes(r.author_association))
@@ -259,8 +271,6 @@ async function loadStalled(role: string) {
         if (!full.draft) {
           const tl = await getAll<{ event: string; created_at: string }>(`/repos/${REPO}/issues/${n}/timeline`);
           readyAt = tl.filter((e) => e.event === "ready_for_review").at(-1)?.created_at ?? full.created_at;
-          const comments = (await getAll<RawTrustedComment>(`/repos/${REPO}/issues/${n}/comments`)).filter((c) => TRUSTED_ASSOCIATIONS.includes(c.author_association));
-          rereviewCommits = comments.map((c) => /factory:(?:dispatch|patrol) action=rereview commit=([0-9a-f]+)/.exec(c.body ?? "")?.[1]).filter((c): c is string => !!c);
         }
         if (labels.includes(LABEL.merge) && labels.some((l) => l === "merge:dequeued" || l === "dequeued")) {
           const comments = await getAll<RawTrustedComment>(`/repos/${REPO}/issues/${n}/comments`);
@@ -272,7 +282,7 @@ async function loadStalled(role: string) {
       unknown.push({ pr: n, reason: e instanceof Error ? e.message : String(e) });
       continue;
     }
-    prs.push({ number: n, headRef: full.head.ref, headSha: full.head.sha, draft: full.draft, mergeable, labels, updatedAt: full.updated_at, readyAt, appCheck, reviews, after, rereviewCommits, mergifyTimeout });
+    prs.push({ number: n, headRef: full.head.ref, headSha: full.head.sha, draft: full.draft, mergeable, labels, updatedAt: full.updated_at, readyAt, appCheck, reviews, after, priorMarks, bodyCheck, mergifyTimeout });
   }
   const closed = (await get<(RawIssue & { updated_at: string })[]>(`/repos/${REPO}/issues?state=closed&per_page=100&sort=updated&direction=desc`)).data.filter((i) => !i.pull_request);
   const closedStarted = closed.map((i) => ({ number: i.number, labels: (i.labels ?? []).map((l) => normalizeLabel(l.name)) })).filter((i) => i.labels.some((l) => START_LABELS.includes(l)));
