@@ -3,8 +3,9 @@ import { taskRowAnchorId } from "@/lib/task-list-anchor";
 import { Fragment } from "react";
 import { bulkSelectionKey } from "@/lib/bulk-select";
 import { listCommentersByTask } from "@/lib/comments";
-import { NOTHING_TO_DO_TEXT, countMyDueTasks, limitItems, listExtensionsAwaitingMe, listMyDueTasks, myDueTasksHref } from "@/lib/my-attention";
-import { listAssigneeOptions } from "@/lib/members";
+import { NOTHING_TO_DO_TEXT, countMyDueTasks, limitItems, listExtensionsAwaitingMe, listMyDueTasks, listSuspendedBacklog, myDueTasksHref } from "@/lib/my-attention";
+import { memberTasksHref } from "@/lib/member-suspension";
+import { listAssigneeOptions, listSuspendedUserIds, withSuspendedMark } from "@/lib/members";
 import { BulkBar, BulkCheckbox, BulkSelection } from "./BulkActions";
 import { buildAssigneeFilterOptions, buildCheckboxOptions } from "@/lib/task-filter-form";
 import { exportHref } from "@/lib/export";
@@ -61,6 +62,8 @@ export default async function TasksPage({ searchParams }: Props) {
   const users = listAssigneeOptions();
   const myTasks = listMyDueTasks(user.id, undefined, today);
   const myExtensions = listExtensionsAwaitingMe(user.id);
+  const suspendedBacklog = listSuspendedBacklog(user.id);
+  const suspendedIds = listSuspendedUserIds();
   const myTasksView = limitItems(myTasks);
   const myExtensionsView = limitItems(myExtensions);
   const myCounts = countMyDueTasks(myTasks);
@@ -90,7 +93,7 @@ export default async function TasksPage({ searchParams }: Props) {
       )}
       <section aria-labelledby="my-attention-heading" data-testid="my-attention">
         <h2 id="my-attention-heading">あなたの対応が必要なもの</h2>
-        {myTasks.length === 0 && myExtensions.length === 0 && <p data-testid="my-attention-empty">{NOTHING_TO_DO_TEXT}</p>}
+        {myTasks.length === 0 && myExtensions.length === 0 && suspendedBacklog.length === 0 && <p data-testid="my-attention-empty">{NOTHING_TO_DO_TEXT}</p>}
         {myTasks.length > 0 && (
           <>
             <h3>担当のタスク（期限切れ・期限間近）</h3>
@@ -109,6 +112,18 @@ export default async function TasksPage({ searchParams }: Props) {
                 </a>
               </p>
             )}
+          </>
+        )}
+        {suspendedBacklog.length > 0 && (
+          <>
+            <h3>ログインを停止したメンバーの担当のタスク</h3>
+            <ul>
+              {suspendedBacklog.map((b) => (
+                <li key={b.id} data-testid="suspended-backlog">
+                  <a href={memberTasksHref(b.id)}>{b.name}さん</a>が担当のまま、未完了のタスクが {b.count} 件残っています
+                </li>
+              ))}
+            </ul>
           </>
         )}
         {myExtensions.length > 0 && (
@@ -266,7 +281,7 @@ export default async function TasksPage({ searchParams }: Props) {
                 )}
               </td>
               <td role="cell" className="c-status" data-label="ステータス">{STATUS_LABELS[task.status]}</td>
-              <td role="cell" className="c-assignee" data-label="担当者" data-testid="task-assignee">{assigneeName(task.assignee, assignees)}</td>
+              <td role="cell" className="c-assignee" data-label="担当者" data-testid="task-assignee">{withSuspendedMark(assigneeName(task.assignee, assignees), suspendedIds.has(task.assignee))}</td>
               <td role="cell" className="c-priority" data-label="優先度" data-testid="task-priority" style={{ fontWeight: priorityFontWeight(task.priority) }}>{PRIORITY_LABELS[task.priority]}</td>
               <td role="cell" className="c-due" data-label="期限">
                 {task.dueDate}
