@@ -1,3 +1,4 @@
+import { formatPageTitle } from "@/lib/page-title";
 import { Fragment } from "react";
 import { bulkSelectionKey } from "@/lib/bulk-select";
 import { listCommentersByTask } from "@/lib/comments";
@@ -17,6 +18,8 @@ import { DUE_FILTER_LABELS, TASK_DUE_FILTERS, parseDueFilter, assigneeName, PRIO
 type Props = {
   searchParams: Promise<{ status?: string; assignee?: string | string[]; tag?: string | string[]; q?: string; due?: string; sort?: string; archived?: string; reset?: string }>;
 };
+
+export const metadata = { title: formatPageTitle("タスク一覧") };
 
 export default async function TasksPage({ searchParams }: Props) {
   const user = await requireUser();
@@ -46,7 +49,7 @@ export default async function TasksPage({ searchParams }: Props) {
   const selectionKey = bulkSelectionKey({ status, assignees: selectedAssignees, tags, q, due, sort, includeArchived });
 
   return (
-    <main>
+    <main id="main-content" tabIndex={-1}>
       <h1>タスク一覧</h1>
       <p data-testid="current-user">{formatCurrentUser(user.name)}</p>
       <p data-testid="list-help">{TASK_LIST_HELP}</p>

@@ -1,3 +1,4 @@
+import { formatPageTitle } from "@/lib/page-title";
 import { redirect } from "next/navigation";
 import { getCurrentUser } from "@/lib/session";
 import { PasswordField } from "./password-field";
@@ -6,12 +7,14 @@ type Props = {
   searchParams: Promise<{ error?: string }>;
 };
 
+export const metadata = { title: formatPageTitle("ログイン") };
+
 export default async function LoginPage({ searchParams }: Props) {
   // ログイン済みなら、ログイン画面を見せずにタスク一覧へ移す。
   if (await getCurrentUser()) redirect("/tasks");
   const { error } = await searchParams;
   return (
-    <main>
+    <main id="main-content" tabIndex={-1}>
       <h1>ログイン</h1>
       {error === "locked" ? (
         <p role="alert">ログインに続けて失敗したため、しばらくしてからもう一度お試しください。</p>

@@ -1,3 +1,4 @@
+import { formatPageTitle } from "@/lib/page-title";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { SESSION_COOKIE } from "@/lib/auth";
@@ -5,13 +6,15 @@ import { formatLastUsedAt, formatLoggedInAt, listDeviceSessions } from "@/lib/de
 import { requireUser } from "@/lib/session";
 import { RevokeDeviceButton } from "./revoke";
 
+export const metadata = { title: formatPageTitle("ログイン中の端末") };
+
 export default async function SessionsPage() {
   await requireUser();
   const store = await cookies();
   const sessions = listDeviceSessions(store.get(SESSION_COOKIE)?.value);
   if (!sessions) redirect("/login");
   return (
-    <main>
+    <main id="main-content" tabIndex={-1}>
       <h1>ログイン中の端末</h1>
       <p>身に覚えのない端末があれば、その端末だけを切れます。切った端末では、もう一度ログインが必要になります。</p>
       <table data-testid="device-sessions">

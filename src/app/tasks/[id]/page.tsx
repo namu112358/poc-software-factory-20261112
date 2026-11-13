@@ -1,8 +1,9 @@
+import { formatTaskDetailTitle } from "@/lib/page-title";
 import { notFound } from "next/navigation";
 import { formatAssigneeChange, listAssigneeChanges } from "@/lib/assignee-history";
 import { commentEditedLabel, listCommentRevisions, listComments, listDeletedComments, splitCommentBody } from "@/lib/comments";
 import { commentPreview } from "@/lib/comment-delete";
-import { requireUser } from "@/lib/session";
+import { getCurrentUser, requireUser } from "@/lib/session";
 import { listTags, listTagSuggestions } from "@/lib/tags";
 import { PRIORITY_LABELS, RESTORE_DAYS, STATUS_LABELS, formatCompletedAt, formatEstimate, formatJstDateTime, formatTaskNumber, getTask, isDueSoon, isOverdue, parseTaskId, todayInJapan } from "@/lib/tasks";
 import { listAssigneeOptions } from "@/lib/members";
@@ -16,6 +17,12 @@ import { listExtensions } from "@/lib/extensions";
 import { canRequestExtension, extensionResultLabel, findPendingExtension, pendingExtensionLabel, recentExtensionResults } from "@/lib/task-extension-panel";
 import { ExtensionRequestForm } from "./extension-form";
 import { RemoveTagButton, TagForm } from "./tags";
+
+export async function generateMetadata({ params }: Props) {
+  const user = await getCurrentUser();
+  const id = parseTaskId((await params).id);
+  return { title: formatTaskDetailTitle(user !== undefined, () => (id === undefined ? undefined : getTask(id))) };
+}
 
 type Props = {
   params: Promise<{ id: string }>;
@@ -38,7 +45,7 @@ export default async function TaskDetailPage({ params }: Props) {
   const extensionResults = recentExtensionResults(extensions);
 
   return (
-    <main>
+    <main id="main-content" tabIndex={-1}>
       <p>
         <a href="/tasks">← タスク一覧へ戻る</a>
       </p>
