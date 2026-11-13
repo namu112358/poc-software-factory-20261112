@@ -819,3 +819,13 @@ export function stalledActions(input: {
   }
   return { role, now, actions, unknown };
 }
+
+export type HeadRef = { ref: string; repo?: { full_name: string } | null };
+
+/**
+ * 役が扱う PR か: このリポジトリのブランチで、名前が `claude/` で始まる。
+ * フォークの PR は、ブランチ名を `claude/...` にしても対象にしない（片付けのラベル・draft の付け外し・コメントを、外の人が起こせないように）
+ */
+export function isOwnClaudePr(p: { head: HeadRef }, repo: string): boolean {
+  return p.head.ref.startsWith("claude/") && p.head.repo?.full_name === repo;
+}

@@ -23,6 +23,7 @@ import {
   type IssueInfo,
   normalizeLabel,
   START_LABELS,
+  isOwnClaudePr,
 } from "../scripts/factory/claim-core.ts";
 
 const touch = (files: string, at: string) => ({ body: `<!-- factory:touch files=${files} -->\n着手します。`, createdAt: at });
@@ -742,5 +743,21 @@ describe("stalled: 止まった実装・PR の片付け", () => {
       assert.equal(only(run([pr({ ...kick, priorMarks: [{ action: "conflict-kick", commit: "ccccccc" }] })], kickIssue)).draft, "ready-then-draft");
       assert.equal(only(run([pr({ ...kick, priorMarks: [{ action: "conflict", commit: "aaaaaaa" }] })], kickIssue)).draft, "ready-then-draft");
     });
+  });
+});
+
+describe("isOwnClaudePr（フォークの PR を役の対象にしない）", () => {
+  const repo = "o/r";
+  it("このリポジトリの claude/ のブランチは対象", () => {
+    assert.equal(isOwnClaudePr({ head: { ref: "claude/issue-1", repo: { full_name: repo } } }, repo), true);
+  });
+  it("フォークの PR は、ブランチ名が claude/ でも対象にしない", () => {
+    assert.equal(isOwnClaudePr({ head: { ref: "claude/issue-1", repo: { full_name: "x/r" } } }, repo), false);
+  });
+  it("フォークが消えた PR（repo が null）は対象にしない", () => {
+    assert.equal(isOwnClaudePr({ head: { ref: "claude/issue-1", repo: null } }, repo), false);
+  });
+  it("claude/ で始まらないブランチは対象にしない", () => {
+    assert.equal(isOwnClaudePr({ head: { ref: "sf-d/x", repo: { full_name: repo } } }, repo), false);
   });
 });
