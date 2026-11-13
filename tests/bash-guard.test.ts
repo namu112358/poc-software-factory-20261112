@@ -57,6 +57,33 @@ describe("Bash のフック（文字の許可リスト。承認の画面で止�
     for (const c of ["git -C /x log --oneline -5", "git --no-pager log", "git commit -c HEAD", "git log -c"]) assert.equal(denied(c), false, c);
   });
 
+  it("手元の変更を捨てる git（checkout ... --・checkout .・restore・reset --hard・clean -f・checkout claude/<ブランチ> に続く引数）は断る。ブランチを替えるだけは通す", () => {
+    for (const c of [
+      "git checkout -- .",
+      "git checkout claude/x -- src/a.ts",
+      "git checkout .",
+      "git restore src/a.ts",
+      "git reset --hard",
+      "git reset --hard origin/main",
+      "git clean -f",
+      "git clean -fd",
+      "git clean --force",
+      "git -C /x reset --hard",
+      "git -C /x restore a.ts",
+      "git checkout claude/issue-1 src/a.ts",
+      "git checkout claude/issue-1 package.json",
+    ]) assert.equal(denied(c), true, c);
+    for (const c of [
+      "git checkout claude/issue-1",
+      "git checkout -b claude/kaizen-x",
+      "git checkout -B claude/x origin/claude/x",
+      "git checkout main",
+      "git reset HEAD~1",
+      "git clean -n",
+      "git clean -nd",
+    ]) assert.equal(denied(c), false, c);
+  });
+
   it("通す例（1 つのコマンド）", () => {
     for (const c of [
       "npm test",
