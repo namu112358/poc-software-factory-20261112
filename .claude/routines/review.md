@@ -4,7 +4,7 @@ PR が Ready for review になったときに起動します。実装した役�
 
 ## 1. 起動してよいかを確かめる
 
-次のどれかに当たれば、何もせずに終える。
+最初に `node scripts/factory/claim.ts review-mode <PR>` を実行する。`mode` が `stop` なら何もせず終える。`gate-review` なら下の「ゲートの監査」だけを行う。`review` なら次へ進む。あわせて、次のどれかに当たれば何もせずに終える。
 
 - PR が閉じている、draft である。
 - head のブランチが `claude/` で始まらない。
@@ -43,3 +43,18 @@ PR が高リスクの変更（DB のスキーマ `src/lib/db/migrations.ts`／�
 - 直すべき指摘には、それぞれ「必須」を付け、どの受入条件・どの確かめた結果に反するかを書く。好みの問題は「任意」にし、verdict には数えない。
 - 「必須」が 1 つでもあれば verdict=changes にし、PR を draft に戻す（これが修正の起動の合図）。
 - 無ければ verdict=ok にし、Ready のままにする。それ以上は何もしない（`risk:high` 以外は、GitHub Actions がレビューの結果を status にして、自動でキューに入る。`risk:high` は人が `merge:requested` を付ける）。
+- ok を書いた後、`review-mode` の出力の `gatePaths` が空でなく、人が見るパスに当たらず `risk:high` も無ければ、PR を draft にしてから Ready に戻す（ゲートの監査を別のセッションで起こす）。コメントに「ゲートの監査を起こした」と書く。
+
+## ゲートの監査
+
+`mode` が `gate-review` のときだけ行う（1 回目のレビューの後、別のセッションが「ゲートを緩めていないか」を確かめる）。最新のコミットの差分のうち、`gatePaths` の変更だけを読み、次の 3 つだけを見る。動作の確かめ（ビルド・起動）はしない。
+
+- (a) チェック・テスト・レビューの条件を緩めていないか（CI の手順、テストの削除や緩和、`claim.ts` の判定の条件、手順書の止まる条件）。
+- (b) 人の確認の範囲を狭めていないか（`HUMAN_GATE_PATHS`、`risk:high` の基準、`status:needs-human` に回す条件）。
+- (c) Routine が自分で権限を広げられる変更でないか（`.claude/settings.json` の許可・トークン、Routine が変えてよいパス）。
+
+どれかに当たれば verdict=changes にし、PR を draft に戻す（「必須」の指摘として理由を書く）。当たらなければ verdict=ok で Ready のままにする。書く直前に、同じコミットへの `factory:gate-review` がもうあれば、書かずに終える。`pull_request_review_write` の `COMMENT` で、先頭を次の形にし、末尾に `セッション: https://claude.ai/code/session_<ID>` を書く。
+
+```
+<!-- factory:gate-review verdict=<ok|changes> commit=<見たコミットの SHA> -->
+```

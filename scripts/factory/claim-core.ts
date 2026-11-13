@@ -614,20 +614,166 @@ export const GATE_PATHS = [
   "tests/factory-claim.test.ts",
 ];
 
+const matchPaths = (files: string[], paths: string[]) => files.filter((f) => paths.some((g) => (g.endsWith("/") ? f.startsWith(g) : f === g || f.endsWith(`/${g}`))));
+
 export function touchesGate(files: string[]): string[] {
-  return files.filter((f) => GATE_PATHS.some((g) => (g.endsWith("/") ? f.startsWith(g) : f === g || f.endsWith(`/${g}`))));
+  return matchPaths(files, GATE_PATHS);
 }
 
-export function reviewStatus(mc: ReturnType<typeof mergeCheck>, headSha: string, labels: string[], files: string[] = []): { state: "success" | "failure" | null; description: string } {
+/**
+ * ゲートのパスのうち、2 回目の独立したレビュー（ゲートの監査）でも通さず、今までどおり人が merge:requested を付けるもの（#123 の E27）。
+ * CI・Mergify・Ruleset の定義と、監査の仕組み自身（判定のスクリプトと、レビュー・共通の決まりの手順書）。監査の判定を緩める変更が監査だけで通らないようにする。
+ */
+export const HUMAN_GATE_PATHS = [
+  ".github/",
+  ".mergify.yml",
+  ".mergify/",
+  "docs/rulesets/",
+  "scripts/factory/claim-core.ts",
+  "scripts/factory/claim.ts",
+  ".claude/routines/review.md",
+  ".claude/routines/README.md",
+];
+
+export const touchesHumanGate = (files: string[]): string[] => matchPaths(files, HUMAN_GATE_PATHS);
+
+/** 監査で通すパス: ゲートのパスのうち、人が見るパス以外に当たる変更ファイル */
+export const auditPaths = (files: string[]): string[] => touchesGate(files).filter((f) => touchesHumanGate([f]).length === 0);
+
+// ---- ゲートの監査（factory:gate-review）----
+
+/** 書き込み権限のある人のレビューの印（古い順）。session は本文の「セッション: https://claude.ai/code/session_XXXX」。読めなければ null */
+export type ReviewMark = { kind: "review" | "gate-review"; verdict: string; commit: string; session: string | null };
+export type GateContext = {
+  marks: ReviewMark[];
+  /** 印のコミット → それより後のコミット（first-parent）。PR の履歴に無ければ null。head と同じなら [] */
+  after: Record<string, StalledCommit[] | null>;
+  authorSessions: string[]; // PR を出したセッション（PR 本文と、コミットの Claude-Session: の行）
+};
+
+export const REVIEW_MARK_RE = /<!--\s*factory:(review|gate-review)\s+verdict=(\w+)[^>]*?commit=([0-9a-f]+)/;
+
+export function parseReviewMark(body: string): Omit<ReviewMark, "session"> | null {
+  const m = REVIEW_MARK_RE.exec(body);
+  return m ? { kind: m[1] as ReviewMark["kind"], verdict: m[2], commit: m[3] } : null;
+}
+
+/** レビュー本文の末尾の「セッション: https://claude.ai/code/session_XXXX」の session_XXXX（最後のもの） */
+export const sessionOfReview = (body: string): string | null => [...body.matchAll(/セッション:\s*https:\/\/claude\.ai\/code\/(session_[A-Za-z0-9]+)/g)].at(-1)?.[1] ?? null;
+
+/** PR を出したセッション: PR 本文に出てくる session_XXXX と、コミットのメッセージの `Claude-Session:` の行の session_XXXX すべて */
+export function authorSessionsOf(prBody: string, commitMessages: string[]): string[] {
+  const ids = (t: string) => [...t.matchAll(/session_[A-Za-z0-9]+/g)].map((m) => m[0]);
+  const lines = commitMessages.flatMap((m) => [...m.matchAll(/^Claude-Session:.*$/gm)].map((x) => x[0]));
+  return [...new Set([...ids(prBody), ...lines.flatMap(ids)])];
+}
+
+/** commit の印が、最新のコミット（headSha）か、その後が取り込みだけのコミットだけの版を指しているか */
+function coversHead(headSha: string, commit: string, after: GateContext["after"]): boolean {
+  if (sameCommit(headSha, commit)) return true;
+  const a = after[commit];
+  return a != null && a.every((c) => c.mergeOnly);
+}
+
+/** 最新のコミット（または、その後が取り込みだけの版）への、最新の factory:review が ok か（merge-check と同じ見方）。ok ならその印 */
+function latestOkReview(headSha: string, ctx: GateContext): ReviewMark | null {
+  const marks = ctx.marks.filter((m) => m.kind === "review");
+  const last = marks.at(-1);
+  if (!last || last.verdict !== "ok" || !coversHead(headSha, last.commit, ctx.after)) return null;
+  if (marks.some((m) => m.commit === last.commit && m.verdict !== "ok")) return null;
+  return last;
+}
+
+/** 最新のコミットを覆う factory:gate-review のうち最新の印。無ければ null */
+function latestAudit(headSha: string, ctx: GateContext): ReviewMark | null {
+  return ctx.marks.filter((m) => m.kind === "gate-review" && coversHead(headSha, m.commit, ctx.after)).at(-1) ?? null;
+}
+
+/** ゲートの監査の結果。1 回目のレビューが ok で、変更が監査で通すパスだけのときの判定（reviewStatus の中で使う） */
+export function gateAuditStatus(headSha: string, ctx: GateContext | undefined): { state: "success" | "failure" | null; description: string } {
+  const wait = { state: null, description: "品質のゲートを変える PR は、2 回目の監査（factory:gate-review）を待つ。" } as const;
+  if (!ctx) return wait;
+  const audit = latestAudit(headSha, ctx);
+  if (!audit) return wait;
+  // 同じ版に ok と changes の両方があれば、changes を優先する
+  if (audit.verdict !== "ok" || ctx.marks.some((m) => m.kind === "gate-review" && m.commit === audit.commit && m.verdict !== "ok"))
+    return { state: "failure", description: "ゲートの監査（factory:gate-review）が changes。直して、監査を起こし直す。" };
+  const first = latestOkReview(headSha, ctx);
+  if (!audit.session) return { state: null, description: "監査のレビューにセッションの行が無いので、別のセッションか確かめられない。人が確かめる。" };
+  if (!first?.session) return { state: null, description: "1 回目のレビューにセッションの行が無いので、監査が別のセッションか確かめられない。人が確かめる。" };
+  if (audit.session === first.session || ctx.authorSessions.includes(audit.session))
+    return { state: null, description: "監査が 1 回目のレビュー・PR を出したセッションと同じなので数えない。別のセッションの監査を待つ。" };
+  return { state: "success", description: "1 回目のレビューが ok で、別のセッションのゲートの監査も ok。" };
+}
+
+export function reviewStatus(mc: ReturnType<typeof mergeCheck>, headSha: string, labels: string[], files: string[] = [], gate?: GateContext): { state: "success" | "failure" | null; description: string } {
   const onHead = mc.review !== null && (headSha.startsWith(mc.review.commit) || mc.review.commit.startsWith(headSha));
   if (mc.ok) {
     if (labels.includes(LABEL.riskHigh)) return { state: null, description: "risk:high の PR は、人が merge:requested を付けてキューに入れる。" };
-    const gate = touchesGate(files);
-    if (gate.length > 0) return { state: null, description: `品質のゲートを変える PR（${gate.slice(0, 3).join("、")}）は、人が確かめて merge:requested を付ける。` };
+    const human = touchesHumanGate(files);
+    if (human.length > 0) return { state: null, description: `人が見るパス（${human.slice(0, 3).join("、")}）を変える PR は、人が確かめて merge:requested を付ける。` };
+    if (auditPaths(files).length > 0) return gateAuditStatus(headSha, gate);
     return { state: "success", description: mc.reason };
   }
   if (onHead && mc.review !== null && mc.review.verdict !== "ok") return { state: "failure", description: mc.reason };
   return { state: null, description: mc.reason };
+}
+
+export type ReviewMode = {
+  pr: number;
+  mode: "stop" | "review" | "gate-review";
+  reason: string;
+  gatePaths: string[];
+  firstReviewSession: string | null;
+  authorSessions: string[];
+};
+
+/** 最新のコミットに、ゲートの監査が要るのに無いか（要るなら、1 回目の ok のレビューの印を返す）。自分のセッションは見ない（stalled が使う） */
+export function auditNeeded(input: { headSha: string; labels: string[]; files: string[]; ctx: GateContext }): ReviewMark | null {
+  const { headSha, labels, files, ctx } = input;
+  if (labels.includes(LABEL.riskHigh) || auditPaths(files).length === 0 || touchesHumanGate(files).length > 0) return null;
+  const first = latestOkReview(headSha, ctx);
+  if (!first || latestAudit(headSha, ctx)) return null;
+  return first;
+}
+
+/**
+ * review.md の最初に実行する review-mode の判定。stop なら何もせず終え、review は通常のレビュー、gate-review はゲートの監査だけを行う。
+ * 上から最初に当たったもの: 1 閉じている・draft・claude/ でない・フォーク・needs-human は stop、2 最新のコミットへの factory:review が無ければ review、
+ * 3 factory:review が ok で監査が要る（auditNeeded）のに無ければ、自分が 1 回目のレビューか PR を出したセッションなら stop（自分のセッションが読めなくても stop）・そうでなければ gate-review、4 それ以外は stop。
+ */
+export function reviewMode(input: {
+  pr: number;
+  open: boolean;
+  draft: boolean;
+  headRef: string;
+  headRepoSame: boolean;
+  headSha: string;
+  labels: string[];
+  files: string[];
+  ctx: GateContext;
+  mySession: string | null;
+}): ReviewMode {
+  const { ctx, headSha } = input;
+  const gatePaths = auditPaths(input.files);
+  const base = { pr: input.pr, gatePaths, firstReviewSession: null as string | null, authorSessions: ctx.authorSessions };
+  const stop = (reason: string, first: string | null = null): ReviewMode => ({ ...base, mode: "stop", reason, firstReviewSession: first });
+  if (!input.open) return stop("PR が閉じている。");
+  if (input.draft) return stop("PR が draft。");
+  if (!input.headRef.startsWith("claude/")) return stop("head のブランチが claude/ で始まらない。");
+  if (!input.headRepoSame) return stop("フォークの PR。");
+  if (input.labels.includes(LABEL.needsHuman)) return stop("status:needs-human が付いている。");
+  const reviews = ctx.marks.filter((m) => m.kind === "review");
+  const lastOk = reviews.filter((m) => m.verdict === "ok").at(-1);
+  const reviewed = reviews.some((m) => sameCommit(m.commit, headSha)) || (lastOk !== undefined && coversHead(headSha, lastOk.commit, ctx.after));
+  if (!reviewed) return { ...base, mode: "review", reason: "最新のコミットへの factory:review が無い。通常のレビューをする。" };
+  const first = auditNeeded({ headSha, labels: input.labels, files: input.files, ctx });
+  if (!first) return stop("最新のコミットは、レビュー済みで、ゲートの監査も要らない（または済んでいる）。", latestOkReview(headSha, ctx)?.session ?? null);
+  const firstSession = first.session;
+  if (!input.mySession) return stop("自分のセッションが読めないので、監査が別のセッションか確かめられない。", firstSession);
+  if (input.mySession === firstSession || ctx.authorSessions.includes(input.mySession))
+    return stop("自分が 1 回目のレビュー（または PR を出した）セッションなので、監査はしない。別のセッションが行う。", firstSession);
+  return { ...base, mode: "gate-review", reason: "ゲートの監査が要る。別のセッションの自分が行う。", firstReviewSession: firstSession };
 }
 
 export function mergeCheck(args: {
@@ -674,6 +820,7 @@ export type StalledPr = {
   after: Record<string, StalledCommit[] | null>;
   priorMarks: { action: string; commit: string }[]; // 割り当て・巡回の `action=<処置> commit=<sha>` のコメント（書き込み権限のある人のもの）。同じ処置のくり返しを数える
   bodyCheck: CheckState; // 最新のコミットの pr-body-check の最新の実行
+  auditWait?: { since: string } | null; // ゲートの監査が要るのに無いとき、1 回目の ok のレビューの時刻（auditNeeded）
   mergifyTimeout: { at: string } | null; // Mergify の状況のコメントの dequeue_reason.code が CHECKS_TIMEOUT のとき、外れた時刻
 };
 export type StalledIssue = { number: number; labels: string[]; updatedAt: string };
@@ -710,6 +857,8 @@ function changedAfterLatestReview(pr: StalledPr): boolean {
   const after = pr.after[last.commit];
   return after == null || after.some((c) => !c.mergeOnly);
 }
+
+const AUDIT_STALLED_TEXT = "ゲートの監査が動かなかったので起こし直した。";
 
 export function stalledComment(role: string, action: string, text: string, sessionUrl: string | null, commit?: string): string {
   const mark = `<!-- factory:${role} action=${action}${commit ? ` commit=${commit}` : ""} -->`;
@@ -788,14 +937,20 @@ export function stalledActions(input: {
       once({ action: "conflict", draft: "to-draft" }, "`main` と衝突しているので draft に戻した。衝突を直して Ready に戻す。");
       continue;
     }
-    if (issueNo === null) continue; // claude/issue- 以外は、衝突の行だけ
+    // ゲートの監査が動かなかった（1 回目の ok の後、監査が 10 分たっても来ない）。監査は出したセッションが自分でできないので、claude/issue- 以外の PR も対象
+    const auditStalled = !pr.draft && !!pr.auditWait && minutesSince(pr.auditWait.since, now) >= 10;
+    if (issueNo === null) {
+      if (auditStalled) once({ action: "rereview", draft: "draft-then-ready" }, AUDIT_STALLED_TEXT);
+      continue; // それ以外は、衝突の行だけ
+    }
     if (pr.draft && pr.mergeable === false && idle >= 30) {
       once({ action: "conflict-kick", draft: "ready-then-draft" }, "衝突したまま止まっているので、修正の役を起こし直した。");
       continue;
     }
     // 3: レビューが動かなかった
-    if (!pr.draft && !pr.reviews.some((r) => sameCommit(r.commit, pr.headSha)) && !okCoversHead(pr) && pr.readyAt && minutesSince(pr.readyAt, now) >= 10) {
-      once({ action: "rereview", draft: "draft-then-ready" }, "レビューが動かなかったので起こし直した。");
+    const reviewStalled = !pr.draft && !pr.reviews.some((r) => sameCommit(r.commit, pr.headSha)) && !okCoversHead(pr) && pr.readyAt && minutesSince(pr.readyAt, now) >= 10;
+    if (reviewStalled || auditStalled) {
+      once({ action: "rereview", draft: "draft-then-ready" }, reviewStalled ? "レビューが動かなかったので起こし直した。" : AUDIT_STALLED_TEXT);
       continue;
     }
     // 4: 必須の指摘が直されないまま

@@ -9,10 +9,11 @@ Routine（`.claude/routines/`）が使う判定のスクリプトです。GitHub
 | `pick` | 割り当て・巡回 | 着手させる候補（`pick`）と、待ち先を付け替える Issue（`rewait` とその `comment`）。空き・budget の残り |
 | `precheck <番号> --files a,b` | 割り当て・巡回 | 候補 1 件を着手させてよいか（`go` / `queue` / `error`）と、そのまま行う操作（`actions`） |
 | `relabel --minutes N` | 割り当て（15）・巡回（30） | 起動しなかった実装の付け直しの対象（`relabel`）と、2 回目で人に回すもの（`needsHuman`） |
-| `stalled --role dispatch\|patrol` | 割り当て・巡回 | 止まった実装・PR の片付け。衝突した PR・レビューが動かなかった PR・CI が通ったまま止まった draft・作業中のまま止まった Issue・CI が通らないまま止まった draft・Mergify の時間切れ・閉じた Issue に残った起動のラベルを、行の順に最初に当たった 1 つだけ判定し、`actions`（`target`・`action`・`removeLabels`・`addLabels`・`draft`・`issue`・`comment`）に出す。`mergeable` が `null` の PR は `unknown`（1 分後に 1 回だけ実行し直す）。PR は `claude/` のもの（`claude/issue-` 以外は衝突だけ）。人を待っているもの（`status:needs-human` の PR、Issue に `status:blocked-question`・`status:needs-human`・`kind:epic`）は対象にしない |
+| `stalled --role dispatch\|patrol` | 割り当て・巡回 | 止まった実装・PR の片付け。衝突した PR・レビューが動かなかった PR（ゲートの監査が ok の後 10 分来ない PR も、同じ処置の `rereview`）・CI が通ったまま止まった draft・作業中のまま止まった Issue・CI が通らないまま止まった draft・Mergify の時間切れ・閉じた Issue に残った起動のラベルを、行の順に最初に当たった 1 つだけ判定し、`actions`（`target`・`action`・`removeLabels`・`addLabels`・`draft`・`issue`・`comment`）に出す。`mergeable` が `null` の PR は `unknown`（1 分後に 1 回だけ実行し直す）。PR は `claude/` のもの（`claude/issue-` 以外は衝突と、ゲートの監査が来ないときの `rereview` だけ）。人を待っているもの（`status:needs-human` の PR、Issue に `status:blocked-question`・`status:needs-human`・`kind:epic`）は対象にしない |
 | `handled --since <時刻>` | 割り当て | ほかの割り当てのセッションが、その時刻より後に処理した Issue・PR |
 | `budget` | （確かめ用） | 直近 60 分に `status:in-progress`・`status:in-progress-hard` を付けた回数と、残り |
-| `review-status <PR>` | GitHub Actions（`.github/workflows/factory-review-status.yml`。main の定義で動くきっかけだけで起動する） | レビューを通ったことを表す status（`factory-review`）の値。`merge-check` のレビューの部分と同じ判定で `ok` なら `success`（`risk:high` の PR と、品質のゲート〔CI の動きを決めるファイル・Mergify・手順書・判定のスクリプト・規約・Ruleset。一覧は `GATE_PATHS`〕を変える PR は付けない）、最新のコミットへのレビューが ok でなければ `failure`、それ以外は `null`（付けない）。Mergify は `risk:high` 以外の PR を、これが `success` ならキューに入れる |
+| `review-status <PR>` | GitHub Actions（`.github/workflows/factory-review-status.yml`。main の定義で動くきっかけだけで起動する） | レビューを通ったことを表す status（`factory-review`）の値。`merge-check` のレビューの部分と同じ判定で `ok` なら `success`（`risk:high` の PR と、品質のゲート〔CI の動きを決めるファイル・Mergify・手順書・判定のスクリプト・規約・Ruleset。一覧は `GATE_PATHS`〕を変える PR は、下のとおり監査を通ったときだけ）、最新のコミットへのレビューが ok でなければ `failure`、それ以外は `null`（付けない）。監査で通すパスだけを変える PR は、別のセッションの `factory:gate-review` が ok のときだけ `success`（changes なら `failure`、セッションが同じ・読めないときは付けない）。人が見るパス（`HUMAN_GATE_PATHS`: `.github/`・`.mergify.yml`・`.mergify/`・`docs/rulesets/`・`scripts/factory/claim-core.ts`・`scripts/factory/claim.ts`・`.claude/routines/review.md`・`.claude/routines/README.md`）を含む PR は監査が ok でも付けない。Mergify は `risk:high` 以外の PR を、これが `success` ならキューに入れる |
+| `review-mode <PR>` | レビューの Routine（`review.md` の最初） | `stop`（何もしない）・`review`（通常のレビュー）・`gate-review`（ゲートの監査）。最新のコミットへの `factory:review` が無ければ `review`。ok で、変更が監査で通すパス（`GATE_PATHS` のうち人が見るパス以外）に当たり、`risk:high` が無く、`factory:gate-review` がまだ無ければ、自分のセッションが 1 回目のレビュー・PR を出したセッションでない場合だけ `gate-review` |
 | `merge-check <PR>` | 人（`merge:requested` を付ける前） | `merge:requested` を付けてよいか（`ok`）と理由。最新の `factory:review` が `verdict=ok` で、そのコミットより後が「取り込みだけのコミット」（`git show --remerge-diff` の差分が空）だけで、最新のコミットの `app-check`・`pr-body-check`（キューに入る条件）が成功していれば `ok` |
 
 `node scripts/factory/claim.ts <コマンド>` で動かす（Node 22.18 以上。クラウドのプロキシを通すため、自分を `NODE_USE_ENV_PROXY=1` で起動し直す）。`decision` が `error` のときは終了コード 2。
@@ -31,7 +32,7 @@ Routine（`.claude/routines/`）が使う判定のスクリプトです。GitHub
 
 ## 人の手順: merge:requested を付ける前
 
-レビューを通った PR は、`risk:high` と品質のゲートを変える PR 以外は自動でキューに入る（`review-status`）。人が `merge:requested` を付けるのは、`risk:high` の PR・品質のゲートを変える PR・自動で入らなかった PR（キューから外れたものなど）だけ。
+レビューを通った PR は、`risk:high` と、人が見るパスを変える PR 以外は自動でキューに入る（`review-status`。品質のゲートを変える PR は、ゲートの監査の ok の後）。人が `merge:requested` を付けるのは、`risk:high` の PR・人が見るパスを変える PR・自動で入らなかった PR（キューから外れたものなど）だけ。
 
 
 PR に `merge:requested` を付ける前に、必ず `node scripts/factory/claim.ts merge-check <PR>` を実行し、`ok` が `true` のときだけ付ける。`false` なら `reason` のとおりにする（レビューを起こし直す、など）。レビューの ok が無いまま `merge:requested` が付いた PR が 4 本あったため（#293）。キューを通さずにマージするとき（`.mergify.yml` を変える PR など）も、マージの前に同じように実行する（#323 は、レビューの後に足した衝突の解消が未レビューのままマージされた）。
