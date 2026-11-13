@@ -1,10 +1,12 @@
 # 割り当ての手順書
 
-`claude/` の PR が閉じたとき（マージを含む）に起動します。待っている Issue に実装を始めさせ、マージの後の衝突・起動しなかった実装・止まった実装を拾います。コードは書きません。以下の `status:in-progress` は `status:in-progress-hard` も含みます。
+`claude/` の PR が閉じたとき（マージを含む）と、Issue に `status:ready` が付いたとき（人の承認）に起動します。待っている Issue に実装を始めさせ、マージの後の衝突・起動しなかった実装・止まった実装を拾います。コードは書きません。以下の `status:in-progress` は `status:in-progress-hard` も含みます。
 
 ## 0. ほかの割り当てと重ならないようにする
 
-きっかけの PR が閉じた時刻を T として `node scripts/factory/claim.ts handled --since <T>` を実行し、`handled` の Issue・PR には 1〜4 で触らない。`error` なら、この確かめを飛ばす。
+きっかけの時刻（PR が閉じた時刻、または `status:ready` が付いた時刻）を T として `node scripts/factory/claim.ts handled --since <T>` を実行し、`handled` の Issue・PR には 1〜4 で触らない。`error` なら、この確かめを飛ばす。
+
+`status:ready` が付いて起動したときは、「2.」だけを行う（承認されてすぐ着手させるため。#357）。そのとき、きっかけの Issue に最後にラベルが付いてから 30 秒たつまで待ってから始める（同じ数秒にほかのラベルも付くと、実装が重ねて起動する。#429）。
 
 ## 1. 衝突した PR を修正に回す
 
