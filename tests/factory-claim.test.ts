@@ -15,6 +15,7 @@ import {
   type GateContext,
   type ReviewMark,
   ciCheck,
+  combineChecks,
   precheckActions,
   relabelTargets,
   readyBudget,
@@ -32,6 +33,7 @@ import {
   type IssueInfo,
   normalizeLabel,
   START_LABELS,
+  isOwnClaudePr,
 } from "../scripts/factory/claim-core.ts";
 
 const touch = (files: string, at: string) => ({ body: `<!-- factory:touch files=${files} -->\n着手します。`, createdAt: at });
@@ -463,30 +465,55 @@ describe("ラベルの名前（接頭を付けた名前への切り替え）", (
 describe("キューに入る条件のチェック（ciCheck。#364）", () => {
   const run = (name: string, conclusion: string | null, startedAt = "2026-11-12T18:00:00Z", status = "completed") => ({ name, status, conclusion, startedAt });
 
-  it("app-check と pr-body-check が両方 success なら ok", () => {
-    assert.equal(ciCheck([run("app-check", "success"), run("pr-body-check", "success"), run("Summary", "failure")]).ok, true);
+  const ds = run("design-system-check", "success");
+
+  it("app-check・design-system-check・pr-body-check がすべて success なら ok", () => {
+    assert.equal(ciCheck([run("app-check", "success"), ds, run("pr-body-check", "success"), run("Summary", "failure")]).ok, true);
   });
 
   it("app-check が落ちていれば ok にしない（#364 の形）", () => {
-    const r = ciCheck([run("app-check", "failure"), run("pr-body-check", "success")]);
+    const r = ciCheck([run("app-check", "failure"), ds, run("pr-body-check", "success")]);
     assert.equal(r.ok, false);
     assert.match(r.reason, /app-check が failure/);
   });
 
+  it("design-system-check が落ちている・無いときは ok にしない（.mergify.yml のキューの条件と同じ）", () => {
+    const r = ciCheck([run("app-check", "success"), run("design-system-check", "failure"), run("pr-body-check", "success")]);
+    assert.equal(r.ok, false);
+    assert.match(r.reason, /design-system-check が failure/);
+    assert.match(ciCheck([run("app-check", "success"), run("pr-body-check", "success")]).reason, /design-system-check が無い/);
+  });
+
   it("本文の検査が skipped のまま残っていれば ok にしない（#258 の形）", () => {
-    assert.equal(ciCheck([run("app-check", "success"), run("pr-body-check", "skipped")]).ok, false);
+    assert.equal(ciCheck([run("app-check", "success"), ds, run("pr-body-check", "skipped")]).ok, false);
   });
 
   it("まだ終わっていない・まだ無いチェックがあれば ok にしない", () => {
-    assert.equal(ciCheck([run("app-check", null, "2026-11-12T18:00:00Z", "in_progress"), run("pr-body-check", "success")]).ok, false);
-    assert.equal(ciCheck([run("app-check", "success")]).ok, false);
+    assert.equal(ciCheck([run("app-check", null, "2026-11-12T18:00:00Z", "in_progress"), ds, run("pr-body-check", "success")]).ok, false);
+    assert.equal(ciCheck([run("app-check", "success"), ds]).ok, false);
   });
 
   it("同じ名前のチェックが何度も動いたときは、最後に始まったものを見る", () => {
     const old = run("pr-body-check", "failure", "2026-11-12T17:00:00Z");
     const now = run("pr-body-check", "success", "2026-11-12T18:00:00Z");
-    assert.equal(ciCheck([run("app-check", "success"), now, old]).ok, true);
-    assert.equal(ciCheck([run("app-check", "success"), old, run("pr-body-check", "failure", "2026-11-12T19:00:00Z")]).ok, false);
+    assert.equal(ciCheck([run("app-check", "success"), ds, now, old]).ok, true);
+    assert.equal(ciCheck([run("app-check", "success"), ds, old, run("pr-body-check", "failure", "2026-11-12T19:00:00Z")]).ok, false);
+  });
+});
+
+describe("巡回の CI の状態（combineChecks。app-check と design-system-check をまとめる）", () => {
+  it("どちらかが落ちていれば failure（design-system-check だけが落ちた PR を「CI が通った」と扱わない）", () => {
+    assert.equal(combineChecks(["success", "failure"]), "failure");
+    assert.equal(combineChecks(["failure", "pending"]), "failure");
+  });
+
+  it("落ちたものが無く、動いているものがあれば pending、まだ無いものがあれば none", () => {
+    assert.equal(combineChecks(["success", "pending"]), "pending");
+    assert.equal(combineChecks(["success", "none"]), "none");
+  });
+
+  it("すべて成功なら success", () => {
+    assert.equal(combineChecks(["success", "success"]), "success");
   });
 });
 
@@ -848,10 +875,10 @@ describe("gate: 各役の起動の判定", () => {
       const r = gateDecision(impl({ comments: [startMark], branchExists: true, closingPrs: [{ number: 90, headRef: "claude/issue-7", headRepo: REPO, draft: true, reviewed: false }] }));
       assert.equal(r.decision, "stop");
     });
-    it("フォークの PR（head のリポジトリが違う・null）は引き継がず stop", () => {
+    it("フォークの PR（head のリポジトリが違う・null）は引き継がず、着手も止めない（数えずに lock へ）", () => {
       for (const headRepo of ["someone/poc-software-factory-20261112", null]) {
         const r = gateDecision(impl({ closingPrs: [{ number: 90, headRef: "claude/issue-7", headRepo, draft: true, reviewed: false }] }));
-        assert.equal(r.decision, "stop", String(headRepo));
+        assert.equal(r.decision, "lock", String(headRepo));
         assert.equal(r.pr, null);
       }
     });
@@ -1118,5 +1145,21 @@ describe("ゲートの監査（gate-review。台帳 #123 の E27）", () => {
       assert.equal(a[0].draft, null);
       assert.deepEqual(a[0].addLabels, ["status:needs-human"]);
     });
+  });
+});
+
+describe("isOwnClaudePr（フォークの PR を役の対象にしない）", () => {
+  const repo = "o/r";
+  it("このリポジトリの claude/ のブランチは対象", () => {
+    assert.equal(isOwnClaudePr({ head: { ref: "claude/issue-1", repo: { full_name: repo } } }, repo), true);
+  });
+  it("フォークの PR は、ブランチ名が claude/ でも対象にしない", () => {
+    assert.equal(isOwnClaudePr({ head: { ref: "claude/issue-1", repo: { full_name: "x/r" } } }, repo), false);
+  });
+  it("フォークが消えた PR（repo が null）は対象にしない", () => {
+    assert.equal(isOwnClaudePr({ head: { ref: "claude/issue-1", repo: null } }, repo), false);
+  });
+  it("claude/ で始まらないブランチは対象にしない", () => {
+    assert.equal(isOwnClaudePr({ head: { ref: "sf-d/x", repo: { full_name: repo } } }, repo), false);
   });
 });
