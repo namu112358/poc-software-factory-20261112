@@ -63,6 +63,7 @@ flowchart LR
 - push するのは `claude/` で始まるブランチだけ。force push はしない。
 - `claude/issue-` 以外の `claude/` の PR（有人のセッションが出した手順書・スクリプトの PR など）は、出したセッションが直す。修正・巡回の役は扱わない（衝突や指摘で `status:needs-human` を付けない）。レビューと、割り当ての衝突の知らせは同じように行う。
 - PR の draft と Ready の切り替えは、GitHub MCP の `update_pull_request`（`draft: true` / `false`）で行う。
+- 実装の着手の鍵は、ブランチ `claude/issue-<番号>` の作成（同じ名前は 2 度作れない）。
 - 「取り込みだけのコミット」（`main` を取り込んだマージのコミットで、`git show --remerge-diff <コミット>` の差分が空のもの。ただの `git show` は、手の入っていない取り込みでも差分を出すことがある）は、レビュー済みかを判定するときに数えない。
 - 権限で拒まれた操作は、言い換えて通そうとせず、拒まれたコマンドをコメントに書いて `status:needs-human` を付けて止まる。
 - 役の最後に、Issue か PR に「何をしたか・次に誰が何をするか」を 1〜3 行でコメントする。先頭に `<!-- factory:<役> -->`、最後に `セッション: https://claude.ai/code/session_<ID>` を書く（`<ID>` は `echo "$CLAUDE_CODE_REMOTE_SDK_URL" | sed 's/.*cse_/session_/'` で取る。コミットの行からは取らない）。コミットに書く `Claude-Session:` の行も、同じ方法で取った ID で書く（手で書き写さない。崩れた URL が 4 行あった。#156）。
