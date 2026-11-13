@@ -11,8 +11,9 @@ const target = join(root, "src", "components");
 
 const rules = [
   { name: "色の直書き", re: /#[0-9a-fA-F]{3,8}\b|\b(?:rgba?|hsla?|oklch|oklab)\(/ },
-  // [&_svg]:size-4 のような「場所の指定」は許し、値の任意指定（-[...]）だけを見る。
-  { name: "任意の値", re: /\b[a-z][a-z0-9-]*-\[[^\]]+\]/ },
+  // [&_svg]:size-4 のような「場所の指定」と、data-[state=checked]:・aria-[...]: のような「状態の指定」
+  // （] の直後に : が続くもの）は許し、値の任意指定（p-[13px] など）だけを見る。
+  { name: "任意の値", re: /\b[a-z][a-z0-9-]*-\[[^\]]+\](?!:)/ },
   { name: "style 属性", re: /\bstyle=\{\{/ },
 ];
 
